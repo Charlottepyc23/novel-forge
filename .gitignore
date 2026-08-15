@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output (published, but regenerated on prepare)
+lib/
+
+# Logs & temp
+*.log
+*.tmp
+upload-log.txt
+novel-forge-restart.log
+novel-forge-web.*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Test artifacts
+coverage/
