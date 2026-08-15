@@ -41,6 +41,10 @@ interface ProgressLine {
   id: number
   text: string
   kind: 'info' | 'done' | 'error'
+  /** Live line: a single in-place-updating row (generation counter + bar). */
+  live?: boolean
+  /** 0..1 completion ratio for the live line's progress bar. */
+  ratio?: number
 }
 
 /** The tab bar definition. */
@@ -101,6 +105,16 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [rewriteInstruction, setRewriteInstruction] = useState('')
   const [localTarget, setLocalTarget] = useState('')
   const progressId = useRef(0)
+  /** id of the single live progress row (generation counter), if any. */
+  const liveProgressId = useRef<number | null>(null)
+  /** last chars value rendered into the live row (throttle for streaming). */
+  const lastDeltaChars = useRef(0)
+  /** cumulative chars received this job (delta frames carry increments). */
+  const liveChars = useRef(0)
+  /** chapter no of the job currently streaming (delta frames carry no `no`). */
+  const currentJobNo = useRef(0)
+  /** prominent top-of-panel progress bar while a chapter is being written. */
+  const [liveBar, setLiveBar] = useState<{ text: string; ratio?: number } | null>(null)
 
   /** Refresh bookshelf. */
   const refreshShelf = useCallback(async () => {
@@ -113,6 +127,26 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   /** Append a progress console line. */
   const pushProgress = useCallback((text: string, kind: ProgressLine['kind'] = 'info') => {
     setProgress(prev => [...prev.slice(-300), { id: progressId.current++, text, kind }])
+  }, [])
+
+  /** Update the single live progress row in place (create it on first call). */
+  const setLiveProgress = useCallback((text: string, ratio?: number) => {
+    setProgress(prev => {
+      if (liveProgressId.current !== null) {
+        return prev.map(l => l.id === liveProgressId.current ? { ...l, text, ratio } : l)
+      }
+      const id = progressId.current++
+      liveProgressId.current = id
+      return [...prev.slice(-300), { id, text, kind: 'info', live: true, ratio }]
+    })
+  }, [])
+
+  /** Remove the live progress row (a job finished / failed). */
+  const clearLiveProgress = useCallback(() => {
+    if (liveProgressId.current === null) return
+    const id = liveProgressId.current
+    liveProgressId.current = null
+    setProgress(prev => prev.filter(l => l.id !== id))
   }, [])
 
   /** Refresh status (config + project + files). */
@@ -267,16 +301,31 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   /** Shared frame handler for generate/rewrite/polish streams. */
   const applyJobFrame = useCallback((frame: JobFrame, label: (no: number) => string) => {
     if (frame.type === 'start') {
+      clearLiveProgress()
+      setLiveBar(null)
+      lastDeltaChars.current = 0
+      liveChars.current = 0
+      currentJobNo.current = frame.no
       setProject(prev => prev === null ? prev : {
         ...prev,
         chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, status: 'generating', error: undefined } : c),
       })
       pushProgress(label(frame.no))
     } else if (frame.type === 'delta') {
-      if (frame.text.length % 3000 < 600) {
-        pushProgress(`…已生成 ${frame.text.length} 字`)
+      // One live row updated in place — no per-token console spam. The
+      // server streams incremental text, so accumulate locally.
+      const chars = (liveChars.current += frame.text.length)
+      const target = project?.chapters.find(c => c.no === currentJobNo.current)?.targetChars ?? 0
+      if (chars < 50 || chars - lastDeltaChars.current >= 200) {
+        lastDeltaChars.current = chars
+        const text = target > 0 ? `已生成 ${chars} / ${target} 字` : `已生成 ${chars} 字`
+        const ratio = target > 0 ? Math.min(chars / target, 1) : undefined
+        setLiveProgress(text, ratio)
+        setLiveBar({ text, ratio })
       }
     } else if (frame.type === 'done' || frame.type === 'rewritten') {
+      clearLiveProgress()
+      setLiveBar(null)
       setProject(prev => prev === null ? prev : {
         ...prev,
         chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, status: 'written', chars: frame.chars, file: frame.file, review: undefined } : c),
@@ -284,6 +333,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       pushProgress(tt('progress.done', { no: frame.no, chars: frame.chars, file: frame.file }), 'done')
       setGeneratedFiles(prev => prev.includes(frame.file) ? prev : [...prev, frame.file])
     } else if (frame.type === 'review') {
+      clearLiveProgress()
+      setLiveBar(null)
       setProject(prev => prev === null ? prev : {
         ...prev,
         chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, status: frame.report.passed ? 'approved' : 'rejected', review: frame.report } : c),
@@ -294,13 +345,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         verdict: frame.report.verdict,
       }), frame.report.passed ? 'done' : 'error')
     } else if (frame.type === 'error') {
+      clearLiveProgress()
+      setLiveBar(null)
       setProject(prev => prev === null ? prev : {
         ...prev,
         chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, status: 'error', error: frame.message } : c),
       })
       pushProgress(tt('progress.error', { no: frame.no, message: frame.message }), 'error')
     }
-  }, [pushProgress])
+  }, [pushProgress, setLiveProgress, clearLiveProgress, project])
 
   /** Generate one chapter, streaming frames into the console. */
   const handleWriteChapter = async (no: number, skipReview: boolean): Promise<void> => {
@@ -550,7 +603,19 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       <div className={css.panelContent}>
         {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
         {notice !== '' && <div className={css.card}><span style={{ color: 'var(--nf-success)' }}>{notice}</span></div>}
-        {busy && busyLabel !== '' && <div className={css.card}><span style={{ color: 'var(--nf-accent)' }}>{busyLabel}…</span></div>}
+        {busy && busyLabel !== '' && (
+          <div className={css.card}>
+            <div className={css.busyRow}>
+              <span style={{ color: 'var(--nf-accent)' }}>{busyLabel}…</span>
+              {liveBar !== null && <span className={css.liveText}>{liveBar.text}</span>}
+            </div>
+            {liveBar?.ratio !== undefined && (
+              <div className={css.bigProgressBar}>
+                <div className={css.bigProgressBarFill} style={{ width: `${Math.round(liveBar.ratio * 100)}%` }} />
+              </div>
+            )}
+          </div>
+        )}
 
         {activeTab === 'workflow' && (
           <div className={css.card}>
@@ -797,7 +862,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <div className={css.progress}>
                 {progress.length === 0 && <span className={css.meta}>{tt('progress.empty')}</span>}
                 {progress.map(line => (
-                  <div key={line.id} className={line.kind === 'done' ? css.progressLineDone : line.kind === 'error' ? css.progressLineError : css.progressLine}>
+                  <div key={line.id} className={line.kind === 'done' ? css.progressLineDone : line.kind === 'error' ? css.progressLineError : line.live === true ? css.progressLineLive : css.progressLine}>
+                    {line.live === true && (
+                      <span className={css.progressBar}>
+                        <span className={css.progressBarFill} style={{ width: `${Math.round((line.ratio ?? 0) * 100)}%` }} />
+                      </span>
+                    )}
                     {line.text}
                   </div>
                 ))}
