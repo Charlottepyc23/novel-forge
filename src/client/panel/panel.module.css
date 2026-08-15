@@ -613,6 +613,63 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   opacity: 0.9;
 }
 
+.progressLineLive {
+  color: var(--nf-accent);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.progressBar {
+  display: inline-block;
+  flex: none;
+  width: 110px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--nf-border);
+  overflow: hidden;
+}
+
+.progressBarFill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--nf-accent);
+  transition: width 0.3s ease;
+}
+
+/* Prominent top-of-panel generation progress (visible on every tab). */
+.busyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.liveText {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--nf-text-2);
+}
+
+.bigProgressBar {
+  margin-top: 10px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--nf-border);
+  overflow: hidden;
+}
+
+.bigProgressBarFill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--nf-accent), var(--nf-accent-2, var(--nf-accent)));
+  transition: width 0.3s ease;
+}
+
 .progressLineDone {
   color: var(--nf-success);
   font-weight: 600;
