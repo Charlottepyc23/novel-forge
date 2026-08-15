@@ -37,11 +37,46 @@ dsh plugin --profile web add link:"<此目录绝对路径>"
 ```yaml
 - insert:
     - id: novel-forge
-      name: '@ryan/dsh-novel-forge'
+      name: '@waterwx/dsh-novel-forge'
 ```
 
 重启 dsh web 后，侧边栏出现「小说工坊」。
 Restart dsh web and the "Novel Forge" entry appears in the sidebar.
+
+## 安装方式 / Installation
+
+### 从 GitHub 安装 / Install from GitHub
+
+```sh
+dsh plugin --profile web add github:watersxya/dsh-novel-forge
+```
+
+> 注意：pnpm ≥10 默认拒绝运行 git 依赖的 `prepare` 构建脚本。首次安装失败时，把 pnpm 提示的包键加入该 profile 的 `pnpm-workspace.yaml`：
+> Note: pnpm ≥10 refuses to run `prepare` build scripts of git dependencies by default. On first failure, add the package key pnpm prints to the profile's `pnpm-workspace.yaml`:
+>
+> ```yaml
+> allowBuilds:
+>   '@waterwx/dsh-novel-forge': true
+> ```
+>
+> 然后重新执行 `add`。只对源码可信的包授权。
+> Then re-run `add`. Only allow packages whose source you trust.
+
+### 从 npm 安装 / Install from npm（推荐 / recommended）
+
+```sh
+dsh plugin --profile web add @waterwx/dsh-novel-forge
+```
+
+npm 分发的是预构建产物，无需任何构建授权。
+npm distribution ships prebuilt artifacts — no build authorization needed.
+
+### 本地开发 / Local development
+
+```sh
+pnpm install && pnpm build
+dsh plugin --profile web add link:"<本目录绝对路径>"
+```
 
 ## 目录结构 / Directory Layout
 
@@ -112,7 +147,7 @@ Or insert into `~/.dsh/profiles/web/cordis.patch.yml`:
 ```yaml
 - insert:
     - id: novel-forge
-      name: '@ryan/dsh-novel-forge'
+      name: '@waterwx/dsh-novel-forge'
 ```
 
 Restart dsh web, and the "Novel Forge" entry appears in the sidebar.
