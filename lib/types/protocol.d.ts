@@ -18,6 +18,10 @@ export declare const NOVEL_API: {
     readonly review: "/api/dsh-novel-forge/review";
     readonly rewrite: "/api/dsh-novel-forge/rewrite";
     readonly polish: "/api/dsh-novel-forge/polish";
+    /** 采纳待确认草稿（润色/重写产物）覆盖正文文件。 */
+    readonly draftApply: "/api/dsh-novel-forge/draft/apply";
+    /** 放弃待确认草稿，保留原稿。 */
+    readonly draftDiscard: "/api/dsh-novel-forge/draft/discard";
     readonly summary: "/api/dsh-novel-forge/summary";
     readonly foreshadow: "/api/dsh-novel-forge/foreshadow";
     readonly exportBook: "/api/dsh-novel-forge/export";
@@ -25,6 +29,16 @@ export declare const NOVEL_API: {
     readonly assistant: "/api/dsh-novel-forge/assistant";
     readonly assistantHistory: "/api/dsh-novel-forge/assistant-history";
     readonly bookshelf: "/api/dsh-novel-forge/bookshelf";
+    /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
+    readonly reset: "/api/dsh-novel-forge/reset";
+    /** 全书一致性质检：LLM 扫描已生成章节，输出矛盾问题清单。 */
+    readonly audit: "/api/dsh-novel-forge/audit";
+    /** 角色卡刷新：基于事实库与各章摘要聚合角色当前状态。 */
+    readonly charactersRefresh: "/api/dsh-novel-forge/characters/refresh";
+    /** 事实库回填：对历史已生成章节批量抽取事实（旧章节无事实记录时用）。 */
+    readonly factsBackfill: "/api/dsh-novel-forge/facts/backfill";
+    /** 设定圣经局部修补（如世界观规则编辑）。 */
+    readonly biblePatch: "/api/dsh-novel-forge/bible/patch";
     readonly config: "/api/dsh-novel-forge/config";
     readonly openFolder: "/api/dsh-novel-forge/open-folder";
 };
@@ -55,6 +69,13 @@ export interface BookshelfSnapshot {
 export interface BookCreateRequest {
     bookName: string;
     outputDir?: string;
+    /** 开书向导：创建时直接导入的大纲文本（提供则立即建立项目）。 */
+    outline?: string;
+}
+/** POST /reset 请求：重置项目（可选更新大纲）。 */
+export interface ResetRequest {
+    /** 新大纲文本；提供则替换 outline，否则保留原大纲。 */
+    outline?: string;
 }
 /** POST /bookshelf/activate 请求：切换当前书。 */
 export interface BookActivateRequest {
@@ -90,6 +111,11 @@ export interface ChapterPlan {
     summary?: string;
     /** Latest review report (present once reviewed). */
     review?: ReviewReport;
+    /**
+     * 待确认草稿：润色（去AI味）或整章重写的产物正文。生成时先存这里，
+     * 用户看过对比后点「采纳」才覆盖正文文件；点「放弃」则丢弃。刷新页面不丢失。
+     */
+    pendingDraft?: string;
 }
 /** One review finding. */
 export interface ReviewIssue {
@@ -167,6 +193,49 @@ export interface Foreshadow {
     /** Resolution note when resolved. */
     resolvedNote?: string;
 }
+/** 一条已确立的叙事事实（事实库/时间线，注入后续章节生成）。 */
+export interface ChapterFact {
+    /** 来源章节号。 */
+    chapterNo: number;
+    /** 事实文本（人物状态/境界资源/关系变化/伏笔落地等）。 */
+    text: string;
+}
+/** 一条全书质检发现的问题（一致性矛盾，定位到章）。 */
+export interface AuditIssue {
+    /** 问题所在章节号（无法定位时 0）。 */
+    chapterNo: number;
+    severity: 'high' | 'medium' | 'low';
+    /** 矛盾描述。 */
+    item: string;
+    /** 修改建议。 */
+    suggestion: string;
+}
+/** POST /audit 响应。 */
+export interface AuditResponse {
+    issues: AuditIssue[];
+    /** 参与质检的章节数。 */
+    auditedChapters: number;
+    /** 质检时间。 */
+    auditedAt: string;
+}
+/** 角色卡：角色当前状态（从事实库聚合）。 */
+export interface RoleStatusCard {
+    name: string;
+    /** protagonist / supporting / antagonist / other。 */
+    role: string;
+    /** 当前状态一句话（境界/资源/伤势/心境）。 */
+    status: string;
+    /** 最近出场章节。 */
+    lastChapter: number;
+    /** 出场次数。 */
+    appearances: number;
+}
+/** POST /bible/patch 请求：局部修补设定圣经。 */
+export interface BiblePatchRequest {
+    worldRules?: string[];
+    redLines?: string[];
+    style?: string[];
+}
 /** The persisted project: outline + bible + plan + progress. */
 export interface ProjectState {
     /** Book title (first non-empty line of the outline, usually). */
@@ -185,6 +254,8 @@ export interface ProjectState {
     foreshadows: Foreshadow[];
     /** 写作资产（题材基底/推进模式/反AI规则/写法资产）。 */
     assets?: ProjectAssets;
+    /** 事实库/时间线：每章生成后抽取，注入后续章节保持一致性。 */
+    facts?: ChapterFact[];
     /** ISO timestamps. */
     createdAt: string;
     updatedAt: string;
@@ -292,6 +363,13 @@ export type JobFrame = {
     no: number;
     file: string;
     chars: number;
+}
+/** 润色/重写完成，产物作为待确认草稿（尚未覆盖正文）。 */
+ | {
+    type: 'drafted';
+    no: number;
+    chars: number;
+    draft: string;
 } | {
     type: 'error';
     no: number;
@@ -314,6 +392,10 @@ export interface RewriteRequest {
 }
 /** POST /polish request: de-AI-ify one chapter. */
 export interface PolishRequest {
+    chapterNo: number;
+}
+/** POST /draft/apply | /draft/discard request: 采纳或放弃待确认草稿。 */
+export interface DraftDecisionRequest {
     chapterNo: number;
 }
 /** POST /summary request: (re)generate a chapter summary. */

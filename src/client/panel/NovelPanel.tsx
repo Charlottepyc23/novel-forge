@@ -4,7 +4,8 @@
  * 设定库 (story bible), 伏笔 (foreshadows), 设置 (config). Generation and
  * review streams land in the progress console.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import type { NovelApi } from '../api.ts'
 import type { PanelController } from './controller.ts'
 import { tt } from './helpers.ts'
@@ -26,7 +27,10 @@ import type {
 import css from './panel.module.css'
 
 /** The panel's tab identifiers. */
-export type NovelTab = 'workflow' | 'overview' | 'plan' | 'bible' | 'assets' | 'foreshadow' | 'assistant' | 'settings'
+export type NovelTab =
+  | 'workflow' | 'overview' | 'plan' | 'bible' | 'foreshadow' | 'assistant' | 'settings'
+  | 'characters'
+  | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle'
 
 /** Panel shell props. */
 export interface NovelPanelProps {
@@ -47,17 +51,42 @@ interface ProgressLine {
   ratio?: number
 }
 
-/** The tab bar definition. */
-const TABS: ReadonlyArray<{ id: NovelTab; label: string }> = [
-  { id: 'workflow', label: tt('tab.workflow') },
-  { id: 'overview', label: tt('tab.overview') },
-  { id: 'plan', label: tt('tab.plan') },
-  { id: 'bible', label: tt('tab.bible') },
-  { id: 'assets', label: '写作资产' },
-  { id: 'foreshadow', label: tt('tab.foreshadow') },
-  { id: 'assistant', label: tt('tab.assistant') },
-  { id: 'settings', label: tt('tab.settings') },
+/** The navigation groups (AI-Novel-Writing-Assistant style grouping). */
+const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArray<{ id: NovelTab; label: string; icon: string }> }> = [
+  {
+    id: 'create',
+    label: '创作',
+    items: [
+      { id: 'workflow', label: tt('tab.workflow'), icon: '🛠️' },
+      { id: 'plan', label: tt('tab.plan'), icon: '📚' },
+      { id: 'overview', label: tt('tab.overview'), icon: '📄' },
+    ],
+  },
+  {
+    id: 'tools',
+    label: '工具',
+    items: [
+      { id: 'assistant', label: tt('tab.assistant'), icon: '💬' },
+    ],
+  },
+  {
+    id: 'db',
+    label: '数据库',
+    items: [
+      { id: 'bible', label: tt('tab.bible'), icon: '📖' },
+      { id: 'characters', label: '角色卡', icon: '👥' },
+      { id: 'foreshadow', label: tt('tab.foreshadow'), icon: '🔮' },
+      { id: 'assetsGenre', label: '题材基底', icon: '🏷️' },
+      { id: 'assetsProgression', label: '推进模式', icon: '📈' },
+      { id: 'assetsTemplates', label: '预置写法', icon: '🖋️' },
+      { id: 'assetsRules', label: '反 AI 规则', icon: '🚫' },
+      { id: 'assetsStyle', label: '自定义写法', icon: '🎨' },
+    ],
+  },
 ]
+
+/** Settings tab — pinned to the bottom of the nav rail. */
+const SETTINGS_TAB: { id: NovelTab; label: string; icon: string } = { id: 'settings', label: tt('tab.settings'), icon: '⚙️' }
 
 /** Whether any chapter is being generated right now. */
 function anyGenerating(chapters: ChapterPlan[] | undefined): boolean {
@@ -82,6 +111,171 @@ function severityColor(severity: string): string {
   return severity === 'high' ? 'var(--nf-error)' : severity === 'medium' ? 'var(--nf-warn)' : 'var(--nf-info)'
 }
 
+/** One row of a chapter-level diff (paragraph granularity). */
+type DiffRow =
+  | { kind: 'same'; text: string }
+  | { kind: 'change'; old: string; neu: string }
+  | { kind: 'del'; text: string }
+  | { kind: 'add'; text: string }
+
+/**
+ * Paragraph-level LCS diff between an original chapter body and its
+ * rewrite/polish draft. Adjacent delete+add runs merge into "change" pairs
+ * (the common case: a reworded paragraph shown as old → new).
+ */
+function paragraphDiff(oldText: string, newText: string): DiffRow[] {
+  const split = (t: string): string[] =>
+    t.replace(/^#\s+.*$/m, '').trim().split(/\n{2,}/).map(p => p.trim()).filter(p => p !== '')
+  const a = split(oldText)
+  const b = split(newText)
+  const n = a.length
+  const m = b.length
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i]![j] = a[i] === b[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!)
+    }
+  }
+  const rows: DiffRow[] = []
+  let i = 0
+  let j = 0
+  while (i < n || j < m) {
+    if (i < n && j < m && a[i] === b[j]) {
+      rows.push({ kind: 'same', text: a[i]! })
+      i++
+      j++
+    } else if (i < n && (j >= m || dp[i + 1]![j]! >= dp[i]![j + 1]!)) {
+      rows.push({ kind: 'del', text: a[i]! })
+      i++
+    } else if (j < m) {
+      rows.push({ kind: 'add', text: b[j]! })
+      j++
+    } else if (i < n) {
+      rows.push({ kind: 'del', text: a[i]! })
+      i++
+    } else {
+      rows.push({ kind: 'add', text: b[j]! })
+      j++
+    }
+  }
+  // Merge adjacent del/add runs into change pairs.
+  const merged: DiffRow[] = []
+  let k = 0
+  while (k < rows.length) {
+    const row = rows[k]!
+    if (row.kind !== 'del' && row.kind !== 'add') {
+      merged.push(row)
+      k++
+      continue
+    }
+    const dels: string[] = []
+    const adds: string[] = []
+    while (k < rows.length && (rows[k]!.kind === 'del' || rows[k]!.kind === 'add')) {
+      if (rows[k]!.kind === 'del') dels.push((rows[k] as { text: string }).text)
+      else adds.push((rows[k] as { text: string }).text)
+      k++
+    }
+    if (dels.length > 0 && adds.length > 0) {
+      merged.push({ kind: 'change', old: dels.join('\n\n'), neu: adds.join('\n\n') })
+    } else if (dels.length > 0) {
+      for (const d of dels) merged.push({ kind: 'del', text: d })
+    } else {
+      for (const ad of adds) merged.push({ kind: 'add', text: ad })
+    }
+  }
+  return merged
+}
+
+/** 把章节 beats 按结构标签渲染（本章目标/剧情要点/爽点/结尾钩子 等）。 */
+function renderBeats(beats: string): ReactElement {
+  const lines = beats.split('\n')
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {lines.map((line, i) => {
+        const trimmed = line.trim()
+        const match = /^([^：:]{2,14})[：:]/.exec(trimmed)
+        if (match !== null) {
+          return (
+            <div key={i}>
+              <b style={{ color: 'var(--nf-accent)' }}>{match[1]}</b>
+              {trimmed.slice(match[0].length)}
+            </div>
+          )
+        }
+        return <div key={i}>{line}</div>
+      })}
+    </div>
+  )
+}
+
+/** The diff list of a draft-vs-original comparison (scrollable). */
+function DiffList({ original, draft }: { original: string; draft: string }): ReactElement {  const rows = useMemo(() => paragraphDiff(original, draft), [original, draft])
+  const changed = rows.filter(r => r.kind === 'change').length
+  const added = rows.filter(r => r.kind === 'add').length
+  const removed = rows.filter(r => r.kind === 'del').length
+  const [onlyChanges, setOnlyChanges] = useState(false)
+  const shown = onlyChanges ? rows.filter(r => r.kind !== 'same') : rows
+  return (
+    <>
+      <div className={css.diffLegend}>
+        <span className={css.legendOld}>■ 原稿</span>
+        <span className={css.legendNew}>■ 新稿</span>
+        <span className={css.meta}>
+          原 {original.length} 字 → 新 {draft.length} 字 · 修改 {changed} · 新增 {added} · 删除 {removed}
+        </span>
+        <label className={css.onlyChanges}>
+          <input
+            type="checkbox"
+            checked={onlyChanges}
+            onChange={e => { setOnlyChanges(e.target.checked) }}
+          />
+          只看改动
+        </label>
+      </div>
+      <div className={css.diffList}>
+        {shown.map((row, idx) => {
+          if (row.kind === 'same') {
+            return (
+              <details key={idx} className={css.diffSame}>
+                <summary>第 {idx + 1} 段 · 未改动（点击展开）</summary>
+                <div className={css.diffSameBody}>{row.text}</div>
+              </details>
+            )
+          }
+          if (row.kind === 'change') {
+            return (
+              <div key={idx} className={css.diffChange}>
+                <div className={css.diffColumn}>
+                  <span className={css.diffTagOld}>原稿</span>
+                  <div className={css.diffOld}>{row.old}</div>
+                </div>
+                <div className={css.diffColumn}>
+                  <span className={css.diffTagNew}>新稿</span>
+                  <div className={css.diffNew}>{row.neu}</div>
+                </div>
+              </div>
+            )
+          }
+          if (row.kind === 'del') {
+            return (
+              <div key={idx} className={css.diffDel}>
+                <span className={css.diffTagOld}>原稿</span>
+                <span className={css.diffText}>{row.text}</span>
+              </div>
+            )
+          }
+          return (
+            <div key={idx} className={css.diffAdd}>
+              <span className={css.diffTagNew}>新稿</span>
+              <span className={css.diffText}>{row.text}</span>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
 /** The novel-forge panel. */
 export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [activeTab, setActiveTab] = useState<NovelTab>('workflow')
@@ -102,8 +296,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [configDraft, setConfigDraft] = useState<NovelConfig | null>(null)
   const [expandedChapter, setExpandedChapter] = useState<number | null>(null)
   const [chapterText, setChapterText] = useState('')
-  const [rewriteInstruction, setRewriteInstruction] = useState('')
-  const [localTarget, setLocalTarget] = useState('')
   const progressId = useRef(0)
   /** id of the single live progress row (generation counter), if any. */
   const liveProgressId = useRef<number | null>(null)
@@ -115,6 +307,94 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const currentJobNo = useRef(0)
   /** prominent top-of-panel progress bar while a chapter is being written. */
   const [liveBar, setLiveBar] = useState<{ text: string; ratio?: number } | null>(null)
+  /** 润色/修订工作区：左栏原文（可选中局部目标）+ 右栏指令/预览/应用。 */
+  const [workspace, setWorkspace] = useState<{
+    no: number
+    title: string
+    original: string
+    instruction: string
+    draft: string | null
+  } | null>(null)
+  /** 工作区左栏当前选中的文字（局部修订目标）。 */
+  const [wsSelected, setWsSelected] = useState('')
+  /** 工作区预览区：diff 对比视图开关。 */
+  const [wsShowDiff, setWsShowDiff] = useState(false)
+  /** 工作区原文 textarea 引用（用于捕获选中文字）。 */
+  const wsEditorRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 有未采纳草稿的章节号（refresh 后检测到遗留草稿时提示）。 */
+  const [draftNo, setDraftNo] = useState<number | null>(null)
+  /** 大纲页「更新大纲」编辑区是否展开。 */
+  const [updatingOutline, setUpdatingOutline] = useState(false)
+  /** 全书质检结果（null = 未运行）。 */
+  const [auditIssues, setAuditIssues] = useState<import('../../protocol.ts').AuditIssue[] | null>(null)
+  /** 角色卡（从事实库聚合）。 */
+  const [charCards, setCharCards] = useState<import('../../protocol.ts').RoleStatusCard[] | null>(null)
+  /** 世界观规则编辑草稿（bible tab，每行一条）。 */
+  const [worldRulesDraft, setWorldRulesDraft] = useState('')
+  /** AI 助手悬浮窗：是否打开。 */
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  /** 悬浮窗位置（相对面板，localStorage 记忆）。 */
+  const [assistantPos, setAssistantPos] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('dsh-novel-forge.assistant.float')
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown }
+        return { x: typeof parsed.x === 'number' ? parsed.x : 260, y: typeof parsed.y === 'number' ? parsed.y : 60 }
+      }
+    } catch { /* ignore */ }
+    return { x: 260, y: 60 }
+  })
+  /** 悬浮窗尺寸（localStorage 记忆）。 */
+  const [assistantSize, setAssistantSize] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('dsh-novel-forge.assistant.size')
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as { w?: unknown; h?: unknown }
+        return { w: typeof parsed.w === 'number' ? parsed.w : 420, h: typeof parsed.h === 'number' ? parsed.h : 460 }
+      }
+    } catch { /* ignore */ }
+    return { w: 420, h: 460 }
+  })
+  /** 拖拽/缩放状态。 */
+  const dragState = useRef<{ type: 'move' | 'resize'; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number } | null>(null)
+
+  /** 悬浮窗位置/尺寸持久化。 */
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('dsh-novel-forge.assistant.float', JSON.stringify(assistantPos))
+      window.localStorage.setItem('dsh-novel-forge.assistant.size', JSON.stringify(assistantSize))
+    } catch { /* ignore */ }
+  }, [assistantPos, assistantSize])
+
+  /** 全局拖拽/缩放监听（挂一次，靠 dragState 判断）。 */
+  useEffect(() => {
+    const onMove = (e: MouseEvent): void => {
+      const s = dragState.current
+      if (s === null) return
+      if (s.type === 'move') {
+        setAssistantPos({
+          x: Math.max(-340, Math.min(s.origX + e.clientX - s.startX, 3000)),
+          y: Math.max(0, Math.min(s.origY + e.clientY - s.startY, 3000)),
+        })
+      } else {
+        setAssistantSize({
+          w: Math.max(320, Math.min(s.origW + e.clientX - s.startX, 1400)),
+          h: Math.max(220, Math.min(s.origH + e.clientY - s.startY, 1200)),
+        })
+      }
+    }
+    const onUp = (): void => { dragState.current = null }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+  /** 左侧导航折叠状态（localStorage 记忆，参照 AI-Novel-Writing-Assistant 侧边栏）。 */
+  const [navCollapsed, setNavCollapsed] = useState(() => {
+    try { return window.localStorage.getItem('dsh-novel-forge.nav.collapsed') === 'true' } catch { return false }
+  })
 
   /** Refresh bookshelf. */
   const refreshShelf = useCallback(async () => {
@@ -157,6 +437,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       setConfigDraft(status.config)
       setProject(status.project ?? null)
       setGeneratedFiles(status.generatedFiles)
+      const withDraft = status.project?.chapters.find(c => c.pendingDraft !== undefined && c.pendingDraft !== '')
+      setDraftNo(withDraft?.no ?? null)
       const nextOutline = status.project?.outline
       if (nextOutline !== undefined && outlineText === '') {
         setOutlineText(nextOutline)
@@ -233,6 +515,108 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
+  /** 大纲页「更新大纲」展开/收起（展开时预填当前大纲文本）。 */
+  const handleToggleUpdateOutline = (): void => {
+    if (!updatingOutline && project !== null) setOutlineText(project.outline)
+    setUpdatingOutline(v => !v)
+  }
+
+  /** 重置项目：清空全部进度，从新大纲重新开始（二次确认）。 */
+  const handleResetProject = async (): Promise<void> => {
+    if (project === null) return
+    if (!window.confirm('将清空本书全部进度（设定圣经/卷计划/章节计划/已生成章节/伏笔/写作资产/事实库），且不可恢复。确定用新大纲重置？')) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.reset(outlineText)
+      setUpdatingOutline(false)
+      pushProgress(`已重置项目：${result.bookName}（从新大纲重新开始）`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`重置失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      await refresh(false)
+    }
+  }
+
+  /** 全书一致性质检（LLM 扫描已生成章节）。 */
+  const handleAudit = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel('全书一致性质检中…')
+    setError('')
+    try {
+      const result = await api.audit()
+      setAuditIssues(result.issues)
+      pushProgress(result.issues.length === 0
+        ? `全书质检完成：${result.auditedChapters} 章未发现矛盾 🎉`
+        : `全书质检完成：发现 ${result.issues.length} 处疑似矛盾`, result.issues.length === 0 ? 'done' : 'error')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`全书质检失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 角色卡刷新。 */
+  const handleCharactersRefresh = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel('聚合角色卡中…')
+    setError('')
+    try {
+      const result = await api.charactersRefresh()
+      setCharCards(result.cards)
+      pushProgress(`角色卡已刷新：${result.cards.length} 个角色`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`角色卡刷新失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 事实库回填（历史章节批量抽取）。 */
+  const handleFactsBackfill = async (): Promise<void> => {
+    if (doneCount === 0) return
+    setBusy(true)
+    setBusyLabel('回填历史章节事实中…')
+    setError('')
+    try {
+      const result = await api.factsBackfill()
+      pushProgress(result.filled > 0
+        ? `事实库回填完成：${result.filled} 章已抽取事实`
+        : '事实库无需回填（所有章节都已有事实记录）', 'done')
+      await refresh(false)
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`事实库回填失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 保存世界观规则编辑（bible tab，每行一条）。 */
+  const handleSaveWorldRules = async (): Promise<void> => {
+    if (bible === undefined) return
+    const rules = worldRulesDraft.split('\n').map(line => line.trim()).filter(line => line !== '')
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.biblePatch({ worldRules: rules })
+      setProject(prev => prev === null ? prev : { ...prev, bible: result.bible, updatedAt: new Date().toISOString() })
+      pushProgress(`世界观规则已保存（${rules.length} 条）`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** Extract the story bible. */
   const handleBible = async (): Promise<void> => {
     setBusy(true)
@@ -298,6 +682,109 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
+  /** 打开某章的工作区（读取服务器原文；有遗留草稿时预载草稿；可预填修订指令）。 */
+  const openWorkspace = useCallback(async (no: number, instruction = ''): Promise<void> => {
+    try {
+      const [chapterRes, statusRes] = await Promise.all([api.chapter(no), api.status()])
+      const chapter = statusRes.project?.chapters.find(c => c.no === no)
+      if (chapter === undefined) return
+      setWorkspace({
+        no,
+        title: chapter.title,
+        original: chapterRes.markdown,
+        instruction,
+        draft: chapter.pendingDraft !== undefined && chapter.pendingDraft !== '' ? chapter.pendingDraft : null,
+      })
+      setWsSelected('')
+      setWsShowDiff(false)
+    } catch { /* best-effort */ }
+  }, [api])
+
+  /** 捕获工作区原文 textarea 中选中的文字（局部修订目标）。 */
+  const captureWsSelection = (): void => {
+    const el = wsEditorRef.current
+    if (el === null) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    if (end > start) setWsSelected(el.value.slice(start, end).trim())
+    else setWsSelected('')
+  }
+
+  /** 工作区：去 AI 味润色（流式 → 预览草稿）。 */
+  const handleWsPolish = async (): Promise<void> => {
+    if (workspace === null) return
+    setBusy(true)
+    setBusyLabel(`${tt('plan.polish')} 第${workspace.no}章`)
+    setError('')
+    try {
+      await api.polish(workspace.no, frame => { applyJobFrame(frame, n => tt('progress.polishing', { no: n })) })
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`第 ${workspace.no} 章润色失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      await refresh(false)
+    }
+  }
+
+  /** 工作区：按指令修订（whole=true 整章，false 仅修订选中片段）。 */
+  const handleWsRewrite = async (whole: boolean): Promise<void> => {
+    if (workspace === null) return
+    const target = whole ? '' : wsSelected
+    setBusy(true)
+    setBusyLabel(`${tt('plan.rewrite')} 第${workspace.no}章`)
+    setError('')
+    try {
+      await api.rewrite(workspace.no, workspace.instruction, target, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`第 ${workspace.no} 章修订失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      await refresh(false)
+    }
+  }
+
+  /** 采纳草稿：覆盖正文文件并刷新。 */
+  const handleDraftApply = async (no: number): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.draftApply(no)
+      setWorkspace(null)
+      setDraftNo(null)
+      pushProgress(`已采纳第 ${no} 章新稿（${result.chars} 字）→ ${result.file}`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`采纳第 ${no} 章草稿失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      await refresh(false)
+    }
+  }
+
+  /** 放弃草稿：保留原稿，仅清空草稿。 */
+  const handleDraftDiscard = async (no: number): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      await api.draftDiscard(no)
+      setWorkspace(null)
+      setDraftNo(null)
+      pushProgress(`已放弃第 ${no} 章草稿，保留原稿`, 'info')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`放弃第 ${no} 章草稿失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      await refresh(false)
+    }
+  }
+
   /** Shared frame handler for generate/rewrite/polish streams. */
   const applyJobFrame = useCallback((frame: JobFrame, label: (no: number) => string) => {
     if (frame.type === 'start') {
@@ -344,6 +831,18 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         score: frame.report.score,
         verdict: frame.report.verdict,
       }), frame.report.passed ? 'done' : 'error')
+    } else if (frame.type === 'drafted') {
+      // 润色/重写完成：产物作为待确认草稿，展示在工作区预览，由用户决定。
+      clearLiveProgress()
+      setLiveBar(null)
+      setProject(prev => prev === null ? prev : {
+        ...prev,
+        chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, pendingDraft: frame.draft } : c),
+      })
+      pushProgress(`第 ${frame.no} 章润色完成（${frame.chars} 字），请查看预览后应用或放弃`)
+      setDraftNo(frame.no)
+      setWsShowDiff(false)
+      setWorkspace(prev => prev !== null && prev.no === frame.no ? { ...prev, draft: frame.draft } : prev)
     } else if (frame.type === 'error') {
       clearLiveProgress()
       setLiveBar(null)
@@ -372,7 +871,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
-  /** Batch-write all remaining chapters in sequence. */
+  /** Batch-write all remaining chapters in sequence (auto-retry once per chapter). */
   const handleWriteAll = async (): Promise<void> => {
     const remaining = chapters.filter(c => c.status === 'pending' || c.status === 'error')
     if (remaining.length === 0) return
@@ -380,13 +879,27 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setBusyLabel(`${tt('plan.writeAllPending')}（共 ${remaining.length} 章）`)
     setError('')
     let failed = 0
+    const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
     for (const chapter of remaining) {
       pushProgress(`▶ 开始生成第 ${chapter.no} 章《${chapter.title}》`)
-      try {
-        await api.generate(chapter.no, true, frame => { applyJobFrame(frame, n => tt('progress.generating', { no: n, title: (project?.chapters.find(c => c.no === n)?.title ?? '') })) })
-      } catch (err) {
+      let lastError: unknown = null
+      // 失败自动重试：最多尝试 2 次，间隔 3 秒（网络抖动/LLM 偶发失败自愈）。
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await api.generate(chapter.no, true, frame => { applyJobFrame(frame, n => tt('progress.generating', { no: n, title: (project?.chapters.find(c => c.no === n)?.title ?? '') })) })
+          lastError = null
+          break
+        } catch (err) {
+          lastError = err
+          if (attempt < 2) {
+            pushProgress(`第 ${chapter.no} 章第 ${attempt} 次尝试失败（${(err as Error).message}），3 秒后自动重试…`, 'error')
+            await sleep(3000)
+          }
+        }
+      }
+      if (lastError !== null) {
         failed++
-        pushProgress(`第 ${chapter.no} 章失败：${(err as Error).message}`, 'error')
+        pushProgress(`第 ${chapter.no} 章失败：${(lastError as Error).message}`, 'error')
       }
     }
     setBusy(false)
@@ -415,42 +928,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } finally {
       setBusy(false)
       setBusyLabel('')
-    }
-  }
-
-  /** Rewrite one chapter (whole-chapter or local target). */
-  const handleRewrite = async (no: number): Promise<void> => {
-    setBusy(true)
-    setBusyLabel(`${tt('plan.rewrite')} 第${no}章`)
-    setError('')
-    try {
-      await api.rewrite(no, rewriteInstruction, localTarget, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
-      setRewriteInstruction('')
-      setLocalTarget('')
-    } catch (err) {
-      setError((err as Error).message)
-      pushProgress(`第 ${no} 章修订失败：${(err as Error).message}`, 'error')
-    } finally {
-      setBusy(false)
-      setBusyLabel('')
-      await refresh(false)
-    }
-  }
-
-  /** Polish one chapter. */
-  const handlePolish = async (no: number): Promise<void> => {
-    setBusy(true)
-    setBusyLabel(`${tt('plan.polish')} 第${no}章`)
-    setError('')
-    try {
-      await api.polish(no, frame => { applyJobFrame(frame, n => tt('progress.polishing', { no: n })) })
-    } catch (err) {
-      setError((err as Error).message)
-      pushProgress(`第 ${no} 章润色失败：${(err as Error).message}`, 'error')
-    } finally {
-      setBusy(false)
-      setBusyLabel('')
-      await refresh(false)
     }
   }
 
@@ -549,21 +1026,166 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const volumes: Volume[] | undefined = project?.volumes
   const foreshadows: Foreshadow[] = project?.foreshadows ?? []
 
-  /** Workflow timeline row: step dot + connector + label + optional action. */
-  const workflowRow = (stepNo: number, done: boolean, label: string, hint: string, buttonLabel: string, onClick: () => void, disabled: boolean) => (
-    <div className={css.workflowRow}>
-      <span className={`${css.workflowDot} ${done ? css.workflowDotDone : css.workflowDotActive}`}>{done ? '✓' : stepNo}</span>
-      <div className={css.workflowBody}>
-        <span className={css.workflowLabel}>{label}</span>
-        <span className={css.workflowHint}>{hint}</span>
-      </div>
-      {!done && (
-        <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={disabled || busy} onClick={onClick}>
-          {buttonLabel}
-        </button>
-      )}
-    </div>
-  )
+  // --------------------------------------------------- dashboard (workflow)
+  const approvedCount = chapters.filter(c => c.status === 'approved').length
+  const reviewPendingCount = chapters.filter(c => c.status === 'written' || c.status === 'rejected').length
+  const totalChars = chapters.reduce((sum, c) => sum + (c.chars ?? 0), 0)
+  const firstChapter = chapters[0]
+  const currentVolumeName = (() => {
+    if (firstChapter === undefined || volumes === undefined || volumes.length === 0) return '—'
+    const vol = volumes.find(v => v.no === firstChapter.volume)
+    return vol !== undefined ? vol.title : `第 ${firstChapter.volume} 卷`
+  })()
+  const lastUpdated = project?.updatedAt !== undefined
+    ? new Date(project.updatedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '—'
+
+  /** 创作旅程 6 阶段（完成/当前/未到）。 */
+  const journeyStages: Array<{ id: string; label: string; done: boolean }> = [
+    { id: 'outline', label: '大纲', done: project !== null },
+    { id: 'bible', label: '设定', done: bible !== undefined },
+    { id: 'volumes', label: '卷计划', done: volumes !== undefined },
+    { id: 'plan', label: '章节计划', done: chapters.length > 0 },
+    { id: 'write', label: '正文', done: chapters.some(c => (c.chars ?? 0) > 0) },
+    { id: 'review', label: '审稿', done: approvedCount > 0 },
+  ]
+  const journeyDoneCount = journeyStages.filter(s => s.done).length
+  const journeyPercent = Math.round((journeyDoneCount / journeyStages.length) * 100)
+  const currentStageId = journeyStages.find(s => !s.done)?.id
+
+  /** 主行动卡片：推荐下一步（AI-Novel-Writing-Assistant 首页主卡模式）。 */
+  const nextAction = useMemo((): { eyebrow: string; title: string; reason: string; actionLabel: string; onClick: () => void } | null => {
+    if (project === null) {
+      return {
+        eyebrow: '开始你的第一本书',
+        title: '导入小说大纲',
+        reason: '从 docx 文件或粘贴文本开始，AI 会把一份大纲「编译」成完整的小说。',
+        actionLabel: '导入大纲',
+        onClick: () => { setActiveTab('overview') },
+      }
+    }
+    if (bible === undefined) {
+      return {
+        eyebrow: '推荐下一步',
+        title: '提炼设定圣经',
+        reason: '人设、世界观、金手指规则、写作红线是后续所有生成的地基，越完整质量越高。',
+        actionLabel: '生成设定圣经',
+        onClick: () => { void handleBible() },
+      }
+    }
+    if (volumes === undefined) {
+      return {
+        eyebrow: '推荐下一步',
+        title: '规划全书卷结构',
+        reason: '按剧情弧线划分卷，章节计划才有骨架可依。',
+        actionLabel: '生成卷计划',
+        onClick: () => { void handleVolumes() },
+      }
+    }
+    if (chapters.length === 0) {
+      return {
+        eyebrow: '推荐下一步',
+        title: '生成章节计划',
+        reason: 'LLM 根据大纲拆解每章标题与剧情要点，然后就可以逐章生成正文。',
+        actionLabel: '生成章节计划',
+        onClick: () => { void handlePlan() },
+      }
+    }
+    const drafting = chapters.find(c => c.pendingDraft !== undefined && c.pendingDraft !== '')
+    if (drafting !== undefined) {
+      return {
+        eyebrow: '需要你确认',
+        title: `第 ${drafting.no} 章有未采纳的润色草稿`,
+        reason: '打开工作区查看对比，决定采纳新稿或保留原稿（原稿未被改动）。',
+        actionLabel: '打开工作区',
+        onClick: () => { void openWorkspace(drafting.no) },
+      }
+    }
+    if (pendingCount > 0) {
+      return {
+        eyebrow: '继续创作',
+        title: `还有 ${pendingCount} 章待生成`,
+        reason: '批量生成剩余章节，顶部进度条会实时显示每章字数与进度。',
+        actionLabel: `批量生成（${pendingCount}）`,
+        onClick: () => { void handleWriteAll() },
+      }
+    }
+    if (reviewPendingCount > 0) {
+      return {
+        eyebrow: '推荐下一步',
+        title: `${reviewPendingCount} 章待审稿`,
+        reason: '审稿通过后章节才算完成；不通过的可按意见在工作区修订。',
+        actionLabel: '去审稿',
+        onClick: () => { setActiveTab('plan') },
+      }
+    }
+    return {
+      eyebrow: '全部完成 🎉',
+      title: '《' + project.bookName + '》已全部生成',
+      reason: '可以去 AI 味润色（对比后采纳）、按卷复查或导出全本（TXT/MD）。',
+      actionLabel: '导出全本',
+      onClick: () => { void handleExport('txt') },
+    }
+  }, [project, bible, volumes, chapters, pendingCount, reviewPendingCount, openWorkspace])
+
+  /** 待办队列（失败/草稿/待审稿，点击直达）。 */
+  const todos = useMemo(() => {
+    const items: Array<{ tone: 'danger' | 'warning' | 'info' | 'success'; title: string; description: string; actionLabel: string; onClick: () => void }> = []
+    for (const chapter of chapters) {
+      if (chapter.status === 'error') {
+        items.push({
+          tone: 'danger',
+          title: `第 ${chapter.no} 章《${chapter.title}》生成失败`,
+          description: chapter.error ?? '',
+          actionLabel: '去处理',
+          onClick: () => { setActiveTab('plan') },
+        })
+      }
+      if (items.length >= 3) return items
+    }
+    const drafting = chapters.find(c => c.pendingDraft !== undefined && c.pendingDraft !== '')
+    if (drafting !== undefined && items.length < 3) {
+      items.push({
+        tone: 'warning',
+        title: `第 ${drafting.no} 章《${drafting.title}》有未采纳草稿`,
+        description: '原稿未被改动，采纳或放弃由你决定',
+        actionLabel: '打开工作区',
+        onClick: () => { void openWorkspace(drafting.no) },
+      })
+    }
+    for (const chapter of chapters) {
+      if ((chapter.status === 'written' || chapter.status === 'rejected') && items.length < 3) {
+        items.push({
+          tone: 'info',
+          title: `第 ${chapter.no} 章《${chapter.title}》待审稿`,
+          description: chapter.status === 'rejected' ? '审稿未通过，可按意见修订' : '等待 AI 审稿确认',
+          actionLabel: '去审稿',
+          onClick: () => { setActiveTab('plan') },
+        })
+      }
+    }
+    return items
+  }, [chapters, openWorkspace])
+
+  /** 资产健康（设定/卷/写作资产/伏笔）。 */
+  const assetSummary = (() => {
+    const assets = project?.assets
+    const parts: string[] = []
+    if (assets?.genre !== undefined) parts.push(`题材：${assets.genre.name}`)
+    if (assets?.primaryProgression !== undefined) parts.push(`推进：${assets.primaryProgression.name}`)
+    if ((assets?.styleAssets?.length ?? 0) > 0) parts.push(`写法：${assets!.styleAssets!.length} 套`)
+    return parts.length > 0 ? parts.join(' · ') : '题材 / 推进 / 写法未绑定'
+  })()
+  const assetCount = (() => {
+    const assets = project?.assets
+    let n = 0
+    if (assets?.genre !== undefined) n++
+    if (assets?.primaryProgression !== undefined) n++
+    n += assets?.auxiliaryProgressions?.length ?? 0
+    n += assets?.styleAssets?.length ?? 0
+    n += assets?.antiAiRules?.length ?? 0
+    return n
+  })()
 
   return (
     <div className={css.panel}>
@@ -573,8 +1195,32 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           {project?.bookName !== '' && project?.bookName !== undefined && (
             <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', fontSize: 11 }}>{project.bookName}</span>
           )}
+          {chapters.length > 0 && (
+            <span className={css.headerProgress}>
+              已完成 <b>{doneCount}</b>/{chapters.length} 章
+              <span className={css.headerProgressDot} />
+              通过 <b>{chapters.filter(c => c.status === 'approved').length}</b>
+            </span>
+          )}
         </h2>
-        <button type="button" className={css.iconButton} title={tt('common.close')} aria-label={tt('common.close')} onClick={() => { controller.close() }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button
+            type="button"
+            className={css.iconButton}
+            title={navCollapsed ? '展开导航栏' : '收起导航栏'}
+            aria-label={navCollapsed ? '展开导航栏' : '收起导航栏'}
+            onClick={() => {
+              setNavCollapsed(prev => {
+                const next = !prev
+                try { window.localStorage.setItem('dsh-novel-forge.nav.collapsed', String(next)) } catch { /* ignore */ }
+                return next
+              })
+            }}
+          >
+            {navCollapsed ? '▸' : '◂'}
+          </button>
+          <button type="button" className={css.iconButton} title={tt('common.close')} aria-label={tt('common.close')} onClick={() => { controller.close() }}>×</button>
+        </div>
       </div>
       {shelf !== null && (
         <BookshelfBar
@@ -593,14 +1239,64 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           }}
         />
       )}
-      <div className={css.tabBar} role="tablist">
-        {TABS.map(tab => (
-          <button key={tab.id} type="button" role="tab" aria-selected={activeTab === tab.id} data-active={activeTab === tab.id ? '' : undefined} className={css.tab} onClick={() => { setActiveTab(tab.id) }}>
-            {tab.label}
+      <div className={css.panelBody}>
+        <nav className={`${css.panelNav} ${navCollapsed ? css.panelNavCollapsed : ''}`} role="tablist" aria-label="工作台导航">
+          {/* 分组导航（创作 / 工具 / 数据库） */}
+          {NAV_GROUPS.map(group => (
+            <div key={group.id} className={css.navGroup}>
+              {!navCollapsed && <div className={css.navGroupLabel}>{group.label}</div>}
+              {group.items.map(tab => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.id || (tab.id === 'assistant' && assistantOpen)}
+                  data-active={activeTab === tab.id || (tab.id === 'assistant' && assistantOpen) ? '' : undefined}
+                  className={css.navTab}
+                  title={tab.label}
+                  onClick={() => {
+                    if (tab.id === 'assistant') {
+                      setAssistantOpen(true)
+                    } else {
+                      setActiveTab(tab.id)
+                    }
+                  }}
+                >
+                  <span className={css.navTabIcon}>{tab.icon}</span>
+                  {!navCollapsed && <span className={css.navTabLabel}>{tab.label}</span>}
+                  {/* 状态角标：章节待办 / 伏笔待埋 / 工作流进度 */}
+                  {tab.id === 'plan' && (pendingCount > 0 || reviewPendingCount > 0) && (
+                    <span className={`${css.navTabBadge} ${chapters.some(c => c.status === 'error') ? css.navTabBadgeDanger : css.navTabBadgeWarn}`}>
+                      {chapters.some(c => c.status === 'error') ? `!${pendingCount + reviewPendingCount}` : pendingCount + reviewPendingCount}
+                    </span>
+                  )}
+                  {tab.id === 'foreshadow' && foreshadows.some(f => f.status === 'planned') && (
+                    <span className={css.navTabBadge}>{foreshadows.filter(f => f.status === 'planned').length}</span>
+                  )}
+                  {tab.id === 'workflow' && chapters.length > 0 && (
+                    <span className={`${css.navTabBadge} ${css.navTabBadgeDone}`}>{journeyPercent}%</span>
+                  )}
+                </button>
+              ))}
+              {!navCollapsed && <div className={css.navGroupSep} />}
+            </div>
+          ))}
+          {/* 设置沉底 */}
+          <div className={css.navSpacer} />
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === SETTINGS_TAB.id}
+            data-active={activeTab === SETTINGS_TAB.id ? '' : undefined}
+            className={css.navTab}
+            title={SETTINGS_TAB.label}
+            onClick={() => { setActiveTab(SETTINGS_TAB.id) }}
+          >
+            <span className={css.navTabIcon}>{SETTINGS_TAB.icon}</span>
+            {!navCollapsed && <span className={css.navTabLabel}>{SETTINGS_TAB.label}</span>}
           </button>
-        ))}
-      </div>
-      <div className={css.panelContent}>
+        </nav>
+        <div className={css.panelContent}>
         {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
         {notice !== '' && <div className={css.card}><span style={{ color: 'var(--nf-success)' }}>{notice}</span></div>}
         {busy && busyLabel !== '' && (
@@ -617,25 +1313,282 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
-        {activeTab === 'workflow' && (
-          <div className={css.card}>
-            <span className={css.cardTitle}>{tt('workflow.title')}</span>
-            <div className={css.meta}>{tt('workflow.progress', {
-              bible: bible !== undefined ? '✓' : '—',
-              volumes: volumes !== undefined ? '✓' : '—',
-              plan: chapters.length > 0 ? '✓' : '—',
-              done: doneCount,
-              total: chapters.length,
-            })}</div>
-            <div className={css.workflowList}>
-              {workflowRow(1, project !== null, tt('workflow.step1'), '从 docx 或粘贴文本导入全书大纲', tt('workflow.loadOutline'), () => { void handleLoadDocx(false) }, false)}
-              {workflowRow(2, bible !== undefined, tt('workflow.step2'), '提炼人设 / 世界观 / 金手指规则 / 写作红线', tt('workflow.genBible'), () => { void handleBible() }, project === null)}
-              {workflowRow(3, volumes !== undefined, tt('workflow.step3'), '按剧情弧线划分全书卷结构', tt('workflow.genVolumes'), () => { void handleVolumes() }, project === null)}
-              {workflowRow(4, chapters.length > 0, tt('workflow.step4'), '每章标题 + 剧情要点 + 字数目标', tt('workflow.genPlan'), () => { void handlePlan() }, project === null)}
-              {workflowRow(5, doneCount > 0, tt('workflow.step5'), '逐章生成，自动摘要 + AI 审稿', tt('plan.write'), () => { setActiveTab('plan') }, false)}
-              {workflowRow(6, doneCount > 0, tt('workflow.step6'), '去 AI 味润色 / 导出全本', tt('settings.exportTxt'), () => { void handleExport('txt') }, false)}
+        {/* 遗留草稿提示：刷新页面后仍有未采纳的润色/修订草稿 */}
+        {workspace === null && draftNo !== null && (
+          <div className={css.card} style={{ borderColor: 'var(--nf-info)' }}>
+            <div className={css.busyRow}>
+              <span style={{ color: 'var(--nf-info)' }}>第 {draftNo} 章有未采纳的润色/修订草稿（原稿未被改动）</span>
+              <span style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void openWorkspace(draftNo) }}>
+                  打开工作区
+                </button>
+                <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleDraftDiscard(draftNo) }}>
+                  放弃
+                </button>
+              </span>
             </div>
           </div>
+        )}
+
+        {/* 润色/修订工作区：左栏原文（可选中局部目标）+ 右栏指令/预览/应用 */}
+        {workspace !== null && (
+          <div className={css.card} style={{ borderColor: 'var(--nf-accent)' }}>
+            <div className={css.busyRow}>
+              <span className={css.cardTitle}>第 {workspace.no} 章《{workspace.title}》润色/修订</span>
+              <button type="button" className={css.iconButton} title="关闭工作区" aria-label="关闭工作区" onClick={() => { setWorkspace(null) }}>×</button>
+            </div>
+            <div className={css.wsColumns}>
+              <div className={css.wsColumn}>
+                <div className={css.meta}>
+                  原文（{workspace.original.length} 字）— 在正文中选中文字可作为「修订选中」的局部目标
+                </div>
+                <textarea
+                  ref={wsEditorRef}
+                  className={`${css.textarea} ${css.wsEditor}`}
+                  value={workspace.original}
+                  onChange={e => { setWorkspace({ ...workspace, original: e.target.value }) }}
+                  onMouseUp={captureWsSelection}
+                  onKeyUp={captureWsSelection}
+                  onSelect={captureWsSelection}
+                  spellCheck={false}
+                />
+              </div>
+              <div className={css.wsColumn}>
+                <div className={css.meta} style={{ fontWeight: 600 }}>AI 修正指令</div>
+                <textarea
+                  className={css.textarea}
+                  style={{ minHeight: 60 }}
+                  placeholder="输入修正要求，例如：压缩冗余、加强冲突、这段对话更口语化…（可留空）"
+                  value={workspace.instruction}
+                  onChange={e => { setWorkspace({ ...workspace, instruction: e.target.value }) }}
+                />
+                {wsSelected !== '' ? (
+                  <div className={css.wsSelected}>
+                    <div className={css.meta}>当前选中内容（将用于精准修订）</div>
+                    <div className={css.wsSelectedText}>{wsSelected}</div>
+                  </div>
+                ) : (
+                  <div className={css.meta}>未选中内容时仅支持整章润色/修订。</div>
+                )}
+                <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                  <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleWsPolish() }}>
+                    ✨ 去AI味润色
+                  </button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || workspace.instruction.trim() === ''} onClick={() => { void handleWsRewrite(true) }}>
+                    整章修订
+                  </button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || wsSelected === ''} onClick={() => { void handleWsRewrite(false) }}>
+                    修订选中
+                  </button>
+                </div>
+                {workspace.draft !== null && (
+                  <div className={css.wsPreview}>
+                    <div className={css.busyRow}>
+                      <span className={css.meta}>优化预览（{workspace.draft.length} 字）</span>
+                      <span style={{ display: 'flex', gap: 8 }}>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWsShowDiff(v => !v) }}>
+                          {wsShowDiff ? '显示文本' : '查看对比'}
+                        </button>
+                        <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleDraftApply(workspace.no) }}>
+                          ✅ 应用预览
+                        </button>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleDraftDiscard(workspace.no) }}>
+                          ↩️ 放弃
+                        </button>
+                      </span>
+                    </div>
+                    {wsShowDiff
+                      ? <DiffList original={workspace.original} draft={workspace.draft} />
+                      : <pre className={css.wsPreviewText}>{workspace.draft}</pre>}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'workflow' && (
+          <>
+            {/* ⭐ 主行动大卡片 */}
+            <div className={css.dashHero}>
+              <div className={css.dashHeroEyebrow}>
+                <span className={css.dashHeroSparkle}>✨</span>
+                {nextAction?.eyebrow ?? '开始'}
+              </div>
+              {project !== null && (
+                <div className={css.dashHeroTitle}>
+                  <span className={css.meta}>正在创作</span>
+                  <h3 className={css.dashHeroBook}>《{project.bookName}》</h3>
+                </div>
+              )}
+              {nextAction !== null && (
+                <div className={css.dashHeroAction}>
+                  <span className={css.dashHeroArrow}>→</span>
+                  <div className={css.dashHeroActionBody}>
+                    <div className={css.dashHeroActionTitle}>{nextAction.title}</div>
+                    <div className={css.meta}>{nextAction.reason}</div>
+                  </div>
+                  <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { nextAction.onClick() }}>
+                    {nextAction.actionLabel}
+                  </button>
+                </div>
+              )}
+              {/* 创作旅程进度 */}
+              <div className={css.dashJourney}>
+                <div className={css.busyRow}>
+                  <span className={css.meta} style={{ fontWeight: 600 }}>创作旅程</span>
+                  <span className={css.meta}>{journeyPercent}% · 已完成 {journeyDoneCount}/{journeyStages.length} 步</span>
+                </div>
+                <div className={css.dashJourneyBar}>
+                  <div className={css.dashJourneyFill} style={{ width: `${journeyPercent}%` }} />
+                </div>
+                <div className={css.dashJourneyStages}>
+                  {journeyStages.map(stage => (
+                    <span
+                      key={stage.id}
+                      className={`${css.dashStage} ${stage.done ? css.dashStageDone : stage.id === currentStageId ? css.dashStageCurrent : ''}`}
+                    >
+                      <span className={css.dashStageDot}>{stage.done ? '✓' : stage.id === currentStageId ? '●' : '○'}</span>
+                      {stage.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {/* HeroFact 4 格 */}
+              <div className={css.dashFacts}>
+                <div className={css.dashFact}><span className={css.meta}>已沉淀章节</span><b>{doneCount} 章</b></div>
+                <div className={css.dashFact}><span className={css.meta}>累计字数</span><b>{totalChars} 字</b></div>
+                <div className={css.dashFact}><span className={css.meta}>当前卷</span><b>{currentVolumeName}</b></div>
+                <div className={css.dashFact}><span className={css.meta}>最近创作</span><b>{lastUpdated}</b></div>
+              </div>
+            </div>
+
+            {/* 状态摘要条 */}
+            <div className={css.assetGrid}>
+              <div className={css.assetStat}>
+                <span className={css.assetStatLabel}>已通过审稿</span>
+                <span className={css.assetStatValue} style={{ color: approvedCount > 0 ? 'var(--nf-success)' : undefined }}>{approvedCount}</span>
+                <span className={css.assetStatDetail}>章节已 approved</span>
+              </div>
+              <div className={css.assetStat}>
+                <span className={css.assetStatLabel}>待生成</span>
+                <span className={css.assetStatValue} style={{ color: pendingCount > 0 ? 'var(--nf-warn)' : undefined }}>{pendingCount}</span>
+                <span className={css.assetStatDetail}>pending + error</span>
+              </div>
+              <div className={css.assetStat}>
+                <span className={css.assetStatLabel}>待审稿</span>
+                <span className={css.assetStatValue} style={{ color: reviewPendingCount > 0 ? 'var(--nf-info)' : undefined }}>{reviewPendingCount}</span>
+                <span className={css.assetStatDetail}>written + rejected</span>
+              </div>
+              <div className={css.assetStat}>
+                <span className={css.assetStatLabel}>总字数</span>
+                <span className={css.assetStatValue}>{totalChars}</span>
+                <span className={css.assetStatDetail}>已生成正文累计</span>
+              </div>
+            </div>
+
+            {/* 双栏：左待办队列 + 右资产健康 */}
+            <div className={css.dashGrid}>
+              <div className={css.card}>
+                <span className={css.cardTitle}>待办队列</span>
+                {todos.length === 0 ? (
+                  <span className={css.meta}>🎉 暂无待办，一切顺畅</span>
+                ) : (
+                  todos.map((todo, i) => (
+                    <div key={i} className={`${css.todoItem} ${todo.tone === 'danger' ? css.todoDanger : todo.tone === 'warning' ? css.todoWarning : css.todoInfo}`}>
+                      <span className={css.todoText}>
+                        {todo.title}
+                        {todo.description !== '' && <span className={css.meta}> — {todo.description}</span>}
+                      </span>
+                      <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { todo.onClick() }}>
+                        {todo.actionLabel}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className={css.card}>
+                <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                  <span className={css.cardTitle}>资产健康</span>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || doneCount === 0} onClick={() => { void handleAudit() }} title="LLM 扫描全本已生成章节，检查人名/境界/资源/时间线矛盾">
+                    🔍 全书质检
+                  </button>
+                </div>
+                <div className={css.assetGrid}>
+                  <div className={css.assetStat}>
+                    <span className={css.assetStatLabel}>设定圣经</span>
+                    <span className={css.assetStatValue} style={{ color: bible !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
+                      {bible !== undefined ? `✓ ${bible.worldRules.length} 条规则` : '未生成'}
+                    </span>
+                    <span className={css.assetStatDetail}>
+                      {bible !== undefined ? `${bible.characters.length} 角色 · ${bible.redLines.length} 红线` : '提炼人设 / 世界观 / 金手指'}
+                    </span>
+                  </div>
+                  <div className={css.assetStat}>
+                    <span className={css.assetStatLabel}>卷计划</span>
+                    <span className={css.assetStatValue} style={{ color: volumes !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
+                      {volumes !== undefined ? `${volumes.length} 卷` : '未生成'}
+                    </span>
+                    <span className={css.assetStatDetail} title={volumes?.map(v => v.title).join(' / ')}>
+                      {volumes !== undefined ? volumes.map(v => v.title).join(' / ') : '按剧情弧线划分全书'}
+                    </span>
+                  </div>
+                  <div className={css.assetStat}>
+                    <span className={css.assetStatLabel}>写作资产</span>
+                    <span className={css.assetStatValue} style={{ color: assetCount > 0 ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
+                      {assetCount} 项
+                    </span>
+                    <span className={css.assetStatDetail} title={assetSummary}>{assetSummary}</span>
+                  </div>
+                  <div className={css.assetStat}>
+                    <span className={css.assetStatLabel}>伏笔</span>
+                    <span className={css.assetStatValue}>{foreshadows.length} 条</span>
+                    <span className={css.assetStatDetail}>
+                      {foreshadows.filter(f => f.status === 'planned').length} 待埋 · {foreshadows.filter(f => f.status === 'resolved').length} 已回收
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 全书质检结果 */}
+            {auditIssues !== null && (
+              <div className={css.card} style={{ borderColor: auditIssues.length > 0 ? 'var(--nf-error)' : 'var(--nf-success)' }}>
+                <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                  <span className={css.cardTitle}>
+                    🔍 全书质检{auditIssues.length === 0 ? '：未发现矛盾 🎉' : `：${auditIssues.length} 处疑似矛盾`}
+                  </span>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setAuditIssues(null) }}>
+                    收起
+                  </button>
+                </div>
+                {auditIssues.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {auditIssues.map((issue, i) => (
+                      <div key={i} className={`${css.todoItem} ${issue.severity === 'high' ? css.todoDanger : issue.severity === 'medium' ? css.todoWarning : css.todoInfo}`}>
+                        <span className={css.todoText}>
+                          <span>
+                            {issue.chapterNo > 0 ? `第 ${issue.chapterNo} 章` : '未定位章节'} · [{issue.severity}] {issue.item}
+                          </span>
+                          {issue.suggestion !== '' && <span className={css.meta}>建议：{issue.suggestion}</span>}
+                        </span>
+                        {issue.chapterNo > 0 && (
+                          <button
+                            type="button"
+                            className={`${css.button} ${css.buttonSmall}`}
+                            disabled={busy}
+                            onClick={() => { void openWorkspace(issue.chapterNo, `按质检意见修订：${issue.item}（建议：${issue.suggestion}）`) }}
+                          >
+                            去修订
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {activeTab === 'overview' && (
@@ -643,49 +1596,89 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             <div className={css.card}>
               <div className={css.row} style={{ justifyContent: 'space-between' }}>
                 <span className={css.cardTitle}>{tt('tab.overview')}</span>
-                {project !== null && <span className={css.meta}>{tt('overview.bookName')}: {project.bookName}</span>}
+                {project !== null && (
+                  <div className={css.row}>
+                    <span className={css.meta}>
+                      {tt('overview.bookName')}: {project.bookName} · {project.outline.length} 字
+                      {project.outlinePath !== undefined && <span> · {project.outlinePath}</span>}
+                    </span>
+                    <button type="button" className={css.button} disabled={busy} onClick={() => { handleToggleUpdateOutline() }}>
+                      {updatingOutline ? '收起' : '更新大纲'}
+                    </button>
+                  </div>
+                )}
               </div>
-              {/* 拖拽 / 文件选择导入 docx */}
-              <div
-                className={`${css.dropzone} ${dragActive ? css.dropzoneActive : ''}`}
-                onClick={() => { fileInputRef.current?.click() }}
-                onDragOver={e => { e.preventDefault(); setDragActive(true) }}
-                onDragLeave={() => { setDragActive(false) }}
-                onDrop={e => {
-                  e.preventDefault()
-                  setDragActive(false)
-                  const file = e.dataTransfer.files?.[0]
-                  if (file !== undefined) void handleDocxFile(file)
-                }}
-              >
-                <span className={css.dropzoneIcon}>📄</span>
-                <span>点击选择本机 docx 大纲，或将文件拖到这里</span>
-                <span className={css.meta}>也支持粘贴文本到下方编辑区</span>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                  style={{ display: 'none' }}
-                  onChange={e => {
-                    const file = e.target.files?.[0]
-                    if (file !== undefined) void handleDocxFile(file)
-                    e.target.value = ''
-                  }}
-                />
-              </div>
-              <div className={css.row} style={{ justifyContent: 'space-between' }}>
-                <span className={css.meta}>{tt('overview.outlineChars')}: {outlineText.length}</span>
-                <button type="button" className={css.button} disabled={busy || outlineText.length < 50} onClick={() => { void handleSaveOutline() }}>
-                  {tt('overview.saveOutline')}
-                </button>
-              </div>
-              <textarea
-                className={css.textarea}
-                value={outlineText}
-                placeholder={tt('overview.outlineHint')}
-                onChange={e => { setOutlineText(e.target.value) }}
-                spellCheck={false}
-              />
+              {project === null ? (
+                <>
+                  {/* 未开书：导入大纲（开书动作） */}
+                  <div
+                    className={`${css.dropzone} ${dragActive ? css.dropzoneActive : ''}`}
+                    onClick={() => { fileInputRef.current?.click() }}
+                    onDragOver={e => { e.preventDefault(); setDragActive(true) }}
+                    onDragLeave={() => { setDragActive(false) }}
+                    onDrop={e => {
+                      e.preventDefault()
+                      setDragActive(false)
+                      const file = e.dataTransfer.files?.[0]
+                      if (file !== undefined) void handleDocxFile(file)
+                    }}
+                  >
+                    <span className={css.dropzoneIcon}>📄</span>
+                    <span>点击选择本机 docx 大纲，或将文件拖到这里</span>
+                    <span className={css.meta}>也支持粘贴文本到下方编辑区</span>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                      style={{ display: 'none' }}
+                      onChange={e => {
+                        const file = e.target.files?.[0]
+                        if (file !== undefined) void handleDocxFile(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </div>
+                  <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                    <span className={css.meta}>{tt('overview.outlineChars')}: {outlineText.length}</span>
+                    <button type="button" className={css.button} disabled={busy || outlineText.length < 50} onClick={() => { void handleSaveOutline() }}>
+                      {tt('overview.saveOutline')}
+                    </button>
+                  </div>
+                  <textarea
+                    className={css.textarea}
+                    value={outlineText}
+                    placeholder={tt('overview.outlineHint')}
+                    onChange={e => { setOutlineText(e.target.value) }}
+                    spellCheck={false}
+                  />
+                </>
+              ) : updatingOutline ? (
+                <>
+                  <div className={css.meta}>
+                    大纲是本书的「出生证明」。更新时请二选一：<b>仅更新文本</b>（保留设定/章节/正文全部进度），或
+                    <b>重置项目</b>（从新大纲重新开始，清空设定/卷/章节/正文/伏笔/资产/事实库，不可恢复）。
+                  </div>
+                  <textarea
+                    className={css.textarea}
+                    value={outlineText}
+                    placeholder="粘贴新版大纲文本…"
+                    onChange={e => { setOutlineText(e.target.value) }}
+                    spellCheck={false}
+                  />
+                  <div className={css.row}>
+                    <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy || outlineText.length < 50} onClick={() => { void handleSaveOutline() }}>
+                      仅更新文本（保留进度）
+                    </button>
+                    <button type="button" className={`${css.button} ${css.buttonDanger}`} disabled={busy || outlineText.length < 50} onClick={() => { void handleResetProject() }}>
+                      重置项目并更新（清空进度）
+                    </button>
+                    <span className={css.meta}>{outlineText.length} 字</span>
+                  </div>
+                </>
+              ) : (
+                /* 只读展示：大纲是开书时的出生证明 */
+                <pre className={css.outlineReadonly}>{project.outline}</pre>
+              )}
             </div>
             <div className={css.card}>
               <span className={css.cardTitle}>{tt('status.files')}（{generatedFiles.length}）</span>
@@ -762,7 +1755,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                           {!expanded && <div className={css.chapterBeats} title={chapter.beats}>{chapter.beats}</div>}
                           {expanded && (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              <div className={css.meta}><b>{tt('plan.beats')}:</b> {chapter.beats}</div>
+                              <div className={css.meta}><b>{tt('plan.beats')}:</b></div>
+                              <div className={css.meta}>{renderBeats(chapter.beats)}</div>
                               {chapter.summary !== undefined && chapter.summary !== '' && (
                                 <div className={css.meta}><b>{tt('plan.summary')}:</b> {chapter.summary}</div>
                               )}
@@ -789,27 +1783,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                               )}
                               {(chapter.status === 'rejected' || chapter.status === 'written' || chapter.status === 'approved') && (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                  <div className={css.meta} style={{ fontWeight: 600 }}>修订（可整章或局部）</div>
-                                  <div className={css.field}>
-                                    <label className={css.fieldLabel}>要修改的原文片段（从上面正文复制一段；留空 = 整章修订）</label>
-                                    <textarea
-                                      className={css.textarea}
-                                      style={{ minHeight: 56 }}
-                                      placeholder="例如：林越咬紧牙关：…（复制正文中的原句）"
-                                      value={localTarget}
-                                      onChange={e => { setLocalTarget(e.target.value) }}
-                                    />
+                                  <div className={css.meta} style={{ fontWeight: 600 }}>
+                                    润色 / 修订 — 在右上角打开工作区：左栏原文可直接选中文字做局部修订，右栏输入指令后预览，确认后再应用（未应用不改动原稿）
                                   </div>
                                   <div className={css.row}>
-                                    <input
-                                      className={css.input}
-                                      style={{ flex: 1 }}
-                                      placeholder="修订指令（如：这段对话太生硬，改得更口语化）"
-                                      value={rewriteInstruction}
-                                      onChange={e => { setRewriteInstruction(e.target.value) }}
-                                    />
-                                    <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy || busyAny} onClick={() => { void handleRewrite(chapter.no) }}>
-                                      {tt('plan.rewrite')}
+                                    <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy || busyAny} onClick={() => { void openWorkspace(chapter.no) }}>
+                                      {tt('plan.rewrite')} / {tt('plan.polish')}
                                     </button>
                                   </div>
                                 </div>
@@ -840,7 +1819,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                             </button>
                           )}
                           {(chapter.status === 'written' || chapter.status === 'rejected' || chapter.status === 'approved') && (
-                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void handlePolish(chapter.no) }}>
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void openWorkspace(chapter.no) }}>
                               {tt('plan.polish')}
                             </button>
                           )}
@@ -877,6 +1856,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {activeTab === 'bible' && (
+          <>
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between' }}>
               <span className={css.cardTitle}>{tt('bible.title')}</span>
@@ -891,10 +1871,37 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 {bible.genre !== '' && (
                   <div><b>{tt('bible.genre')}:</b> <span className={css.meta}>{bible.genre}</span></div>
                 )}
+                {/* 世界观规则独立卡片（可编辑，每行一条） */}
                 {bible.worldRules.length > 0 && (
-                  <div>
-                    <b>{tt('bible.worldRules')}（{bible.worldRules.length}）</b>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{bible.worldRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                  <div style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px' }}>
+                    <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                      <b>{tt('bible.worldRules')}（{bible.worldRules.length}）</b>
+                      <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorldRulesDraft(bible.worldRules.join('\n')) }}>
+                        编辑
+                      </button>
+                    </div>
+                    {worldRulesDraft !== '' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                        <textarea
+                          className={css.textarea}
+                          style={{ minHeight: 120 }}
+                          value={worldRulesDraft}
+                          onChange={e => { setWorldRulesDraft(e.target.value) }}
+                          placeholder="每条规则一行…"
+                        />
+                        <div className={css.row}>
+                          <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveWorldRules() }}>
+                            保存规则
+                          </button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorldRulesDraft('') }}>
+                            取消
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {worldRulesDraft === '' && (
+                      <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>{bible.worldRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    )}
                   </div>
                 )}
                 {bible.characters.length > 0 && (
@@ -924,11 +1931,57 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
           </div>
+          </>
         )}
 
-        {activeTab === 'assets' && (
-          <AssetsTab api={api} />
+        {/* 角色卡：从事实库聚合的当前状态（独立导航页） */}
+        {activeTab === 'characters' && (
+          <div className={css.card}>
+            <div className={css.row} style={{ justifyContent: 'space-between' }}>
+              <span className={css.cardTitle}>角色卡（当前状态）</span>
+              <div className={css.row}>
+                <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || doneCount === 0} onClick={() => { void handleFactsBackfill() }} title="历史章节（事实库功能上线前生成的）批量抽取事实">
+                  📥 回填事实库
+                </button>
+                <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || (project?.facts ?? []).length === 0} onClick={() => { void handleCharactersRefresh() }}>
+                  ↻ 从事实库刷新
+                </button>
+              </div>
+            </div>
+            {charCards === null ? (
+              <span className={css.meta}>
+                {(project?.facts ?? []).length === 0
+                  ? '暂无事实库（生成章节后自动积累人物状态/境界/资源/关系等事实），刷新按钮将在有事实后可用。'
+                  : '点击「从事实库刷新」聚合各角色当前状态（境界/资源/伤势/心境）。'}
+              </span>
+            ) : charCards.length === 0 ? (
+              <span className={css.meta}>未识别到角色信息。</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {charCards.map(card => (
+                  <div key={card.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                    <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                      <b>{card.name}</b>
+                      <span className={css.meta}>
+                        {card.role === 'protagonist' ? '主角' : card.role === 'supporting' ? '配角' : card.role === 'antagonist' ? '反派' : '其他'}
+                        {' · 出场 '}{card.appearances} 次 · 最近 第 {card.lastChapter} 章
+                      </span>
+                    </div>
+                    {card.status !== '' && <div className={css.meta}>状态：{card.status}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+            <span className={css.meta}>角色卡由「设定圣经」角色名单 + 「事实库」聚合而来，随章节生成自动保持最新。</span>
+          </div>
         )}
+
+        {/* 写作资产 5 个子分类（左侧导航直达） */}
+        {activeTab === 'assetsGenre' && <AssetsTab api={api} initialTab="genre" />}
+        {activeTab === 'assetsProgression' && <AssetsTab api={api} initialTab="progression" />}
+        {activeTab === 'assetsTemplates' && <AssetsTab api={api} initialTab="templates" />}
+        {activeTab === 'assetsRules' && <AssetsTab api={api} initialTab="rules" />}
+        {activeTab === 'assetsStyle' && <AssetsTab api={api} initialTab="style" />}
 
         {activeTab === 'foreshadow' && (
           <div className={css.card}>
@@ -980,10 +2033,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
           </div>
-        )}
-
-        {activeTab === 'assistant' && (
-          <AssistantTab api={api} />
         )}
 
         {activeTab === 'settings' && configDraft !== null && (
@@ -1052,9 +2101,59 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 {tt('settings.exportMd')}
               </button>
             </div>
+            {/* 事实库 / 时间线 */}
+            {(project?.facts ?? []).length > 0 && (
+              <div className={css.card}>
+                <span className={css.cardTitle}>事实库 / 时间线（{(project?.facts ?? []).length} 条）</span>
+                <span className={css.meta}>
+                  每章生成后自动抽取「已确立事实」（人物状态/境界资源/关系变化/伏笔落地），最近 20 条注入后续章节生成，保证长期一致。
+                </span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
+                  {[...(project?.facts ?? [])].reverse().slice(0, 60).map((fact, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)', flex: 'none', marginTop: 1 }}>
+                        第 {fact.chapterNo} 章
+                      </span>
+                      <span className={css.meta}>{fact.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
+        </div>
       </div>
+
+      {/* AI 助手悬浮窗：可拖动、可拉大小，不占用工作台 */}
+      {assistantOpen && (
+        <div
+          className={css.assistantFloat}
+          style={{ left: assistantPos.x, top: assistantPos.y, width: assistantSize.w, height: assistantSize.h }}
+        >
+          <div
+            className={css.assistantFloatHeader}
+            onMouseDown={e => {
+              e.preventDefault()
+              dragState.current = { type: 'move', startX: e.clientX, startY: e.clientY, origX: assistantPos.x, origY: assistantPos.y, origW: assistantSize.w, origH: assistantSize.h }
+            }}
+          >
+            <span>💬 AI 助手 <span className={css.meta}>（拖动标题栏移动 · 右下角拉大小）</span></span>
+            <button type="button" className={css.iconButton} title="关闭" aria-label="关闭 AI 助手" onClick={() => { setAssistantOpen(false) }}>×</button>
+          </div>
+          <div className={css.assistantFloatBody}>
+            <AssistantTab api={api} />
+          </div>
+          <div
+            className={css.assistantResize}
+            onMouseDown={e => {
+              e.preventDefault()
+              e.stopPropagation()
+              dragState.current = { type: 'resize', startX: e.clientX, startY: e.clientY, origX: assistantPos.x, origY: assistantPos.y, origW: assistantSize.w, origH: assistantSize.h }
+            }}
+          />
+        </div>
+      )}
     </div>
   )
 }

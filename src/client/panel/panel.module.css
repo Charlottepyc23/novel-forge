@@ -63,52 +63,59 @@ body[data-ds-dark-theme] .entry {
   inset: 0;
   overflow: auto;
   color-scheme: light;
-  /* light palette */
-  --nf-bg: #fafafc;
-  --nf-bg-raise: #ffffff;
-  --nf-bg-inset: #f1f1f5;
-  --nf-border: rgba(0, 0, 0, 0.1);
-  --nf-border-strong: rgba(0, 0, 0, 0.22);
-  --nf-text: #1f1f23;
-  --nf-text-2: #5b5b66;
-  --nf-text-3: #8a8a94;
-  --nf-accent: #4d6bfe;
-  --nf-accent-hover: #3d5bf0;
-  --nf-accent-soft: rgba(77, 107, 254, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro SC', 'PingFang SC', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  /* iOS light palette (system colors, frosted translucency) */
+  --nf-bg: rgba(242, 242, 247, 0.86);
+  --nf-bg-raise: rgba(255, 255, 255, 0.72);
+  --nf-bg-inset: rgba(118, 118, 128, 0.12);
+  --nf-border: rgba(60, 60, 67, 0.16);
+  --nf-border-strong: rgba(60, 60, 67, 0.32);
+  --nf-text: #1c1c1e;
+  --nf-text-2: #3c3c43;
+  --nf-text-2-alpha: rgba(60, 60, 67, 0.68);
+  --nf-text-3: #8e8e93;
+  --nf-accent: #007aff;
+  --nf-accent-hover: #0071e3;
+  --nf-accent-soft: rgba(0, 122, 255, 0.12);
   --nf-accent-fg: #ffffff;
-  --nf-hover: rgba(0, 0, 0, 0.06);
-  --nf-success: #16a34a;
-  --nf-error: #e5484d;
-  --nf-warn: #d97706;
-  --nf-info: #7c5cf6;
-  --nf-shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 4px 14px rgba(16, 24, 40, 0.06);
-  --nf-shadow-lg: 0 4px 10px rgba(16, 24, 40, 0.06), 0 12px 28px rgba(16, 24, 40, 0.1);
+  --nf-hover: rgba(0, 0, 0, 0.05);
+  --nf-success: #34c759;
+  --nf-error: #ff3b30;
+  --nf-warn: #ff9500;
+  --nf-info: #5856d6;
+  --nf-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.08);
+  --nf-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.07), 0 20px 48px rgba(0, 0, 0, 0.12);
   background: var(--nf-bg);
+  /* Frosted glass: blur whatever is behind the panel (the chat dialog),
+   * so translucency shows a soft blur instead of readable content. */
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  backdrop-filter: blur(32px) saturate(180%);
   color: var(--nf-text);
 }
 
 body[data-ds-dark-theme] .view {
   color-scheme: dark;
-  /* dark palette */
-  --nf-bg: #121216;
-  --nf-bg-raise: #1a1a20;
-  --nf-bg-inset: #232329;
-  --nf-border: rgba(255, 255, 255, 0.1);
-  --nf-border-strong: rgba(255, 255, 255, 0.24);
-  --nf-text: #ececf1;
-  --nf-text-2: #b0b0ba;
-  --nf-text-3: #7d7d88;
-  --nf-accent: #5b7cff;
-  --nf-accent-hover: #7390ff;
-  --nf-accent-soft: rgba(91, 124, 255, 0.18);
+  /* iOS dark palette */
+  --nf-bg: rgba(0, 0, 0, 0.72);
+  --nf-bg-raise: rgba(28, 28, 30, 0.78);
+  --nf-bg-inset: rgba(118, 118, 128, 0.18);
+  --nf-border: rgba(255, 255, 255, 0.12);
+  --nf-border-strong: rgba(255, 255, 255, 0.28);
+  --nf-text: #f2f2f7;
+  --nf-text-2: #d1d1d6;
+  --nf-text-2-alpha: rgba(209, 209, 214, 0.72);
+  --nf-text-3: #8e8e93;
+  --nf-accent: #0a84ff;
+  --nf-accent-hover: #3a9bff;
+  --nf-accent-soft: rgba(10, 132, 255, 0.2);
   --nf-accent-fg: #ffffff;
-  --nf-hover: rgba(255, 255, 255, 0.08);
-  --nf-success: #4ade80;
-  --nf-error: #f87171;
-  --nf-warn: #fbbf24;
-  --nf-info: #a78bfa;
-  --nf-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.35);
-  --nf-shadow-lg: 0 4px 10px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.5);
+  --nf-hover: rgba(255, 255, 255, 0.09);
+  --nf-success: #30d158;
+  --nf-error: #ff453a;
+  --nf-warn: #ff9f0a;
+  --nf-info: #bf5af2;
+  --nf-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.4);
+  --nf-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4), 0 20px 48px rgba(0, 0, 0, 0.55);
 }
 
 html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) .view {
@@ -124,6 +131,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   min-width: 0;
   font-size: 14px;
   line-height: 1.6;
+  position: relative;
 }
 
 .panelHeader {
@@ -134,6 +142,8 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   border-bottom: 1px solid var(--nf-border);
   flex-shrink: 0;
   background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -230,17 +240,199 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   gap: 14px;
 }
 
+/* ------------------------------------------- body: left nav + content */
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.panelNav {
+  flex: none;
+  width: 142px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 8px;
+  border-right: 1px solid var(--nf-border);
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  overflow-y: auto;
+  transition: width 0.18s ease;
+}
+
+.panelNavCollapsed {
+  width: 52px;
+  padding: 10px 6px;
+}
+
+.navGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navGroupLabel {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--nf-text-3);
+  padding: 6px 10px 2px;
+  user-select: none;
+}
+
+.navGroupSep {
+  height: 1px;
+  margin: 6px 8px 4px;
+  background: var(--nf-border);
+}
+
+.navSpacer {
+  flex: 1;
+  min-height: 8px;
+}
+
+.navTabBadge {
+  margin-left: auto;
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--nf-accent);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 18px;
+  text-align: center;
+  display: inline-block;
+}
+
+.panelNavCollapsed .navTabBadge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  font-size: 9px;
+  padding: 0 3px;
+}
+
+.navTabBadgeDanger {
+  background: var(--nf-error);
+}
+
+.navTabBadgeWarn {
+  background: var(--nf-warn);
+}
+
+.navTabBadgeDone {
+  background: var(--nf-success);
+}
+
+.navTab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--nf-text-2-alpha, var(--nf-text-2));
+  font-weight: 500;
+  transition: color 0.15s ease, background 0.15s ease;
+  position: relative;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.panelNavCollapsed .navTab {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.navTab:hover {
+  color: var(--nf-text);
+  background: var(--nf-hover);
+}
+
+.navTab[data-active] {
+  color: var(--nf-accent);
+  font-weight: 600;
+  background: var(--nf-accent-soft);
+}
+
+.navTab[data-active]::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--nf-accent);
+}
+
+.panelNavCollapsed .navTab[data-active]::before {
+  left: -6px;
+}
+
+.navTabIcon {
+  flex: none;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.navTabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 顶栏进度摘要 */
+.headerProgress {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--nf-text-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+.headerProgress b {
+  color: var(--nf-accent);
+  font-weight: 700;
+}
+
+.headerProgressDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--nf-border-strong, var(--nf-text-3));
+  display: inline-block;
+}
+
 /* ------------------------------------------------------------ cards */
 
 .card {
   border: 1px solid var(--nf-border);
-  border-radius: 12px;
-  padding: 14px 16px;
+  border-radius: 20px;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   background: var(--nf-bg-raise);
   box-shadow: var(--nf-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
@@ -261,7 +453,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   background: var(--nf-bg-inset);
   color: var(--nf-text);
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   font-size: 13px;
   font-weight: 500;
@@ -275,7 +467,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 }
 
 .button:active:not([disabled]) {
-  transform: translateY(1px);
+  transform: scale(0.96);
 }
 
 .button[disabled] {
@@ -284,15 +476,15 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 }
 
 .buttonPrimary {
-  border-color: var(--nf-accent);
-  background: linear-gradient(180deg, var(--nf-accent), var(--nf-accent-hover));
+  border-color: transparent;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nf-accent) 88%, #ffffff), var(--nf-accent));
   color: var(--nf-accent-fg);
-  box-shadow: 0 1px 3px rgba(77, 107, 254, 0.25);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--nf-accent) 35%, transparent);
 }
 
 .buttonPrimary:hover:not([disabled]) {
-  background: linear-gradient(180deg, var(--nf-accent-hover), var(--nf-accent));
-  border-color: var(--nf-accent-hover);
+  background: linear-gradient(180deg, var(--nf-accent-hover), color-mix(in srgb, var(--nf-accent-hover) 85%, #000000));
+  border-color: transparent;
 }
 
 .buttonDanger {
@@ -301,13 +493,13 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 }
 
 .buttonDanger:hover:not([disabled]) {
-  background: rgba(229, 72, 77, 0.1);
+  background: rgba(255, 59, 48, 0.1);
 }
 
 .buttonSmall {
   padding: 3px 10px;
   font-size: 12px;
-  border-radius: 6px;
+  border-radius: 9px;
 }
 
 /* ------------------------------------------------------------ forms */
@@ -328,7 +520,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   border: 1px solid var(--nf-border-strong);
   background: var(--nf-bg-inset);
   color: var(--nf-text);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 7px 11px;
   font-size: 13px;
   width: 100%;
@@ -352,7 +544,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   border: 1px solid var(--nf-border-strong);
   background: var(--nf-bg-inset);
   color: var(--nf-text);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 9px 11px;
   font-size: 13px;
   width: 100%;
@@ -626,7 +818,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   flex: none;
   width: 110px;
   height: 6px;
-  border-radius: 3px;
+  border-radius: 999px;
   background: var(--nf-border);
   overflow: hidden;
 }
@@ -657,7 +849,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 .bigProgressBar {
   margin-top: 10px;
   height: 8px;
-  border-radius: 4px;
+  border-radius: 999px;
   background: var(--nf-border);
   overflow: hidden;
 }
@@ -665,9 +857,555 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 .bigProgressBarFill {
   display: block;
   height: 100%;
-  border-radius: 4px;
+  border-radius: 999px;
   background: linear-gradient(90deg, var(--nf-accent), var(--nf-accent-2, var(--nf-accent)));
   transition: width 0.3s ease;
+}
+
+/* Draft-vs-original diff view (polish / rewrite comparison). */
+.diffLegend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 6px 0 8px;
+  font-size: 12px;
+}
+
+.legendOld {
+  color: var(--nf-error);
+  font-weight: 700;
+}
+
+.legendNew {
+  color: var(--nf-success);
+  font-weight: 700;
+}
+
+.onlyChanges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--nf-text-2);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.diffList {
+  max-height: 460px;
+  overflow-y: auto;
+  border: 1px solid var(--nf-border);
+  border-radius: 8px;
+  background: var(--nf-bg-inset);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.diffSame {
+  border: 1px dashed var(--nf-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--nf-text-2);
+  opacity: 0.85;
+}
+
+.diffSame summary {
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+
+.diffSameBody {
+  margin-top: 6px;
+  white-space: pre-wrap;
+}
+
+/* change 块：左右两栏（左原稿 / 右新稿），带标签徽标 */
+.diffChange {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--nf-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.diffColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.diffColumn:first-child {
+  border-right: 1px solid var(--nf-border);
+}
+
+.diffTagOld,
+.diffTagNew {
+  align-self: flex-start;
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 1px 7px;
+  letter-spacing: 0.5px;
+}
+
+.diffTagOld {
+  color: var(--nf-error);
+  background: color-mix(in srgb, var(--nf-error) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nf-error) 45%, transparent);
+}
+
+.diffTagNew {
+  color: var(--nf-success);
+  background: color-mix(in srgb, var(--nf-success) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--nf-success) 45%, transparent);
+}
+
+.diffOld {
+  color: var(--nf-error);
+  white-space: pre-wrap;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--nf-error) 55%, transparent);
+}
+
+.diffNew {
+  color: var(--nf-success);
+  white-space: pre-wrap;
+  font-weight: 500;
+}
+
+.diffDel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--nf-error) 35%, transparent);
+  background: color-mix(in srgb, var(--nf-error) 7%, transparent);
+}
+
+.diffAdd {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--nf-success) 35%, transparent);
+  background: color-mix(in srgb, var(--nf-success) 7%, transparent);
+}
+
+.diffText {
+  white-space: pre-wrap;
+}
+
+.diffDel .diffText {
+  color: var(--nf-error);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--nf-error) 50%, transparent);
+}
+
+.diffAdd .diffText {
+  color: var(--nf-success);
+}
+
+/* Revision workspace: left original editor + right instruction/preview. */
+.wsColumns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+}
+
+.wsColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wsEditor {
+  flex: 1;
+  min-height: 340px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.wsSelected {
+  border: 1px solid var(--nf-accent);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--nf-accent) 8%, transparent);
+  max-height: 120px;
+  overflow: auto;
+}
+
+.wsSelectedText {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--nf-text-2);
+  white-space: pre-wrap;
+}
+
+.wsPreview {
+  border: 1px solid var(--nf-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--nf-bg-inset);
+}
+
+.wsPreviewText {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  color: var(--nf-text);
+}
+
+/* Assets overview status grid (AI-Novel-Writing-Assistant AssetLibraryStatusGrid). */
+.assetGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.assetStat {
+  border: 1px solid var(--nf-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--nf-bg-inset);
+}
+
+.assetStatLabel {
+  font-size: 11px;
+  color: var(--nf-text-2);
+  opacity: 0.9;
+}
+
+.assetStatValue {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--nf-text);
+}
+
+.assetStatDetail {
+  font-size: 11px;
+  color: var(--nf-text-2);
+  opacity: 0.85;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------ dashboard (workflow tab) */
+
+.dashHero {
+  border: 1px solid var(--nf-border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  background:
+    radial-gradient(1200px 400px at 110% -60%, color-mix(in srgb, var(--nf-accent) 16%, transparent), transparent 60%),
+    linear-gradient(135deg, var(--nf-bg-raise), color-mix(in srgb, var(--nf-accent) 5%, var(--nf-bg-raise)));
+  box-shadow: var(--nf-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dashHeroEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nf-accent);
+}
+
+.dashHeroSparkle {
+  font-size: 14px;
+}
+
+.dashHeroTitle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashHeroBook {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  line-height: 1.25;
+}
+
+.dashHeroAction {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--nf-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--nf-bg-base) 65%, transparent);
+  padding: 10px 14px;
+}
+
+.dashHeroArrow {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--nf-accent);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.dashHeroActionBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashHeroActionTitle {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dashJourney {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashJourneyBar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--nf-border);
+  overflow: hidden;
+}
+
+.dashJourneyFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--nf-info), var(--nf-accent));
+  transition: width 0.4s ease;
+}
+
+.dashJourneyStages {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.dashStage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--nf-text-3);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.dashStageDot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--nf-border-strong, var(--nf-text-3));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  background: var(--nf-bg-base);
+}
+
+.dashStageDone {
+  color: var(--nf-text-2);
+}
+
+.dashStageDone .dashStageDot {
+  background: var(--nf-success);
+  border-color: var(--nf-success);
+  color: #fff;
+}
+
+.dashStageCurrent {
+  color: var(--nf-accent);
+  font-weight: 600;
+}
+
+.dashStageCurrent .dashStageDot {
+  border-color: var(--nf-accent);
+  color: var(--nf-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nf-accent) 18%, transparent);
+}
+
+.dashFacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  border-top: 1px solid var(--nf-border);
+  padding-top: 12px;
+}
+
+.dashFact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dashFact b {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.todoItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border: 1px solid var(--nf-border);
+}
+
+.todoDanger {
+  border-color: color-mix(in srgb, var(--nf-error) 40%, transparent);
+  background: color-mix(in srgb, var(--nf-error) 8%, transparent);
+}
+
+.todoWarning {
+  border-color: color-mix(in srgb, var(--nf-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--nf-warn) 8%, transparent);
+}
+
+.todoInfo {
+  border-color: color-mix(in srgb, var(--nf-info) 40%, transparent);
+  background: color-mix(in srgb, var(--nf-info) 7%, transparent);
+}
+
+.todoText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 只读大纲（开书后的出生证明） */
+.outlineReadonly {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--nf-border);
+  border-radius: 12px;
+  background: var(--nf-bg-inset);
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  max-height: 480px;
+  overflow: auto;
+  user-select: text;
+}
+
+/* 开书向导表单 */
+.bookCreateOutline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+/* AI 助手悬浮窗：可拖动移动 + 右下角拉大小 */
+.assistantFloat {
+  position: absolute;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--nf-border);
+  border-radius: 16px;
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--nf-shadow-lg);
+  overflow: hidden;
+  min-width: 320px;
+  min-height: 220px;
+}
+
+.assistantFloatHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  cursor: grab;
+  user-select: none;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--nf-border);
+  background: var(--nf-bg-inset);
+}
+
+.assistantFloatHeader:active {
+  cursor: grabbing;
+}
+
+.assistantFloatBody {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  padding: 10px;
+}
+
+.assistantFloatBody > * {
+  flex: 1;
+  min-width: 0;
+}
+
+.assistantResize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  background:
+    linear-gradient(135deg, transparent 0 55%, var(--nf-border-strong) 55% 62%, transparent 62%) no-repeat 4px 4px / 12px 12px;
 }
 
 .progressLineDone {
@@ -686,6 +1424,15 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   font-size: 12px;
   color: var(--nf-text-2);
   opacity: 0.9;
+}
+
+/* 题材基底：描述两行截断（悬停 title 看全文），保持列表紧凑自然展开 */
+.genreDesc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 560px;
 }
 
 .fileList {

@@ -12,12 +12,13 @@ import { createUserMessage, BlockAssembler, ReasoningEffortId, type GenerateOpti
 import type { Context } from '@deepseek-ai/cordis'
 import { emptyProjectAssets, renderAllAssets, styleEngineSystemPrompt } from './assets.ts'
 import type {
+  AuditIssue,
   ChapterPlan,
-  CharacterCard,
   Foreshadow,
   NovelConfig,
   ProjectState,
   ReviewReport,
+  RoleStatusCard,
   StoryBible,
   Volume,
 } from './protocol.ts'
@@ -66,6 +67,7 @@ export function loadProject(outputDir: string): ProjectState | undefined {
     if (!Array.isArray(raw.assets.antiAiRules)) raw.assets.antiAiRules = []
     if (!Array.isArray(raw.assets.auxiliaryProgressions)) raw.assets.auxiliaryProgressions = []
     if (!Array.isArray(raw.assets.styleAssets)) raw.assets.styleAssets = []
+    if (!Array.isArray(raw.facts)) raw.facts = []
     return raw
   } catch {
     return undefined
@@ -83,7 +85,7 @@ export function listChapterFiles(outputDir: string): string[] {
   if (!existsSync(outputDir)) return []
   try {
     return readdirSync(outputDir)
-      .filter(name => /^第\d+章_.*\.md$/.test(name))
+      .filter(name => /^第\d+章_.*\.md$/.test(name) && !name.endsWith('.bak.md'))
       .sort((a, b) => {
         const na = Number(/^第(\d+)章/.exec(a)?.[1] ?? 0)
         const nb = Number(/^第(\d+)章/.exec(b)?.[1] ?? 0)
@@ -129,6 +131,7 @@ export function createProject(outline: string, outlinePath?: string): ProjectSta
     chapters: [],
     foreshadows: [],
     assets: emptyProjectAssets(),
+    facts: [],
     createdAt: now,
     updatedAt: now,
   }
@@ -312,13 +315,13 @@ export async function extractBible(ctx: Context, config: NovelConfig, outline: s
   }>(text)
   const strArray = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim() !== '') : []
-  const characters: CharacterCard[] = Array.isArray(raw.characters)
+  const characters: StoryBible['characters'] = Array.isArray(raw.characters)
     ? raw.characters
         .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
         .map(entry => ({
           name: typeof entry.name === 'string' ? entry.name.trim() : '未命名',
           role: (['protagonist', 'supporting', 'antagonist', 'other'] as const).includes(entry.role as never)
-            ? entry.role as CharacterCard['role']
+            ? entry.role as StoryBible['characters'][number]['role']
             : 'other',
           traits: strArray(entry.traits),
           goals: typeof entry.goals === 'string' ? entry.goals : '',
@@ -409,8 +412,8 @@ function planSystemPrompt(volumes: Volume[] | undefined): string {
     '2. 章节之间要衔接自然，前章结尾为后章埋下钩子。',
     '3. 严格遵循大纲的人设、金手指规则、战力体系与世界观设定，不得自行发明冲突设定。',
     '4. 输出必须是合法的 JSON 数组，不要输出任何其他文字或 Markdown 代码块标记。',
-    '5. 数组每个元素格式：{"title": "章节标题（10字以内，有网文感）", "beats": "本章剧情要点（150-250字，含起承转合与钩子）"}',
-    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '5. 数组每个元素格式：{"title": "章节标题（10字以内，有网文感）", "beats": "结构化剧情要点（150-250字，必须包含四段，段间用换行分隔）：\\n本章目标：本章要完成的核心推进；\\n剧情要点：主要情节的起承转合（2-4 句）；\\n爽点/钩子：本章的爽点兑现或情绪钩子；\\n结尾钩子：本章结尾为下一章埋下的悬念"}',
+    '重要：beats 字段内部必须使用 \\n 转义表示换行（JSON 字符串内不得有真实换行符），其余字符串值也不得包含真实换行符，JSON 必须在一段内完整结束。',
     '重要：直接输出 JSON 结果本身，不要把思考过程或推理内容写在输出里。',
     volumeBlock,
   ].join('\n')
@@ -608,7 +611,7 @@ export async function* rewriteChapterStream(
   chapterNo: number,
   instructions: string,
   target?: string,
-): AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'done'; file: string; chars: number }, void, unknown> {
+): AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'drafted'; chars: number; draft: string }, void, unknown> {
   const chapter = project.chapters.find(c => c.no === chapterNo)
   if (chapter === undefined) throw new Error(`章节 ${chapterNo} 不在计划中`)
   const body = readChapterFile(outputDir, chapter)
@@ -711,16 +714,14 @@ export async function* rewriteChapterStream(
   }
   if (newBody.length < 100) throw new Error('修订结果过短，可能失败，请重试')
 
-  const fileName = chapterFileName(chapter)
-  const markdown = `# 第${chapter.no}章 ${chapter.title}\n\n${newBody}\n`
-  writeFileSync(join(outputDir, fileName), markdown, 'utf8')
-  chapter.status = 'written'
-  chapter.chars = newBody.length
+  // Draft mode: do NOT overwrite the file yet. Store the new body as a
+  // pending draft; the user reviews the diff and decides to apply or
+  // discard. File overwrite + status change happen on draft/apply.
+  chapter.pendingDraft = newBody
   chapter.error = undefined
-  chapter.review = undefined
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
-  yield { frame: 'done', file: fileName, chars: newBody.length }
+  yield { frame: 'drafted', chars: newBody.length, draft: newBody }
 }
 
 /** The de-AI-ify polish system prompt (with project writing assets injected). */
@@ -738,14 +739,15 @@ function polishSystemPrompt(project: ProjectState): string {
   ].join('\n')
 }
 
-/** Stream a chapter polish (de-AI-ify). */
+/** Stream a chapter polish (de-AI-ify). Draft-mode: the polished body lands
+ *  in `chapter.pendingDraft` and is only applied on draft/apply. */
 export async function* polishChapterStream(
   ctx: Context,
   config: NovelConfig,
   project: ProjectState,
   outputDir: string,
   chapterNo: number,
-): AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'done'; file: string; chars: number }, void, unknown> {
+): AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'drafted'; chars: number; draft: string }, void, unknown> {
   const chapter = project.chapters.find(c => c.no === chapterNo)
   if (chapter === undefined) throw new Error(`章节 ${chapterNo} 不在计划中`)
   const body = readChapterFile(outputDir, chapter)
@@ -786,13 +788,12 @@ export async function* polishChapterStream(
     .trim()
   if (streamError !== undefined) throw streamError
   if (newBody.length < 100) throw new Error('润色结果过短，可能失败，请重试')
-  const fileName = chapterFileName(chapter)
-  writeFileSync(join(outputDir, fileName), `# 第${chapter.no}章 ${chapter.title}\n\n${newBody}\n`, 'utf8')
-  chapter.status = 'written'
-  chapter.chars = newBody.length
+
+  // Draft mode: keep the original file untouched until the user decides.
+  chapter.pendingDraft = newBody
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
-  yield { frame: 'done', file: fileName, chars: newBody.length }
+  yield { frame: 'drafted', chars: newBody.length, draft: newBody }
 }
 
 /** Generate one chapter (streaming). Yields progress frames; persists when done. */
@@ -820,11 +821,16 @@ export async function* generateChapterStream(
     }
   }
   const prevSummary = prev?.summary
+  // 事实库注入：最近 20 条已确立事实，约束本章不与既定状态矛盾。
+  const recentFacts = (project.facts ?? []).slice(-20).map(f => f.text)
 
   const user = [
     `现在写第 ${chapter.no} 章，标题《${chapter.title}》。`,
     `本章剧情要点：${chapter.beats}`,
     '',
+    recentFacts.length > 0
+      ? `本书已确立的事实（新写内容不得与之矛盾）：\n${recentFacts.join('\n')}`
+      : '',
     prevSummary !== undefined && prevSummary !== ''
       ? `上一章摘要：${prevSummary}`
       : '',
@@ -913,6 +919,214 @@ export async function summarizeChapter(
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
   return chapter.summary
+}
+
+/**
+ * 抽取本章「已确立事实」追加到事实库/时间线（最多 300 条，最新优先）。
+ * 事实注入后续章节生成提示词，保证人物状态/境界/资源/关系长期一致。
+ * @returns 新增事实条数（失败返回 0，调用方 best-effort）。
+ */
+export async function extractFacts(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+): Promise<number> {
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  if (chapter === undefined) return 0
+  const body = readChapterFile(outputDir, chapter)
+  if (body === undefined) return 0
+  const system = [
+    '你是一位网文编辑。请从本章正文中抽取「已确立事实」，供后续章节保持一致。',
+    '事实指：人物当前状态（境界/修为/伤势/资源/心境）、重要关系变化、地点与时间线、已落地或新增的伏笔线索、关键道具去向。',
+    '要求：',
+    '1. 只抽取本章明确写出的、对后续有约束力的内容；纯心理活动与无关细节不要。',
+    '2. 每行一条事实，用客观陈述句，不含主观评价。',
+    '3. 输出 3-6 条，每行一条，不要编号、不要前缀、不要解释。',
+  ].join('\n')
+  const user = body.replace(/^#\s+.*$/m, '').trim()
+  // v4-flash 推理模型：reasoning channel 也占 maxTokens，预算给足避免截断。
+  const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 4000) })
+  const lines = text.split('\n')
+    .map(line => line.replace(/^[-*\d.\s]+/, '').trim())
+    .filter(line => line.length > 8)
+    .slice(0, 8)
+  if (lines.length === 0) return 0
+  const facts = project.facts ?? []
+  for (const line of lines) facts.push({ chapterNo, text: line.slice(0, 140) })
+  project.facts = facts.slice(-300)
+  project.updatedAt = new Date().toISOString()
+  saveProject(outputDir, project)
+  return lines.length
+}
+
+// ------------------------------------------------------------ book audit
+
+/** 全书一致性质检：LLM 扫描已生成章节 + 设定 + 事实库，输出矛盾清单。 */
+export async function auditBook(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+): Promise<AuditIssue[]> {
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  if (written.length === 0) return []
+  const system = [
+    '你是一位严谨的网文连续性审校编辑。你会收到一本小说的设定圣经、事实库和各章正文节选。',
+    '请找出全书的一致性矛盾，例如：',
+    '- 人物状态冲突：境界/修为/伤势/资源在同一章内或跨章前后矛盾。',
+    '- 设定违背：正文与世界观规则、金手指规则、写作红线冲突。',
+    '- 时间线错乱：事件顺序、时间跨度、地点移动不合逻辑。',
+    '- 细节穿帮：人名/地名/物品/数字前后不一致。',
+    '要求：',
+    '1. 只报告有实质证据的矛盾，不要泛泛而谈写作质量问题。',
+    '2. 每条必须定位到具体章节号。',
+    '3. 输出必须是合法 JSON 数组，格式：[{"chapterNo": 章节号, "severity": "high|medium|low", "item": "矛盾描述", "suggestion": "修改建议"}]',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const factsBlock = (project.facts ?? []).slice(-80).map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')
+  const chapterBlocks = written.map(c => {
+    const body = readChapterFile(outputDir, c)
+    const excerpt = (body ?? '').replace(/^#\s+.*$/m, '').trim().slice(0, 700)
+    return `【第${c.no}章《${c.title}》】\n${excerpt}`
+  }).join('\n\n')
+  const user = [
+    '请对以下小说做全书一致性质检。',
+    project.bible !== undefined
+      ? '设定圣经：\n' + [
+          project.bible.worldRules.length > 0 ? `世界规则：\n${project.bible.worldRules.map(r => `- ${r}`).join('\n')}` : '',
+          project.bible.redLines.length > 0 ? `写作红线：\n${project.bible.redLines.map(r => `- ${r}`).join('\n')}` : '',
+          project.bible.characters.length > 0 ? `角色：\n${project.bible.characters.map(ch => `- ${ch.name}（${ch.traits.join('、')}）`).join('\n')}` : '',
+        ].filter(s => s !== '').join('\n')
+      : '',
+    factsBlock !== '' ? `已确立事实库：\n${factsBlock}` : '',
+    `正文节选（每章前 700 字）：\n${chapterBlocks}`,
+    '只输出 JSON 数组。',
+  ].filter(s => s !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 12000) })
+  const parsed = parseJsonArray<Record<string, unknown>>(text)
+  const issues: AuditIssue[] = []
+  for (const entry of parsed) {
+    const item = typeof entry.item === 'string' ? entry.item : ''
+    if (item === '') continue
+    issues.push({
+      chapterNo: Number(entry.chapterNo) || 0,
+      severity: ['high', 'medium', 'low'].includes(entry.severity as string)
+        ? entry.severity as AuditIssue['severity']
+        : 'medium',
+      item,
+      suggestion: typeof entry.suggestion === 'string' ? entry.suggestion : '',
+    })
+  }
+  return issues.slice(0, 30)
+}
+
+/**
+ * 事实库回填：对历史已生成章节批量抽取事实（无事实记录的旧章节）。
+ * @returns 回填的章节数。
+ */
+export async function backfillFacts(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+): Promise<number> {
+  const have = new Set((project.facts ?? []).map(f => f.chapterNo))
+  let filled = 0
+  for (const chapter of project.chapters) {
+    if (chapter.status === 'pending' || chapter.status === 'generating') continue
+    if (chapter.file === undefined || have.has(chapter.no)) continue
+    try {
+      const n = await extractFacts(ctx, config, project, outputDir, chapter.no)
+      if (n > 0) filled++
+    } catch { /* best-effort per chapter */ }
+    have.add(chapter.no)
+  }
+  return filled
+}
+
+/**
+ * 角色卡刷新：出场统计由服务端从正文精确计算（角色名出现过的章节数、
+ * 最近出现章节），LLM 只负责聚合「当前状态」一句话。
+ */
+export async function refreshCharacters(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+): Promise<RoleStatusCard[]> {
+  const roster = project.bible?.characters ?? []
+  const facts = project.facts ?? []
+  if (roster.length === 0 && facts.length === 0) return []
+
+  // 服务端精确出场统计：遍历已写章节正文，统计每个角色名出现过的章节。
+  const stat = new Map<string, { chapters: Set<number>; last: number }>()
+  const known = roster.map(card => card.name)
+  for (const chapter of project.chapters) {
+    if (chapter.status === 'pending' || chapter.status === 'generating') continue
+    const body = readChapterFile(outputDir, chapter)
+    if (body === undefined) continue
+    for (const name of known) {
+      if (body.includes(name)) {
+        const entry = stat.get(name) ?? { chapters: new Set<number>(), last: 0 }
+        entry.chapters.add(chapter.no)
+        if (chapter.no > entry.last) entry.last = chapter.no
+        stat.set(name, entry)
+      }
+    }
+  }
+
+  // LLM 只聚合状态：名单（含 traits）+ 事实库 → [{name, status}]
+  let statuses = new Map<string, string>()
+  if (facts.length > 0) {
+    const system = [
+      '你是一位网文角色档案管理员。请根据「角色名单」与「已确立事实库」，为每个角色输出「当前状态」一句话（境界/修为/伤势/资源/心境）。',
+      '输出必须是合法 JSON 数组，格式：[{"name": "角色名", "status": "当前状态一句话"}]',
+      '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    ].join('\n')
+    const rosterBlock = roster.map(ch => `- ${ch.name}（${ch.traits.join('、')}）`).join('\n')
+    const factsBlock = facts.map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')
+    const user = [
+      `角色名单：\n${rosterBlock}`,
+      `已确立事实库（${facts.length} 条）：\n${factsBlock.slice(-6000)}`,
+      '只输出 JSON 数组。',
+    ].join('\n\n')
+    try {
+      const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 8000) })
+      for (const entry of parseJsonArray<Record<string, unknown>>(text)) {
+        const name = typeof entry.name === 'string' ? entry.name : ''
+        if (name !== '' && typeof entry.status === 'string') statuses.set(name, entry.status)
+      }
+    } catch { /* status 聚合失败则只给出场统计 */ }
+  }
+
+  // 合并：出场统计（精确）+ 状态（LLM）+ 名单角色补全。
+  const cards: RoleStatusCard[] = []
+  const roleOf = (name: string): string => roster.find(c => c.name === name)?.role ?? 'other'
+  for (const card of roster) {
+    const entry = stat.get(card.name)
+    cards.push({
+      name: card.name,
+      role: card.role,
+      status: statuses.get(card.name) ?? '',
+      lastChapter: entry?.last ?? 0,
+      appearances: entry?.chapters.size ?? 0,
+    })
+  }
+  // 名单外的角色（从事实库中识别到但不在设定圣经名单）仅当有出场统计时补充。
+  for (const [name, entry] of stat) {
+    if (!cards.some(c => c.name === name)) {
+      cards.push({
+        name,
+        role: roleOf(name),
+        status: statuses.get(name) ?? '',
+        lastChapter: entry.last,
+        appearances: entry.chapters.size,
+      })
+    }
+  }
+  return cards
 }
 
 // ------------------------------------------------------------- foreshadows

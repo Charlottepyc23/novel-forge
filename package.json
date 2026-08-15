@@ -1,23 +1,11 @@
 {
   "name": "@waterwx/dsh-novel-forge",
   "description": "AI 编译小说工作台 for the dsh web GUI: import a novel outline (docx/text), plan chapters with LLM, generate chapter by chapter (3000-4000 chars each), and save every chapter as Markdown into your chosen output folder.",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/watersxya/dsh-novel-forge.git"
-  },
-  "bugs": {
-    "url": "https://github.com/watersxya/dsh-novel-forge/issues"
-  },
-  "homepage": "https://github.com/watersxya/dsh-novel-forge",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
   "exports": {
@@ -100,7 +88,6 @@
     "bundle": "tsdown",
     "watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "prepare": "node -e \"try { require('node:fs').accessSync('node_modules', require('node:fs').constants.R_OK) } catch { process.exit(0) }\" && pnpm build || true"
+    "test": "vitest run"
   }
 }

@@ -22,6 +22,7 @@ import { emptyProjectAssets } from './assets.ts'
 import {
   chapterFileName,
   exportBook,
+  extractFacts,
   generateChapterStream,
   readChapterFile,
   reviewChapter,
@@ -173,7 +174,7 @@ export async function* executeAction(
   const num = (value: unknown): number | undefined => typeof value === 'number' ? value : undefined
 
   /** Forward live text deltas from a streaming chapter job (text only). */
-  const forward = async function* (stream: AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'done'; file: string; chars: number }, void, unknown>): AsyncGenerator<string, void, unknown> {
+  const forward = async function* (stream: AsyncGenerator<{ frame: 'start' } | { frame: 'delta'; text: string } | { frame: 'done'; file: string; chars: number } | { frame: 'drafted'; chars: number; draft: string }, void, unknown>): AsyncGenerator<string, void, unknown> {
     for await (const step of stream) {
       if (step.frame === 'delta') yield step.text
     }
@@ -239,8 +240,25 @@ export async function* executeAction(
       for await (const chunk of forward(rewriteChapterStream(ctx, config, project, outputDir, no, instructions, target === '' ? undefined : target))) {
         yield chunk
       }
-      // Summarize + re-review so the assistant can report quality.
-      yield '（正在生成章节摘要…）'
+      // Draft mode: the assistant acts on the user's explicit instruction, so
+      // apply the draft immediately — summarize/review must see the new body.
+      const chapter = project.chapters.find(c => c.no === no)
+      const draft = chapter?.pendingDraft
+      if (chapter === undefined || draft === undefined || draft === '') {
+        throw new Error(`章节 ${no} 修订后没有产出草稿`)
+      }
+      const fileName = chapterFileName(chapter)
+      mkdirSync(outputDir, { recursive: true })
+      writeFileSync(join(outputDir, fileName), `# 第${chapter.no}章 ${chapter.title}\n\n${draft}\n`, 'utf8')
+      chapter.pendingDraft = undefined
+      chapter.status = 'written'
+      chapter.chars = draft.length
+      chapter.file = fileName
+      chapter.review = undefined
+      chapter.error = undefined
+      project.updatedAt = new Date().toISOString()
+      saveProject(outputDir, project)
+      yield '（已采纳修订稿，正在生成章节摘要…）'
       try {
         await summarizeChapter(ctx, config, project, outputDir, no)
       } catch { /* summary is best-effort */ }
@@ -257,6 +275,9 @@ export async function* executeAction(
       yield '（正在生成章节摘要…）'
       try {
         await summarizeChapter(ctx, config, project, outputDir, no)
+      } catch { /* best-effort */ }
+      try {
+        await extractFacts(ctx, config, project, outputDir, no)
       } catch { /* best-effort */ }
       yield '（正在 AI 审稿…）'
       const report = await reviewChapter(ctx, config, project, outputDir, no)

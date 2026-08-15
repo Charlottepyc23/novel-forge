@@ -11,13 +11,18 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 
 | 中文 | English |
 |---|---|
-| **创作工作流**：大纲 → 设定圣经 → 卷计划 → 章节计划 → 逐章生成 + AI 审稿 → 润色/导出 | **Workflow**: outline → story bible → volumes → chapter plan → chapter-by-chapter writing with AI review → polish/export |
-| **书架**：同时管理多本书，点击切换进度继续编译，可新建书 | **Bookshelf**: manage multiple books at once — click to switch and keep writing, or start a new one |
-| **写作资产**：题材基底库 / 推进模式库 / 8 套预置写法模板 / 12 条反 AI 规则 / 自定义写法引擎 | **Writing assets**: genre library / progression modes / 8 preset style templates / 12 anti-AI rules / custom style engine |
-| **AI 助手**：对话讨论剧情，助手可直接修改大纲、设定、章节（工具调用实时可见） | **AI assistant**: chat about the plot; the assistant edits outline, settings, and chapters live |
-| **docx 导入**：点击选择或拖拽本机大纲文件，浏览器本地解析 | **docx import**: pick or drag a local outline file — parsed in the browser |
-| **逐章生成**：3000–4000 字/章，自动摘要（叙事记忆）+ AI 审稿 + 按意见修订 + 去 AI 味 | **Chapter generation**: 3000–4000 chars per chapter with summaries, AI review, revise-by-feedback, de-AI polish |
-| **伏笔管理 / 全本导出（TXT/MD）** | **Foreshadowing / full-book export (TXT/MD)** |
+| **创作工作流仪表盘**：主行动卡（推荐下一步）+ 创作旅程进度条 + 状态条 + 待办队列 + 资产健康 | **Workflow dashboard**: next-action hero card, journey progress bar, status strip, todo queue, asset health |
+| **开书向导**：书架新建书时直接导入大纲（docx/粘贴），开书即建项目，书名自动识别 | **Book wizard**: create a book with its outline in one step — project is built immediately |
+| **大纲只读化**：开书后大纲页只读展示；「更新大纲」可选仅改文本（保留进度）或重置项目重来 | **Read-only outline**: after opening a book the outline is read-only; update offers keep-progress or full reset |
+| **章节计划结构化**：每章含 本章目标 / 剧情要点 / 爽点·钩子 / 结尾钩子 | **Structured chapter beats**: goal / plot points / payoff-hook / ending hook per chapter |
+| **事实库 / 时间线**：每章自动抽取已确立事实，注入后续生成，保证长期一致 | **Fact ledger**: auto-extracted per-chapter facts injected into later chapters for consistency |
+| **全书一致性质检**：LLM 扫描全本，输出矛盾清单（定位到章），一键去修订 | **Book audit**: LLM scans all chapters for contradictions, locates them, one-click to revise |
+| **角色卡**：出场统计精确计算 + LLM 聚合当前状态，历史章节可回填事实库 | **Character cards**: precise appearance stats + LLM-aggregated status; backfill for old chapters |
+| **润色/修订工作区**：左栏原文（选中即局部修订）+ 右栏指令/预览/应用，草稿制不覆盖原稿，自动备份 .bak | **Revision workspace**: editable original + selection-targeted local edits, draft-apply flow with auto-backup |
+| **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆，不占用工作台 | **Floating AI assistant**: draggable, resizable, position remembered |
+| **分组导航 + 状态角标**：创作/工具/数据库分组，章节待办/伏笔/进度角标 | **Grouped nav + badges**: creation/tools/database groups with live badges |
+| **iOS 风格毛玻璃 UI**（浅色/深色） | **iOS-style frosted glass UI** (light/dark) |
+| **书架 / 伏笔管理 / 写作资产（题材·推进·写法·反AI规则·自定义引擎）/ 全本导出（TXT/MD）** | **Bookshelf / foreshadowing / writing assets / full-book export (TXT/MD)** |
 
 ## 快速开始 / Quick Start
 
@@ -78,6 +83,15 @@ pnpm install && pnpm build
 dsh plugin --profile web add link:"<本目录绝对路径>"
 ```
 
+## 写作流程 / Writing Pipeline
+
+```
+开书（导入大纲） → 设定圣经 → 卷计划 → 章节计划（结构化 beats）
+→ 逐章生成（自动摘要 + 事实抽取 + AI 审稿）
+→ 修订/润色（工作区对比 → 应用草稿）→ 全书质检 → 角色卡 → 导出
+（旁路：伏笔管理 / 写作资产 / AI 助手悬浮窗 / 书架多书）
+```
+
 ## 目录结构 / Directory Layout
 
 ```
@@ -92,7 +106,7 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 ## 数据位置 / Data Locations
 
 - 书架 / Bookshelf：`~/.dsh/dsh-novel-forge-bookshelf.json`
-- 每本书一个输出目录（含 `novel-project.json` + 各章 Markdown）/ each book owns an output directory
+- 每本书一个输出目录（含 `novel-project.json` + 各章 Markdown + 润色备份 `.bak.md`）/ each book owns an output directory
 - AI 助手对话记录 / assistant log：`<输出目录>/novel-assistant.jsonl`
 
 ## 限制 / Limitations
@@ -107,27 +121,39 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 
 ## English
 
-# My Personal AI Novel Forge (Standalone Copy)
+# My Personal AI Novel Forge
 
-This is a **complete, standalone copy** of the `dsh-novel-forge` plugin. All
+This is the working copy of the `dsh-novel-forge` plugin. All
 source code, build artifacts, and configuration are included — install, build,
 and mount it any time.
 
 ## Feature Overview
 
-- **Workflow**: Outline → Story Bible → Volume Plan → Chapter Plan → chapter-by-chapter
-  writing with AI review → polish / export
-- **Bookshelf**: manage multiple books at once — click to switch progress and keep
-  writing, or start a new book
-- **Writing assets**: genre base library / progression mode library / 8 preset style
-  templates / 12 anti-AI rules / custom style engine
-- **AI Assistant**: discuss plot in chat; the assistant can directly edit the outline,
-  settings, and chapters (tool calls are visible live)
-- **docx import**: pick a local outline file or drag & drop it — parsed in the browser,
-  no server upload
-- **Chapter generation**: 3000–4000 characters per chapter, with automatic summary
-  (narrative memory), AI review, revise-by-feedback, and de-AI polish
-- **Foreshadowing management / full-book export (TXT/MD)**
+- **Workflow dashboard**: next-action hero card with a reason, a 6-stage journey
+  progress bar, a status strip, a todo queue, and asset health
+- **Book wizard**: create a book with its outline in one step — project is built
+  immediately and the title is inferred from the outline
+- **Read-only outline**: after opening a book the outline page is read-only;
+  "Update outline" offers either keep-progress text update or full project reset
+- **Structured chapter beats**: every planned chapter carries goal / plot points /
+  payoff-hook / ending hook sections
+- **Fact ledger**: each chapter auto-extracts established facts (character state,
+  resources, relations, foreshadow landings); the latest 20 are injected into
+  later chapters to keep the long story consistent
+- **Book audit**: one click scans all written chapters against the bible, fact
+  ledger and red lines, reporting located contradictions with one-click revision
+- **Character cards**: appearance statistics are computed precisely from the
+  chapter bodies, status is LLM-aggregated; historical chapters can be backfilled
+- **Revision workspace**: editable original on the left (select text for
+  targeted local edits), instruction + preview + apply/cancel on the right;
+  drafts never overwrite until applied, and applying auto-backs-up the original
+- **Floating AI assistant**: draggable, resizable, position-remembered dialog —
+  chat while working in other tabs
+- **Grouped navigation with live badges**: creation / tools / database groups,
+  badges for chapter todos, foreshadows and journey progress
+- **iOS-style frosted glass UI** with light & dark palettes
+- Bookshelf, foreshadowing management, writing assets (genre / progression /
+  style templates / anti-AI rules / custom style engine), full-book export
 
 ## Getting Started
 
@@ -166,8 +192,8 @@ tsdown.config.ts Dual-face bundling config
 ## Data Locations
 
 - Bookshelf: `~/.dsh/dsh-novel-forge-bookshelf.json`
-- Each book owns an output directory (containing `novel-project.json` project state
-  plus per-chapter Markdown files)
+- Each book owns an output directory (containing `novel-project.json` project state,
+  per-chapter Markdown, and polish backups `.bak.md`)
 - AI assistant conversation log: `<output-dir>/novel-assistant.jsonl`
 
 ## Limitations

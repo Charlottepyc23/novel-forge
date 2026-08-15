@@ -10,6 +10,8 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { exec } from 'node:child_process'
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { Context } from '@deepseek-ai/cordis'
 import {
@@ -19,6 +21,8 @@ import {
   type AssistantFrame,
   type AssistantHistoryResponse,
   type AssistantRequest,
+  type AuditResponse,
+  type BiblePatchRequest,
   type BibleRequest,
   type BibleResponse,
   type BookActivateRequest,
@@ -28,6 +32,7 @@ import {
   type ChapterResponse,
   type ChapterPlan,
   type ConfigPatch,
+  type DraftDecisionRequest,
   type ExportRequest,
   type ExportResponse,
   type ForeshadowRequest,
@@ -39,6 +44,7 @@ import {
   type PlanRequest,
   type PlanResponse,
   type PolishRequest,
+  type ResetRequest,
   type ReviewRequest,
   type RewriteRequest,
   type StatusResponse,
@@ -49,13 +55,16 @@ import {
 } from './protocol.ts'
 import { readOutlineFromDocx } from './docx.ts'
 import { loadAssistantHistory, runAssistantTurn } from './assistant.ts'
-import { activateBook, bookshelfSnapshot, createBook, defaultOutputDirFor, loadBookshelf, removeBook, seedBookshelfFromOutputDir } from './bookshelf.ts'
+import { activateBook, bookshelfSnapshot, createBook, defaultOutputDirFor, loadBookshelf, removeBook, renameBook, seedBookshelfFromOutputDir } from './bookshelf.ts'
 import { BUILTIN_ANTI_AI_RULES, BUILTIN_GENRE_LIBRARY, BUILTIN_PROGRESSION_MODES, BUILTIN_STYLE_TEMPLATES, emptyProjectAssets } from './assets.ts'
 import {
   chapterFileName,
+  auditBook,
+  backfillFacts,
   createProject,
   exportBook,
   extractBible,
+  extractFacts,
   extractStyleAsset,
   generateChapterStream,
   listChapterFiles,
@@ -64,6 +73,7 @@ import {
   planVolumes,
   polishChapterStream,
   readChapterFile,
+  refreshCharacters,
   reviewChapter,
   rewriteChapterStream,
   saveProject,
@@ -400,11 +410,16 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
             send({ type: 'done', no, file: step.file, chars: step.chars, title: chapter.title })
           }
         }
-        // Auto pipeline: summary -> review (unless skipped).
+        // Auto pipeline: summary -> facts -> review (unless skipped).
         try {
           await summarizeChapter(ctx, config, project, config.outputDir, no)
         } catch (error) {
           console.warn('[dsh-novel-forge] summary failed:', (error as Error).message)
+        }
+        try {
+          await extractFacts(ctx, config, project, config.outputDir, no)
+        } catch (error) {
+          console.warn('[dsh-novel-forge] facts extraction failed:', (error as Error).message)
         }
         if (!(body?.skipReview === true) && (config.autoReview ?? true)) {
           const report = await reviewChapter(ctx, config, project, config.outputDir, no)
@@ -475,11 +490,10 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       try {
         for await (const step of rewriteChapterStream(ctx, config, project, config.outputDir, no, body?.instructions ?? '', body?.target)) {
           if (step.frame === 'delta') send({ type: 'delta', text: step.text })
-          else if (step.frame === 'done') send({ type: 'rewritten', no, file: step.file, chars: step.chars })
+          else if (step.frame === 'drafted') send({ type: 'drafted', no, chars: step.chars, draft: step.draft })
         }
-        // Re-review after rewrite.
-        const report = await reviewChapter(ctx, config, project, config.outputDir, no)
-        send({ type: 'review', no, report })
+        // Draft mode: no auto re-review — the user reviews the diff and
+        // decides; re-run review after applying if wanted.
         res.end()
       } catch (error) {
         if (!res.writableEnded) {
@@ -515,7 +529,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       try {
         for await (const step of polishChapterStream(ctx, config, project, config.outputDir, no)) {
           if (step.frame === 'delta') send({ type: 'delta', text: step.text })
-          else if (step.frame === 'done') send({ type: 'rewritten', no, file: step.file, chars: step.chars })
+          else if (step.frame === 'drafted') send({ type: 'drafted', no, chars: step.chars, draft: step.draft })
         }
         res.end()
       } catch (error) {
@@ -524,6 +538,79 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           res.end()
         }
       }
+    },
+  }
+
+  // ---------------------------------------------------- draft apply/discard
+  /** 采纳待确认草稿：覆盖正文文件 + 状态回 written + 清空草稿。 */
+  const draftApplyRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.draftApply,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<DraftDecisionRequest>(req)
+      if (!Number.isInteger(body?.chapterNo)) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      const chapter = project.chapters.find(c => c.no === body!.chapterNo!)
+      if (chapter === undefined) {
+        writeJson(res, 404, { error: `章节 ${body!.chapterNo} 不在计划中` })
+        return
+      }
+      if (chapter.pendingDraft === undefined || chapter.pendingDraft === '') {
+        writeJson(res, 400, { error: `章节 ${chapter.no} 没有待确认的草稿` })
+        return
+      }
+      const draft = chapter.pendingDraft
+      const fileName = chapterFileName(chapter)
+      mkdirSync(config.outputDir, { recursive: true })
+      const targetPath = join(config.outputDir, fileName)
+      // 采纳前自动备份当前原稿为 .bak.md（每次应用都刷新为最新原稿），可随时回退。
+      if (existsSync(targetPath)) {
+        copyFileSync(targetPath, join(config.outputDir, `${fileName.replace(/\.md$/, '')}.bak.md`))
+      }
+      writeFileSync(targetPath, `# 第${chapter.no}章 ${chapter.title}\n\n${draft}\n`, 'utf8')
+      chapter.pendingDraft = undefined
+      chapter.status = 'written'
+      chapter.chars = draft.length
+      chapter.file = fileName
+      chapter.review = undefined
+      chapter.error = undefined
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { ok: true, chars: draft.length, file: fileName })
+    },
+  }
+
+  /** 放弃待确认草稿：保留原稿，仅清空草稿字段。 */
+  const draftDiscardRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.draftDiscard,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<DraftDecisionRequest>(req)
+      if (!Number.isInteger(body?.chapterNo)) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      const chapter = project.chapters.find(c => c.no === body!.chapterNo!)
+      if (chapter === undefined) {
+        writeJson(res, 404, { error: `章节 ${body!.chapterNo} 不在计划中` })
+        return
+      }
+      if (chapter.pendingDraft !== undefined) {
+        chapter.pendingDraft = undefined
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+      }
+      writeJson(res, 200, { ok: true })
     },
   }
 
@@ -828,11 +915,48 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           ? body.outputDir
           : defaultOutputDirFor(bookName)
         const book = createBook(bookName, outputDir)
+        // 开书向导：创建时带大纲 → 立即建立项目（书名以大纲首行为准）。
+        const outline = body?.outline?.trim()
+        if (outline !== undefined && outline.length >= 50) {
+          const project = createProject(outline)
+          saveProject(outputDir, project)
+          renameBook(book.id, project.bookName)
+        }
         writeJson(res, 200, bookshelfSnapshot(loadBookshelf()))
-        void book
         return
       }
       writeJson(res, 405, { error: 'method not allowed (expected GET or POST)' })
+    },
+  }
+
+  // --------------------------------------------------------------- reset
+  /** 重置项目：清空设定/卷/章节计划/正文/伏笔/资产/事实库（可携带新大纲）。 */
+  const resetRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.reset,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = loadProject(config.outputDir)
+      if (project === undefined) {
+        writeJson(res, 400, { error: '输出目录中没有项目，无需重置' })
+        return
+      }
+      const body = await readJsonBody<ResetRequest>(req)
+      const outline = body?.outline?.trim()
+      if (outline !== undefined && outline.length >= 50) {
+        project.outline = outline
+        project.bookName = createProject(outline).bookName
+      }
+      project.bible = undefined
+      project.volumes = undefined
+      project.chapters = []
+      project.foreshadows = []
+      project.assets = emptyProjectAssets()
+      project.facts = []
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { ok: true, bookName: project.bookName })
     },
   }
 
@@ -873,6 +997,92 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         return
       }
       writeJson(res, 200, bookshelfSnapshot(loadBookshelf()))
+    },
+  }
+
+  // ---------------------------------------------------------------- audit
+  /** 全书一致性质检。 */
+  const auditRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.audit,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      try {
+        const issues = await auditBook(ctx, config, project, config.outputDir)
+        const response: AuditResponse = {
+          issues,
+          auditedChapters: project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').length,
+          auditedAt: new Date().toISOString(),
+        }
+        writeJson(res, 200, response)
+      } catch (error) {
+        writeJson(res, 500, { error: (error as Error).message })
+      }
+    },
+  }
+
+  // ----------------------------------------------------- characters refresh
+  /** 角色卡刷新（出场统计精确化 + LLM 聚合状态）。 */
+  const charactersRefreshRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.charactersRefresh,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      try {
+        const cards = await refreshCharacters(ctx, config, project, config.outputDir)
+        writeJson(res, 200, { cards })
+      } catch (error) {
+        writeJson(res, 500, { error: (error as Error).message })
+      }
+    },
+  }
+
+  // ------------------------------------------------------- facts backfill
+  /** 事实库回填：对历史已生成章节批量抽取事实。 */
+  const factsBackfillRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.factsBackfill,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      try {
+        const filled = await backfillFacts(ctx, config, project, config.outputDir)
+        writeJson(res, 200, { ok: true, filled })
+      } catch (error) {
+        writeJson(res, 500, { error: (error as Error).message })
+      }
+    },
+  }
+
+  // ---------------------------------------------------------- bible patch
+  /** 设定圣经局部修补（世界观规则/红线/风格）。 */
+  const biblePatchRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.biblePatch,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      if (project.bible === undefined) {
+        writeJson(res, 400, { error: '尚未生成设定圣经，请先生成' })
+        return
+      }
+      const body = await readJsonBody<BiblePatchRequest>(req)
+      if (Array.isArray(body?.worldRules)) project.bible.worldRules = body.worldRules.filter(r => r.trim() !== '')
+      if (Array.isArray(body?.redLines)) project.bible.redLines = body.redLines.filter(r => r.trim() !== '')
+      if (Array.isArray(body?.style)) project.bible.style = body.style.filter(r => r.trim() !== '')
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { bible: project.bible })
     },
   }
 
@@ -925,6 +1135,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     reviewRoute,
     rewriteRoute,
     polishRoute,
+    draftApplyRoute,
+    draftDiscardRoute,
     summaryRoute,
     foreshadowRoute,
     exportRoute,
@@ -936,6 +1148,11 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     bookshelfRoute,
     bookshelfActivateRoute,
     bookshelfRemoveRoute,
+    resetRoute,
+    auditRoute,
+    charactersRefreshRoute,
+    factsBackfillRoute,
+    biblePatchRoute,
     configRoute,
     openFolderRoute,
   ]

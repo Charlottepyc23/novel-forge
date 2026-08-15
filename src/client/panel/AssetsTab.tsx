@@ -11,6 +11,8 @@ import css from './panel.module.css'
 /** Props. */
 export interface AssetsTabProps {
   api: NovelApi
+  /** 初始子页（左侧导航直达对应资产分类）。 */
+  initialTab?: AssetSubTab
 }
 
 /** 渲染题材树（带勾选当前题材）。 */
@@ -21,7 +23,14 @@ function GenreTree({ node, selected, onSelect }: { node: GenreNode; selected: st
         <input type="radio" name="genre" checked={selected === node.name} onChange={() => { onSelect(node) }} />
         <span>
           <b>{node.name}</b>
-          {node.description !== '' && <span className={css.meta}> — {node.description}</span>}
+          {node.description !== '' && (
+            <span
+              className={`${css.meta} ${css.genreDesc}`}
+              title={node.description}
+            >
+              — {node.description}
+            </span>
+          )}
         </span>
       </label>
       {node.children.length > 0 && (
@@ -48,8 +57,8 @@ const SUB_TABS: ReadonlyArray<{ id: AssetSubTab; label: string }> = [
 ]
 
 /** 写作资产页签。 */
-export function AssetsTab({ api }: AssetsTabProps) {
-  const [assetTab, setAssetTab] = useState<AssetSubTab>('genre')
+export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
+  const [assetTab, setAssetTab] = useState<AssetSubTab>(initialTab)
   const [data, setData] = useState<AssetsResponse | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -58,6 +67,8 @@ export function AssetsTab({ api }: AssetsTabProps) {
   const [styleName, setStyleName] = useState('')
   const [newRule, setNewRule] = useState('')
   const [newProgression, setNewProgression] = useState('')
+  /** 正在行内编辑的自定义反 AI 规则（下标 + 草稿字段）。 */
+  const [editingRule, setEditingRule] = useState<{ index: number; name: string; avoid: string; fix: string } | null>(null)
   const loadId = useRef(0)
 
   /** Load assets (or reset from a new call). */
@@ -135,6 +146,39 @@ export function AssetsTab({ api }: AssetsTabProps) {
     setNewRule('')
   }
 
+  /** 保存行内编辑的自定义规则。 */
+  const handleSaveRuleEdit = async (): Promise<void> => {
+    if (editingRule === null) return
+    const rules = [...(data?.projectAssets.antiAiRules ?? [])]
+    if (editingRule.index < 0 || editingRule.index >= rules.length) return
+    const name = editingRule.name.trim() || rules[editingRule.index]!.name
+    if (editingRule.avoid.trim() === '' && editingRule.fix.trim() === '') return
+    rules[editingRule.index] = { name, avoid: editingRule.avoid.trim(), fix: editingRule.fix.trim() }
+    await patch({ antiAiRules: rules })
+    setEditingRule(null)
+  }
+
+  /** 删除一条自定义规则。 */
+  const handleRemoveRule = async (index: number): Promise<void> => {
+    const rules = [...(data?.projectAssets.antiAiRules ?? [])]
+    rules.splice(index, 1)
+    setEditingRule(null)
+    await patch({ antiAiRules: rules })
+  }
+
+  /** 把内置规则复制为自定义副本（同名覆盖生效），并打开行内编辑。 */
+  const handleOverrideBuiltin = (rule: AntiAiRule): void => {
+    const rules = data?.projectAssets.antiAiRules ?? []
+    const existing = rules.findIndex(r => r.name === rule.name)
+    if (existing >= 0) {
+      setEditingRule({ index: existing, name: rules[existing]!.name, avoid: rules[existing]!.avoid, fix: rules[existing]!.fix ?? '' })
+    } else {
+      const next = [...rules, { ...rule, fix: rule.fix ?? '' }]
+      setEditingRule({ index: next.length - 1, name: rule.name, avoid: rule.avoid, fix: rule.fix ?? '' })
+      void patch({ antiAiRules: next })
+    }
+  }
+
   /** 设置题材。 */
   const handleSelectGenre = (node: GenreNode): void => {
     void patch({ genre: node })
@@ -165,6 +209,32 @@ export function AssetsTab({ api }: AssetsTabProps) {
       {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
       {notice !== '' && <div className={css.card}><span style={{ color: 'var(--nf-success)' }}>{notice}</span></div>}
 
+      {/* 资产状态总览（参照 AI-Novel-Writing-Assistant 状态网格） */}
+      <div className={css.assetGrid}>
+        <div className={css.assetStat}>
+          <span className={css.assetStatLabel}>当前题材</span>
+          <span className={css.assetStatValue}>{assets.genre?.name ?? '未设置'}</span>
+          {assets.genre !== undefined && <span className={css.assetStatDetail} title={assets.genre.description}>{assets.genre.description}</span>}
+        </div>
+        <div className={css.assetStat}>
+          <span className={css.assetStatLabel}>主推进模式</span>
+          <span className={css.assetStatValue}>{assets.primaryProgression?.name ?? '未设置'}</span>
+          {assets.primaryProgression !== undefined && <span className={css.assetStatDetail} title={assets.primaryProgression.driver}>{assets.primaryProgression.driver}</span>}
+        </div>
+        <div className={css.assetStat}>
+          <span className={css.assetStatLabel}>已绑定写法</span>
+          <span className={css.assetStatValue}>{assets.styleAssets?.length ?? 0} 套</span>
+          <span className={css.assetStatDetail} title={(assets.styleAssets ?? []).map(s => s.name).join('、')}>
+            {(assets.styleAssets ?? []).map(s => s.name).join('、') || '未绑定（可在「预置写法」一键选用）'}
+          </span>
+        </div>
+        <div className={css.assetStat}>
+          <span className={css.assetStatLabel}>反 AI 规则</span>
+          <span className={css.assetStatValue}>{builtinRules.length} 内置 + {(assets.antiAiRules ?? []).length} 自定义</span>
+          <span className={css.assetStatDetail}>全部生效于生成与审稿提示词</span>
+        </div>
+      </div>
+
       {/* 子页签栏 */}
       <div className={css.tabBar} role="tablist" style={{ padding: '0 0 8px', borderBottom: '1px solid var(--nf-border)' }}>
         {SUB_TABS.map(tab => (
@@ -192,7 +262,8 @@ export function AssetsTab({ api }: AssetsTabProps) {
               <b>当前题材：{assets.genre.name}</b> — {assets.genre.description}
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 340, overflowY: 'auto' }}>
+          {/* 题材基底库：自然展开，不套内部滚动条（描述两行截断，悬停看全文） */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {genreLibrary.map(root => <GenreTree key={root.name} node={root} selected={assets.genre?.name ?? ''} onSelect={handleSelectGenre} />)}
           </div>
         </div>
@@ -273,20 +344,64 @@ export function AssetsTab({ api }: AssetsTabProps) {
       {assetTab === 'rules' && (
         <div className={css.card}>
         <span className={css.cardTitle}>反 AI 规则</span>
-        <span className={css.meta}>写作时必须遵守的表达边界（内置全局 + 项目自定义），生成与审稿都会检查。</span>
+        <span className={css.meta}>写作时必须遵守的表达边界（内置全局 + 项目自定义），生成与审稿都会检查。内置规则可用「覆盖编辑」复制为自定义版本调整。</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
-          {builtinRules.map(rule => (
-            <div key={rule.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
-              <b>{rule.name}</b> <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)' }}>内置</span>
-              <div className={css.meta}>避免：{rule.avoid}</div>
-              <div className={css.meta}>修正：{rule.fix}</div>
-            </div>
-          ))}
-          {customRules.map(rule => (
-            <div key={rule.name} style={{ border: '1px solid var(--nf-accent)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
-              <b>{rule.name}</b> <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>自定义</span>
-              <div className={css.meta}>避免：{rule.avoid}</div>
-              {rule.fix !== '' && <div className={css.meta}>修正：{rule.fix}</div>}
+          {builtinRules.map(rule => {
+            const overridden = customRules.some(r => r.name === rule.name)
+            return (
+              <div key={rule.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <span>
+                    <b>{rule.name}</b>{' '}
+                    <span className={css.badge} style={{ borderColor: overridden ? 'var(--nf-accent)' : 'var(--nf-text-3)', color: overridden ? 'var(--nf-accent)' : 'var(--nf-text-3)' }}>
+                      {overridden ? '自定义覆盖中' : '内置'}
+                    </span>
+                  </span>
+                  <button className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { handleOverrideBuiltin(rule) }}>
+                    {overridden ? '✎ 编辑覆盖' : '＋ 覆盖编辑'}
+                  </button>
+                </div>
+                <div className={css.meta}>避免：{rule.avoid}</div>
+                <div className={css.meta}>修正：{rule.fix}</div>
+              </div>
+            )
+          })}
+          {customRules.map((rule, index) => (
+            <div key={`${rule.name}-${index}`} style={{ border: '1px solid var(--nf-accent)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span>
+                  <b>{rule.name}</b>{' '}
+                  <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>自定义</span>
+                </span>
+                <span style={{ display: 'flex', gap: 6 }}>
+                  <button className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setEditingRule({ index, name: rule.name, avoid: rule.avoid, fix: rule.fix ?? '' }) }}>
+                    编辑
+                  </button>
+                  <button className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleRemoveRule(index) }}>
+                    删除
+                  </button>
+                </span>
+              </div>
+              {editingRule !== null && editingRule.index === index ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                  <input className={css.input} placeholder="规则名" value={editingRule.name} onChange={e => { setEditingRule({ ...editingRule, name: e.target.value }) }} />
+                  <input className={css.input} placeholder="避免（要杜绝的表达）" value={editingRule.avoid} onChange={e => { setEditingRule({ ...editingRule, avoid: e.target.value }) }} />
+                  <input className={css.input} placeholder="修正（改写方向，可留空）" value={editingRule.fix} onChange={e => { setEditingRule({ ...editingRule, fix: e.target.value }) }} />
+                  <div className={css.row}>
+                    <button className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || (editingRule.avoid.trim() === '' && editingRule.fix.trim() === '')} onClick={() => { void handleSaveRuleEdit() }}>
+                      保存
+                    </button>
+                    <button className={`${css.button} ${css.buttonSmall}`} onClick={() => { setEditingRule(null) }}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className={css.meta}>避免：{rule.avoid}</div>
+                  {rule.fix !== '' && <div className={css.meta}>修正：{rule.fix}</div>}
+                </>
+              )}
             </div>
           ))}
         </div>

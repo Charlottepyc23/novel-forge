@@ -17,6 +17,8 @@ export declare function activeBook(store: BookshelfStore): BookEntry | undefined
 export declare function bookshelfSnapshot(store: BookshelfStore): BookshelfSnapshot;
 /** 新建一本书（自动成为当前书）。 */
 export declare function createBook(bookName: string, outputDir: string): BookEntry;
+/** 更新某本书的书名（开书向导导入大纲后书名以大纲首行为准）。 */
+export declare function renameBook(id: string, bookName: string): boolean;
 /**
  * 播种：书架为空时，把指定输出目录下已有的项目自动登记为第一本书。
  * 兼容升级场景 —— 旧版插件直接在输出目录写项目，从未登记书架。

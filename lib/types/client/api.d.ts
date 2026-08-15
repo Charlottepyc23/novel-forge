@@ -34,8 +34,28 @@ export declare class NovelApi {
     openFolder(): Promise<void>;
     /** 书架快照。 */
     bookshelf(): Promise<import('../protocol.ts').BookshelfSnapshot>;
-    /** 新建书并激活。 */
-    bookCreate(bookName: string, outputDir?: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
+    /** 新建书并激活（开书向导：可携带大纲文本，创建即建项目）。 */
+    bookCreate(bookName: string, outputDir?: string, outline?: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
+    /** 重置项目（清空进度；可携带新大纲）。 */
+    reset(outline?: string): Promise<{
+        ok: boolean;
+        bookName: string;
+    }>;
+    /** 全书一致性质检。 */
+    audit(): Promise<import('../protocol.ts').AuditResponse>;
+    /** 角色卡刷新（基于事实库聚合）。 */
+    charactersRefresh(): Promise<{
+        cards: import('../protocol.ts').RoleStatusCard[];
+    }>;
+    /** 事实库回填：对历史已生成章节批量抽取事实。 */
+    factsBackfill(): Promise<{
+        ok: boolean;
+        filled: number;
+    }>;
+    /** 设定圣经局部修补。 */
+    biblePatch(patch: import('../protocol.ts').BiblePatchRequest): Promise<{
+        bible: import('../protocol.ts').StoryBible;
+    }>;
     /** 切换当前书。 */
     bookActivate(id: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
     /** 移除书架条目。 */
@@ -61,6 +81,16 @@ export declare class NovelApi {
     rewrite(chapterNo: number, instructions: string, target: string, onFrame: (frame: JobFrame) => void): Promise<void>;
     /** Polish (de-AI-ify) one chapter. */
     polish(chapterNo: number, onFrame: (frame: JobFrame) => void): Promise<void>;
+    /** 采纳待确认草稿（润色/重写产物），覆盖正文文件。 */
+    draftApply(chapterNo: number): Promise<{
+        ok: boolean;
+        chars: number;
+        file: string;
+    }>;
+    /** 放弃待确认草稿，保留原稿。 */
+    draftDiscard(chapterNo: number): Promise<{
+        ok: boolean;
+    }>;
     /** Run one assistant turn (NDJSON stream). */
     assistant(message: string, onFrame: (frame: import('../protocol.ts').AssistantFrame) => void): Promise<void>;
     /** Load the persisted assistant conversation. */

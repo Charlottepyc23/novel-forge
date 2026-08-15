@@ -10,4 +10,4 @@
 # served at /plugins/<id>/client.js) load in the web GUI.
 - insert:
     - id: novel-forge
-      name: '@ryan/dsh-novel-forge'
+      name: '@waterwx/dsh-novel-forge'

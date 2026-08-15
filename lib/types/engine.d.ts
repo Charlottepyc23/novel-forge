@@ -6,7 +6,7 @@
  * web-server dependencies), so routes stay thin and logic is testable.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { ChapterPlan, Foreshadow, NovelConfig, ProjectState, ReviewReport, StoryBible, Volume } from './protocol.ts';
+import type { AuditIssue, ChapterPlan, Foreshadow, NovelConfig, ProjectState, ReviewReport, RoleStatusCard, StoryBible, Volume } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -47,20 +47,21 @@ export declare function rewriteChapterStream(ctx: Context, config: NovelConfig, 
     frame: 'delta';
     text: string;
 } | {
-    frame: 'done';
-    file: string;
+    frame: 'drafted';
     chars: number;
+    draft: string;
 }, void, unknown>;
-/** Stream a chapter polish (de-AI-ify). */
+/** Stream a chapter polish (de-AI-ify). Draft-mode: the polished body lands
+ *  in `chapter.pendingDraft` and is only applied on draft/apply. */
 export declare function polishChapterStream(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): AsyncGenerator<{
     frame: 'start';
 } | {
     frame: 'delta';
     text: string;
 } | {
-    frame: 'done';
-    file: string;
+    frame: 'drafted';
     chars: number;
+    draft: string;
 }, void, unknown>;
 /** Generate one chapter (streaming). Yields progress frames; persists when done. */
 export declare function generateChapterStream(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): AsyncGenerator<{
@@ -75,6 +76,24 @@ export declare function generateChapterStream(ctx: Context, config: NovelConfig,
 }, void, unknown>;
 /** Generate a chapter summary (narrative memory). */
 export declare function summarizeChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<string>;
+/**
+ * 抽取本章「已确立事实」追加到事实库/时间线（最多 300 条，最新优先）。
+ * 事实注入后续章节生成提示词，保证人物状态/境界/资源/关系长期一致。
+ * @returns 新增事实条数（失败返回 0，调用方 best-effort）。
+ */
+export declare function extractFacts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<number>;
+/** 全书一致性质检：LLM 扫描已生成章节 + 设定 + 事实库，输出矛盾清单。 */
+export declare function auditBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string): Promise<AuditIssue[]>;
+/**
+ * 事实库回填：对历史已生成章节批量抽取事实（无事实记录的旧章节）。
+ * @returns 回填的章节数。
+ */
+export declare function backfillFacts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string): Promise<number>;
+/**
+ * 角色卡刷新：出场统计由服务端从正文精确计算（角色名出现过的章节数、
+ * 最近出现章节），LLM 只负责聚合「当前状态」一句话。
+ */
+export declare function refreshCharacters(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string): Promise<RoleStatusCard[]>;
 /** Suggest foreshadows from the outline + plan. */
 export declare function suggestForeshadows(ctx: Context, config: NovelConfig, project: ProjectState): Promise<Foreshadow[]>;
 /**

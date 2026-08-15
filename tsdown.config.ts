@@ -16,7 +16,7 @@ import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
 /** Plugin id (package name) stamped into the module-loader handoff. */
-const PLUGIN_ID = '@ryan/dsh-novel-forge'
+const PLUGIN_ID = '@waterwx/dsh-novel-forge'
 
 /** CSS virtual-module wrapping (keeps CSS out of tsdown's own css pipeline). */
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
