@@ -25,6 +25,9 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **全书一致性质检**：LLM 扫描全本，输出矛盾清单（定位到章），一键去修订 | **Book audit**: LLM scans all chapters for contradictions, locates them, one-click to revise |
 | **角色卡**：出场统计精确计算 + LLM 聚合当前状态，历史章节可回填事实库 | **Character cards**: precise appearance stats + LLM-aggregated status; backfill for old chapters |
 | **润色/修订工作区**：左栏原文（选中即局部修订）+ 右栏指令/预览/应用，草稿制不覆盖原稿，自动备份 .bak | **Revision workspace**: editable original + selection-targeted local edits, draft-apply flow with auto-backup |
+| **章节编辑独立页**：点「编辑」进入独占整页（左导航保留），原文｜对比左右各半、原稿新稿并排高亮，默认即对比模式 | **Full-page chapter editor**: opening a chapter takes over the content pane; original vs draft side by side with highlighted changes, diff view by default |
+| **审稿问题勾选修复**：审查报告每条问题可勾选，一键按所选问题修订（默认勾 high） | **Selective review fixes**: check any review issues (high pre-checked) and fix them in one click |
+| **编辑器字号可调**：设置页 12-24px + 编辑页 A−/A＋ 快捷调整（localStorage 记忆） | **Adjustable editor font size**: 12-24px in settings plus A−/A＋ in the editor toolbar (localStorage) |
 | **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆；「编辑老师」全量知情 + 影响分析 + 步骤卡片 + 思考计时 + 清空聊天 | **Floating AI assistant**: draggable, resizable, position remembered; full-context "editor" persona with impact analysis and live step cards |
 | **分组导航 + 状态角标**：创作/工具/数据库分组，章节待办/伏笔/进度角标 | **Grouped nav + badges**: creation/tools/database groups with live badges |
 | **iOS 风格毛玻璃 UI**（浅色/深色） | **iOS-style frosted glass UI** (light/dark) |
@@ -164,6 +167,13 @@ and mount it any time.
 - **Revision workspace**: editable original on the left (select text for
   targeted local edits), instruction + preview + apply/cancel on the right;
   drafts never overwrite until applied, and applying auto-backs-up the original
+- **Full-page chapter editor**: clicking "Edit" takes over the content pane
+  (left nav stays); original vs draft side by side 1:1 with highlighted
+  changes, diff view on by default
+- **Selective review fixes**: every review issue gets a checkbox (high issues
+  pre-checked) and one click fixes exactly the checked ones
+- **Adjustable editor font size**: 12-24px in settings plus A−/A＋ shortcuts in
+  the editor toolbar, remembered in localStorage
 - **Floating AI assistant**: draggable, resizable, position-remembered dialog
   with a full-context "editor" persona, impact analysis, live step cards and
   conversation clearing

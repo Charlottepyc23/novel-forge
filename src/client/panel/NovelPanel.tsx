@@ -219,7 +219,7 @@ function renderBeats(beats: string): ReactElement {
 }
 
 /** The diff list of a draft-vs-original comparison (scrollable). */
-function DiffList({ original, draft }: { original: string; draft: string }): ReactElement {  const rows = useMemo(() => paragraphDiff(original, draft), [original, draft])
+function DiffList({ original, draft, fontSize }: { original: string; draft: string; fontSize?: number }): ReactElement {  const rows = useMemo(() => paragraphDiff(original, draft), [original, draft])
   const changed = rows.filter(r => r.kind === 'change').length
   const added = rows.filter(r => r.kind === 'add').length
   const removed = rows.filter(r => r.kind === 'del').length
@@ -242,7 +242,7 @@ function DiffList({ original, draft }: { original: string; draft: string }): Rea
           只看改动
         </label>
       </div>
-      <div className={css.diffList}>
+      <div className={css.diffList} style={fontSize !== undefined ? { fontSize } : undefined}>
         {shown.map((row, idx) => {
           if (row.kind === 'same') {
             return (
@@ -333,6 +333,20 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const wsEditorRef = useRef<HTMLTextAreaElement | null>(null)
   /** 工作区：手动编辑后的 AI 审查结果（不落盘）。 */
   const [wsCheckReport, setWsCheckReport] = useState<ReviewReport | null>(null)
+  /** 手动审查结果中作者勾选要修复的问题（issue 下标）。 */
+  const [wsChecked, setWsChecked] = useState<number[]>([])
+  /** 编辑页字号（localStorage 记忆，仅影响显示）。 */
+  const [editorFontSize, setEditorFontSize] = useState<number>(() => {
+    try {
+      const v = Number(window.localStorage.getItem('dsh-novel-forge.editor.fontSize'))
+      return v >= 12 && v <= 24 ? v : 14
+    } catch { return 14 }
+  })
+  const changeEditorFontSize = (next: number): void => {
+    const v = Math.min(24, Math.max(12, next))
+    setEditorFontSize(v)
+    try { window.localStorage.setItem('dsh-novel-forge.editor.fontSize', String(v)) } catch { /* ignore */ }
+  }
   /** 有未采纳草稿的章节号（refresh 后检测到遗留草稿时提示）。 */
   const [draftNo, setDraftNo] = useState<number | null>(null)
   /** 大纲页「更新大纲」编辑区是否展开。 */
@@ -776,6 +790,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     try {
       const result = await api.chapterCheck(workspace.no, workspace.original)
       setWsCheckReport(result.report)
+      // 默认勾选 high 问题（无 high 则勾选全部 medium），作者可自行增删。
+      const highIdx = result.report.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'high').map(x => x.i)
+      const mediumIdx = result.report.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'medium').map(x => x.i)
+      setWsChecked(highIdx.length > 0 ? highIdx : mediumIdx)
       pushProgress(`审查完成：${result.report.score} 分 — ${result.report.verdict}`, result.report.passed ? 'done' : 'error')
     } catch (err) {
       setError((err as Error).message)
@@ -801,6 +819,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       setWorkspace(null)
       setDraftNo(null)
       setWsCheckReport(null)
+      setWsChecked([])
       if (report !== undefined) {
         pushProgress(`已保存并审稿：${report.score} 分 — ${report.verdict}（${report.passed ? '通过' : '未通过'}）`, report.passed ? 'done' : 'error')
       } else {
@@ -947,7 +966,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         draft: chapter.pendingDraft !== undefined && chapter.pendingDraft !== '' ? chapter.pendingDraft : null,
       })
       setWsSelected('')
-      setWsShowDiff(false)
+      setWsShowDiff(true)
+      setWsCheckReport(null)
+      setWsChecked([])
     } catch { /* best-effort */ }
   }, [api])
 
@@ -980,14 +1001,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   }
 
   /** 工作区：按指令修订（whole=true 整章，false 仅修订选中片段）。 */
-  const handleWsRewrite = async (whole: boolean): Promise<void> => {
+  const handleWsRewrite = async (whole: boolean, overrideInstruction?: string): Promise<void> => {
     if (workspace === null) return
     const target = whole ? '' : wsSelected
+    const instruction = overrideInstruction ?? workspace.instruction
     setBusy(true)
     setBusyLabel(`${tt('plan.rewrite')} 第${workspace.no}章`)
     setError('')
     try {
-      await api.rewrite(workspace.no, workspace.instruction, target, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
+      await api.rewrite(workspace.no, instruction, target, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
     } catch (err) {
       setError((err as Error).message)
       pushProgress(`第 ${workspace.no} 章修订失败：${(err as Error).message}`, 'error')
@@ -996,6 +1018,19 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       setBusyLabel('')
       await refresh(false)
     }
+  }
+
+  /** 工作区：按审查报告中勾选的问题一键修订（预填指令 + 立即整章修订到草稿）。 */
+  const handleWsReviseByReport = async (): Promise<void> => {
+    if (workspace === null || wsCheckReport === null) return
+    const picked = wsChecked
+      .map(i => wsCheckReport.issues[i])
+      .filter((it): it is ReviewReport['issues'][number] => it !== undefined)
+      .slice(0, 5)
+    if (picked.length === 0) return
+    const instruction = '按审稿意见修订（优先处理）：\n' + picked.map(i => `[${i.severity}] ${i.item} → ${i.suggestion}`).join('\n')
+    setWorkspace({ ...workspace, instruction })
+    await handleWsRewrite(true, instruction)
   }
 
   /** 采纳草稿：覆盖正文文件并刷新。 */
@@ -1665,12 +1700,21 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
-        {/* 润色/修订工作区：左栏原文（可选中局部目标）+ 右栏指令/预览/应用 */}
+        {/* 章节编辑页（独占整页：点「编辑」进入，返回后回到原页面） */}
         {workspace !== null && (
           <div className={css.card} style={{ borderColor: 'var(--nf-accent)' }}>
-            <div className={css.busyRow}>
-              <span className={css.cardTitle}>第 {workspace.no} 章《{workspace.title}》润色/修订</span>
-              <button type="button" className={css.iconButton} title="关闭工作区" aria-label="关闭工作区" onClick={() => { setWorkspace(null) }}>×</button>
+            <div className={css.busyRow} style={{ flexWrap: 'wrap', gap: 8 }}>
+              <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorkspace(null) }} title="返回章节列表（草稿不丢失）">
+                ← 返回
+              </button>
+              <span className={css.cardTitle}>第 {workspace.no} 章《{workspace.title}》</span>
+              <span className={css.meta}>{workspace.original.length} 字</span>
+              <span style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+                <button type="button" className={css.iconButton} title="减小字号" aria-label="减小字号" onClick={() => { changeEditorFontSize(editorFontSize - 1) }}>A−</button>
+                <span className={css.meta}>{editorFontSize}px</span>
+                <button type="button" className={css.iconButton} title="增大字号" aria-label="增大字号" onClick={() => { changeEditorFontSize(editorFontSize + 1) }}>A＋</button>
+                <button type="button" className={css.iconButton} title="关闭工作区" aria-label="关闭工作区" onClick={() => { setWorkspace(null) }}>×</button>
+              </span>
             </div>
             <div className={css.wsColumns}>
               <div className={css.wsColumn}>
@@ -1680,6 +1724,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <textarea
                   ref={wsEditorRef}
                   className={`${css.textarea} ${css.wsEditor}`}
+                  style={{ fontSize: editorFontSize }}
                   value={workspace.original}
                   onChange={e => { setWorkspace({ ...workspace, original: e.target.value }) }}
                   onMouseUp={captureWsSelection}
@@ -1706,7 +1751,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <div className={css.meta}>未选中内容时仅支持整章润色/修订。</div>
                 )}
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
-                  {workspace.instruction.startsWith('按审稿意见修订') && (
+                  {workspace.instruction.includes('按审稿意见修订') && (
                     <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleWsRewrite(true) }} title="AI 按已预填的审稿意见自动修订整章（无需自己找问题）">
                       🔧 按意见修订
                     </button>
@@ -1738,16 +1783,40 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                     </div>
                     <div className={css.meta}><b>总评：</b>{wsCheckReport.verdict}</div>
                     {wsCheckReport.issues.length > 0 && (
-                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 3, fontSize: editorFontSize - 1, maxHeight: '45vh', overflowY: 'auto' }}>
                         {wsCheckReport.issues.map((issue, i) => (
-                          <li key={i} style={{ color: severityColor(issue.severity) }}>
-                            [{issue.severity}] {issue.item}
-                            {issue.suggestion !== '' && <span style={{ color: 'var(--nf-text-2)' }}> → {issue.suggestion}</span>}
+                          <li key={i} style={{ color: severityColor(issue.severity), display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                            <input
+                              type="checkbox"
+                              style={{ marginTop: 1 }}
+                              checked={wsChecked.includes(i)}
+                              onChange={e => {
+                                setWsChecked(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i))
+                              }}
+                              title="勾选后可由「修复所选问题」一起修订"
+                            />
+                            <span>
+                              [{issue.severity}] {issue.item}
+                              {issue.suggestion !== '' && <span style={{ color: 'var(--nf-text-2)' }}> → {issue.suggestion}</span>}
+                            </span>
                           </li>
                         ))}
                       </ul>
                     )}
-                    <span className={css.meta}>审查只读不落盘；改完点「💾 保存为正文」才写入文件（原稿自动备份 .bak）。</span>
+                    <span className={css.meta}>审查只读不落盘；勾选要修的问题，点下方按钮一键修订；改完点「💾 保存为正文」才写入文件（原稿自动备份 .bak）。</span>
+                    {wsCheckReport.issues.length > 0 && wsChecked.length > 0 && (
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                          disabled={busy}
+                          onClick={() => { void handleWsReviseByReport() }}
+                          title="自动按勾选的问题修订整章，产出草稿预览（不落盘），对比后应用或放弃"
+                        >
+                          🔧 修复所选问题（{wsChecked.length}）
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
                 {workspace.draft !== null && (
@@ -1767,8 +1836,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       </span>
                     </div>
                     {wsShowDiff
-                      ? <DiffList original={workspace.original} draft={workspace.draft} />
-                      : <pre className={css.wsPreviewText}>{workspace.draft}</pre>}
+                      ? <DiffList original={workspace.original} draft={workspace.draft} fontSize={editorFontSize} />
+                      : <pre className={css.wsPreviewText} style={{ fontSize: editorFontSize }}>{workspace.draft}</pre>}
                   </div>
                 )}
               </div>
@@ -1776,6 +1845,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
+        {/* 编辑页打开时独占整页：隐藏其余所有页面内容 */}
+        {workspace === null && (<>
         {activeTab === 'workflow' && (
           <>
             {/* ⭐ 主行动大卡片 */}
@@ -2589,6 +2660,19 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <input className={css.input} type="number" min={0} max={100} value={configDraft.reviewPassScore} onChange={e => { setConfigDraft({ ...configDraft, reviewPassScore: Number(e.target.value) }) }} />
               </div>
               <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>{tt('settings.editorFontSize')}</label>
+                <select
+                  className={css.input}
+                  value={editorFontSize}
+                  onChange={e => { changeEditorFontSize(Number(e.target.value)) }}
+                >
+                  {[12, 13, 14, 15, 16, 18, 20, 22, 24].map(v => (
+                    <option key={v} value={v}>{v}px</option>
+                  ))}
+                </select>
+                <span className={css.meta}>{tt('settings.editorFontSizeHint')}</span>
+              </div>
+              <div className={css.field} style={{ flex: 1 }}>
                 <label className={css.fieldLabel}>{tt('settings.autoReview')}</label>
                 <select
                   className={css.input}
@@ -2639,6 +2723,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
           </div>
         )}
+        </>)}
         </div>
       </div>
       </>
