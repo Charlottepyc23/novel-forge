@@ -27,8 +27,14 @@ export const NOVEL_API = {
   foreshadow: '/api/dsh-novel-forge/foreshadow',
   exportBook: '/api/dsh-novel-forge/export',
   chapter: '/api/dsh-novel-forge/chapter',
+  /** 审查任意正文文本（作者手动编辑后，不落盘）。 */
+  chapterCheck: '/api/dsh-novel-forge/chapter/check',
+  /** 保存手动编辑的正文（自动备份 .bak）。 */
+  chapterSave: '/api/dsh-novel-forge/chapter/save',
   assistant: '/api/dsh-novel-forge/assistant',
   assistantHistory: '/api/dsh-novel-forge/assistant-history',
+  /** 清空助手对话记录。 */
+  assistantClear: '/api/dsh-novel-forge/assistant/clear',
   bookshelf: '/api/dsh-novel-forge/bookshelf',
   /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
   reset: '/api/dsh-novel-forge/reset',
@@ -40,6 +46,14 @@ export const NOVEL_API = {
   factsBackfill: '/api/dsh-novel-forge/facts/backfill',
   /** 设定圣经局部修补（如世界观规则编辑）。 */
   biblePatch: '/api/dsh-novel-forge/bible/patch',
+  /** 小说简介：生成（AI）/补全（AI）/保存。 */
+  blurb: '/api/dsh-novel-forge/blurb',
+  /** 重命名当前书（同步项目与书架条目）。 */
+  rename: '/api/dsh-novel-forge/rename',
+  /** 大世界：AI 提炼 / 保存结构化数据（境界/区域/势力）。 */
+  world: '/api/dsh-novel-forge/world',
+  /** 封面：GET 读取（dataUrl）/ POST 上传或移除。 */
+  cover: '/api/dsh-novel-forge/blurb/cover',
   config: '/api/dsh-novel-forge/config',
   openFolder: '/api/dsh-novel-forge/open-folder',
 } as const
@@ -60,7 +74,7 @@ export interface BookEntry {
 
 /** 书架快照（含每本书的进度摘要）。 */
 export interface BookshelfSnapshot {
-  books: Array<BookEntry & { done: number; total: number; hasProject: boolean }>
+  books: Array<BookEntry & { done: number; total: number; hasProject: boolean; hasCover: boolean; blurb?: string }>
   /** 当前激活的书 id（无则 null）。 */
   activeBookId: string | null
 }
@@ -260,6 +274,90 @@ export interface BiblePatchRequest {
   style?: string[]
 }
 
+/** POST /blurb 请求：AI 生成/补全或手动保存小说简介。 */
+export interface BlurbRequest {
+  action: 'generate' | 'save'
+  /** 已写好的开头（AI 补全时使用；留空 = 全量生成）。 */
+  partial?: string
+  /** 手动保存的完整简介（action=save 时）。 */
+  text?: string
+}
+
+/** POST /chapter/check|save 请求：审查/保存手动编辑的正文。 */
+export interface ChapterTextRequest {
+  chapterNo: number
+  /** 当前编辑中的正文全文。 */
+  text: string
+  /** 保存时携带：已在工作区审查过的报告（沿用落盘，不重复审）；缺省则保存后自动正式审稿一次。 */
+  report?: ReviewReport
+}
+
+/** POST /chapter/save 响应。 */
+export interface ChapterSaveResponse {
+  ok: boolean
+  chars: number
+  file: string
+  /** 落盘的审稿报告（沿用工作区报告或保存后自动审稿）。 */
+  report?: ReviewReport
+}
+
+/** POST /cover 请求：上传或移除封面。 */
+export interface CoverRequest {
+  action: 'upload' | 'remove'
+  /** 上传时：data:image/...;base64,... 格式的图片数据。 */
+  dataUrl?: string
+}
+
+/** POST /rename 请求：重命名当前书。 */
+export interface RenameRequest {
+  bookName: string
+}
+
+/** 大世界：一个境界等级。 */
+export interface WorldRealm {
+  /** 境界名（练气/筑基/金丹…）。 */
+  name: string
+  /** 描述：突破条件/寿命/标志等。 */
+  description: string
+}
+
+/** 大世界：一个地理区域。 */
+export interface WorldRegion {
+  name: string
+  description: string
+  /** 关联势力名（可空）。 */
+  faction?: string
+}
+
+/** 大世界：一方势力。 */
+export interface WorldFaction {
+  name: string
+  /** 类型：宗门/家族/王朝/组织… */
+  kind: string
+  description: string
+  /** 驻地区域（可空）。 */
+  region?: string
+}
+
+/** 大世界结构化数据。 */
+export interface WorldState {
+  realms: WorldRealm[]
+  regions: WorldRegion[]
+  factions: WorldFaction[]
+}
+
+/** POST /world 请求：AI 提炼或手动保存。 */
+export interface WorldRequest {
+  action: 'generate' | 'save'
+  /** action=save 时的完整世界数据。 */
+  world?: WorldState
+}
+
+/** GET /cover 响应：封面的 dataUrl（无封面为 null）。 */
+export interface CoverResponse {
+  dataUrl: string | null
+}
+
 /** The persisted project: outline + bible + plan + progress. */
 export interface ProjectState {
   /** Book title (first non-empty line of the outline, usually). */
@@ -280,6 +378,12 @@ export interface ProjectState {
   assets?: ProjectAssets
   /** 事实库/时间线：每章生成后抽取，注入后续章节保持一致性。 */
   facts?: ChapterFact[]
+  /** 小说简介（面向读者的作品门面，AI 生成或手动保存）。 */
+  blurb?: string
+  /** 封面文件名（相对输出目录，如 cover.png）。 */
+  coverPath?: string
+  /** 大世界结构化数据（境界体系/区域/势力）。 */
+  world?: WorldState
   /** ISO timestamps. */
   createdAt: string
   updatedAt: string

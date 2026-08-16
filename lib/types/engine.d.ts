@@ -6,7 +6,7 @@
  * web-server dependencies), so routes stay thin and logic is testable.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, ChapterPlan, Foreshadow, NovelConfig, ProjectState, ReviewReport, RoleStatusCard, StoryBible, Volume } from './protocol.ts';
+import type { AuditIssue, ChapterPlan, Foreshadow, NovelConfig, ProjectState, ReviewReport, RoleStatusCard, StoryBible, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -35,6 +35,11 @@ export declare function planVolumes(ctx: Context, config: NovelConfig, outline: 
 export declare function planChapters(ctx: Context, config: NovelConfig, project: ProjectState, chapterCount: number, volumeNo?: number): Promise<ChapterPlan[]>;
 /** Run the AI review on one chapter. */
 export declare function reviewChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<ReviewReport>;
+/**
+ * 审查「任意正文文本」（作者手动编辑后的草稿，不落盘）。
+ * 复用审稿提示词与红线/道藏/反AI规则；仅返回报告，不改文件不改状态。
+ */
+export declare function reviewChapterText(ctx: Context, config: NovelConfig, project: ProjectState, text: string): Promise<ReviewReport>;
 /**
  * Stream a chapter rewrite. With `target` (a passage of the body), only that
  * passage's paragraph is rewritten and spliced back — everything else stays
@@ -77,13 +82,50 @@ export declare function generateChapterStream(ctx: Context, config: NovelConfig,
 /** Generate a chapter summary (narrative memory). */
 export declare function summarizeChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<string>;
 /**
+ * 摘要 + 事实抽取合并为一次 LLM 调用（省一次调用与一次正文输入，
+ * 批量生成时整体开销约省 25%）。
+ * @returns 摘要与新增事实条数（失败返回空，调用方 best-effort）。
+ */
+export declare function summarizeAndExtractFacts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<{
+    summary: string;
+    factCount: number;
+}>;
+/**
  * 抽取本章「已确立事实」追加到事实库/时间线（最多 300 条，最新优先）。
  * 事实注入后续章节生成提示词，保证人物状态/境界/资源/关系长期一致。
  * @returns 新增事实条数（失败返回 0，调用方 best-effort）。
  */
 export declare function extractFacts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<number>;
-/** 全书一致性质检：LLM 扫描已生成章节 + 设定 + 事实库，输出矛盾清单。 */
+/** 全书一致性质检：LLM 分批扫描已生成章节 + 设定 + 事实库，聚合矛盾清单。 */
 export declare function auditBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string): Promise<AuditIssue[]>;
+/** 小说简介：AI 生成或按已写开头补全（面向读者的作品门面）。 */
+export declare function generateBlurb(ctx: Context, config: NovelConfig, project: ProjectState, partial?: string): Promise<string>;
+/**
+ * 组装全书上下文包（AI 助手 book_overview 工具）。
+ * 分片策略：章节要点默认只给最近 30 章（避免超长后爆上下文）；
+ * scope='full' 全量；scope=数字 只给该卷章节。
+ */
+export declare function bookOverview(project: ProjectState, scope?: 'recent' | 'full' | number): string;
+/** 一条影响分析结果（改动波及处）。 */
+export interface ImpactItem {
+    /** 位置：章节号 / 大纲 / 设定圣经 / 大世界 / 事实库 / 简介。 */
+    location: string;
+    /** 原文片段（定位用）。 */
+    quote: string;
+    /** 修改建议。 */
+    suggestion: string;
+    /** must = 必须同步改；optional = 建议改；note = 备注（如保留旧称作古称）。 */
+    kind: 'must' | 'optional' | 'note';
+}
+/**
+ * 影响分析：LLM 扫描全书（大纲/设定/大世界/事实库/已写章节），
+ * 定位一次改动波及的所有位置。助手在修改后主动调用，做连锁维护。
+ */
+export declare function analyzeImpact(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, change: string): Promise<ImpactItem[]>;
+/** 把大世界结构化数据渲染成提示词块（境界体系按顺序强约束）。 */
+export declare function renderWorld(world: WorldState | undefined): string;
+/** AI 提炼大世界：从大纲 + 设定圣经生成结构化境界体系/区域/势力。 */
+export declare function extractWorld(ctx: Context, config: NovelConfig, project: ProjectState): Promise<WorldState>;
 /**
  * 事实库回填：对历史已生成章节批量抽取事实（无事实记录的旧章节）。
  * @returns 回填的章节数。

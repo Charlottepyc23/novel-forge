@@ -19,6 +19,8 @@ import { chapterFileName } from './engine.ts';
 export declare const ASSISTANT_HISTORY_FILE = "novel-assistant.jsonl";
 /** Load the persisted conversation (empty when none). */
 export declare function loadAssistantHistory(outputDir: string): AssistantMessage[];
+/** 清空助手对话记录（删除历史文件）。 */
+export declare function clearAssistantHistory(outputDir: string): void;
 /** Execute one action directive. Returns a text result (or throws). */
 /**
  * Execute one action directive as an async generator: yields live progress

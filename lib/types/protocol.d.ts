@@ -26,8 +26,14 @@ export declare const NOVEL_API: {
     readonly foreshadow: "/api/dsh-novel-forge/foreshadow";
     readonly exportBook: "/api/dsh-novel-forge/export";
     readonly chapter: "/api/dsh-novel-forge/chapter";
+    /** 审查任意正文文本（作者手动编辑后，不落盘）。 */
+    readonly chapterCheck: "/api/dsh-novel-forge/chapter/check";
+    /** 保存手动编辑的正文（自动备份 .bak）。 */
+    readonly chapterSave: "/api/dsh-novel-forge/chapter/save";
     readonly assistant: "/api/dsh-novel-forge/assistant";
     readonly assistantHistory: "/api/dsh-novel-forge/assistant-history";
+    /** 清空助手对话记录。 */
+    readonly assistantClear: "/api/dsh-novel-forge/assistant/clear";
     readonly bookshelf: "/api/dsh-novel-forge/bookshelf";
     /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
     readonly reset: "/api/dsh-novel-forge/reset";
@@ -39,6 +45,14 @@ export declare const NOVEL_API: {
     readonly factsBackfill: "/api/dsh-novel-forge/facts/backfill";
     /** 设定圣经局部修补（如世界观规则编辑）。 */
     readonly biblePatch: "/api/dsh-novel-forge/bible/patch";
+    /** 小说简介：生成（AI）/补全（AI）/保存。 */
+    readonly blurb: "/api/dsh-novel-forge/blurb";
+    /** 重命名当前书（同步项目与书架条目）。 */
+    readonly rename: "/api/dsh-novel-forge/rename";
+    /** 大世界：AI 提炼 / 保存结构化数据（境界/区域/势力）。 */
+    readonly world: "/api/dsh-novel-forge/world";
+    /** 封面：GET 读取（dataUrl）/ POST 上传或移除。 */
+    readonly cover: "/api/dsh-novel-forge/blurb/cover";
     readonly config: "/api/dsh-novel-forge/config";
     readonly openFolder: "/api/dsh-novel-forge/open-folder";
 };
@@ -61,6 +75,8 @@ export interface BookshelfSnapshot {
         done: number;
         total: number;
         hasProject: boolean;
+        hasCover: boolean;
+        blurb?: string;
     }>;
     /** 当前激活的书 id（无则 null）。 */
     activeBookId: string | null;
@@ -236,6 +252,79 @@ export interface BiblePatchRequest {
     redLines?: string[];
     style?: string[];
 }
+/** POST /blurb 请求：AI 生成/补全或手动保存小说简介。 */
+export interface BlurbRequest {
+    action: 'generate' | 'save';
+    /** 已写好的开头（AI 补全时使用；留空 = 全量生成）。 */
+    partial?: string;
+    /** 手动保存的完整简介（action=save 时）。 */
+    text?: string;
+}
+/** POST /chapter/check|save 请求：审查/保存手动编辑的正文。 */
+export interface ChapterTextRequest {
+    chapterNo: number;
+    /** 当前编辑中的正文全文。 */
+    text: string;
+    /** 保存时携带：已在工作区审查过的报告（沿用落盘，不重复审）；缺省则保存后自动正式审稿一次。 */
+    report?: ReviewReport;
+}
+/** POST /chapter/save 响应。 */
+export interface ChapterSaveResponse {
+    ok: boolean;
+    chars: number;
+    file: string;
+    /** 落盘的审稿报告（沿用工作区报告或保存后自动审稿）。 */
+    report?: ReviewReport;
+}
+/** POST /cover 请求：上传或移除封面。 */
+export interface CoverRequest {
+    action: 'upload' | 'remove';
+    /** 上传时：data:image/...;base64,... 格式的图片数据。 */
+    dataUrl?: string;
+}
+/** POST /rename 请求：重命名当前书。 */
+export interface RenameRequest {
+    bookName: string;
+}
+/** 大世界：一个境界等级。 */
+export interface WorldRealm {
+    /** 境界名（练气/筑基/金丹…）。 */
+    name: string;
+    /** 描述：突破条件/寿命/标志等。 */
+    description: string;
+}
+/** 大世界：一个地理区域。 */
+export interface WorldRegion {
+    name: string;
+    description: string;
+    /** 关联势力名（可空）。 */
+    faction?: string;
+}
+/** 大世界：一方势力。 */
+export interface WorldFaction {
+    name: string;
+    /** 类型：宗门/家族/王朝/组织… */
+    kind: string;
+    description: string;
+    /** 驻地区域（可空）。 */
+    region?: string;
+}
+/** 大世界结构化数据。 */
+export interface WorldState {
+    realms: WorldRealm[];
+    regions: WorldRegion[];
+    factions: WorldFaction[];
+}
+/** POST /world 请求：AI 提炼或手动保存。 */
+export interface WorldRequest {
+    action: 'generate' | 'save';
+    /** action=save 时的完整世界数据。 */
+    world?: WorldState;
+}
+/** GET /cover 响应：封面的 dataUrl（无封面为 null）。 */
+export interface CoverResponse {
+    dataUrl: string | null;
+}
 /** The persisted project: outline + bible + plan + progress. */
 export interface ProjectState {
     /** Book title (first non-empty line of the outline, usually). */
@@ -256,6 +345,12 @@ export interface ProjectState {
     assets?: ProjectAssets;
     /** 事实库/时间线：每章生成后抽取，注入后续章节保持一致性。 */
     facts?: ChapterFact[];
+    /** 小说简介（面向读者的作品门面，AI 生成或手动保存）。 */
+    blurb?: string;
+    /** 封面文件名（相对输出目录，如 cover.png）。 */
+    coverPath?: string;
+    /** 大世界结构化数据（境界体系/区域/势力）。 */
+    world?: WorldState;
     /** ISO timestamps. */
     createdAt: string;
     updatedAt: string;

@@ -21,11 +21,11 @@ export declare const BUILTIN_PROGRESSION_MODES: ProgressionMode[];
 export declare function emptyProjectAssets(): ProjectAssets;
 /** 合并项目资产与内置库：返回「生效的反 AI 规则」（内置全局 + 项目自定义）。 */
 export declare function effectiveAntiAiRules(assets: ProjectAssets | undefined): AntiAiRule[];
-/** 把生效规则渲染成提示词块。 */
+/** 把生效规则渲染成提示词块（压缩：avoid/fix 截断，省 token）。 */
 export declare function renderAntiAiRules(assets: ProjectAssets | undefined): string;
 /** 渲染题材与推进模式提示词块。 */
 export declare function renderGenreAndProgression(assets: ProjectAssets | undefined): string;
-/** 渲染写法资产提示词块。 */
+/** 渲染写法资产提示词块（规则去重，省 token）。 */
 export declare function renderStyleAssets(assets: ProjectAssets | undefined): string;
 /** 渲染全部写作资产提示词（供生成/规划/审稿注入）。 */
 export declare function renderAllAssets(assets: ProjectAssets | undefined): string;

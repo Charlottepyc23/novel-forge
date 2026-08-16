@@ -21,6 +21,7 @@ import type {
   RoleStatusCard,
   StoryBible,
   Volume,
+  WorldState,
 } from './protocol.ts'
 
 /** Project state file name inside the output dir. */
@@ -338,7 +339,7 @@ export async function extractBible(ctx: Context, config: NovelConfig, outline: s
     generatedAt: new Date().toISOString(),
   }
   if (bible.worldRules.length === 0 && bible.characters.length === 0 && bible.redLines.length === 0) {
-    throw new Error('设定圣经生成失败：模型没有返回有效内容')
+    throw new Error('道藏生成失败：模型没有返回有效内容')
   }
   return bible
 }
@@ -363,7 +364,7 @@ function volumeSystemPrompt(): string {
 /** Plan volumes from an outline. */
 export async function planVolumes(ctx: Context, config: NovelConfig, outline: string): Promise<Volume[]> {
   const user = `请为下面这部小说划分卷：\n\n${outline}`
-  const text = await complete(ctx, config, { system: volumeSystemPrompt(), user, temperature: 0.4 })
+  const text = await complete(ctx, config, { system: volumeSystemPrompt(), user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000) })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const volumes: Volume[] = []
   for (let i = 0; i < parsed.length; i++) {
@@ -437,8 +438,14 @@ function writeSystemPrompt(project: ProjectState): string {
     if (bible.redLines.length > 0) sections.push('写作红线（违反即失败）：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
     if (bible.style.length > 0) sections.push('风格要求：\n' + bible.style.map(r => `- ${r}`).join('\n'))
   }
+  const worldBlock = renderWorld(project.world)
+  if (worldBlock !== '') sections.push(worldBlock)
   sections.push('==================== 全书大纲 ====================')
-  sections.push(project.outline)
+  // 超长大纲截断保护（防止上下文超限）；完整大纲在总纲页查看。
+  const outlineBlock = project.outline.length > 6000
+    ? project.outline.slice(0, 6000) + '\n…（大纲过长已节选，完整内容见总纲页）'
+    : project.outline
+  sections.push(outlineBlock)
   sections.push('==================== 大纲结束 ====================')
   const assetsBlock = renderAllAssets(project.assets)
   if (assetsBlock !== '') sections.push(assetsBlock)
@@ -479,7 +486,7 @@ export async function planChapters(
     '',
     `请规划 ${chapterCount} 章。输出 JSON 数组（不要输出其他文字）：`,
   ].join('\n')
-  const text = await complete(ctx, config, { system: planSystemPrompt(project.volumes), user, temperature: 0.7 })
+  const text = await complete(ctx, config, { system: planSystemPrompt(project.volumes), user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 20000) })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const chapters: ChapterPlan[] = []
   const existing = new Set(project.chapters.map(c => c.no))
@@ -562,7 +569,7 @@ export async function reviewChapter(
     '==================== 章节正文 ====================',
     body.replace(/^#\s+.*$/m, '').trim(),
   ].join('\n')
-  const text = await complete(ctx, config, { system: reviewSystemPrompt(project), user, temperature: 0.3 })
+  const text = await complete(ctx, config, { system: reviewSystemPrompt(project), user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 16000) })
   const raw = parseJsonObject<{ score?: unknown; verdict?: unknown; issues?: unknown }>(text)
   const issues = Array.isArray(raw.issues)
     ? raw.issues
@@ -589,6 +596,46 @@ export async function reviewChapter(
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
   return report
+}
+
+/**
+ * 审查「任意正文文本」（作者手动编辑后的草稿，不落盘）。
+ * 复用审稿提示词与红线/道藏/反AI规则；仅返回报告，不改文件不改状态。
+ */
+export async function reviewChapterText(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  text: string,
+): Promise<ReviewReport> {
+  const user = [
+    `书名：《${project.bookName}》`,
+    '==================== 待审查正文 ====================',
+    text.slice(0, 20000),
+  ].join('\n')
+  const raw = parseJsonObject<{ score?: unknown; verdict?: unknown; issues?: unknown }>(
+    await complete(ctx, config, { system: reviewSystemPrompt(project), user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 8000) }),
+  )
+  const issues = Array.isArray(raw.issues)
+    ? raw.issues
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map(entry => ({
+          severity: (['high', 'medium', 'low'] as const).includes(entry.severity as never)
+            ? entry.severity as 'high' | 'medium' | 'low'
+            : 'medium',
+          item: typeof entry.item === 'string' ? entry.item : '',
+          suggestion: typeof entry.suggestion === 'string' ? entry.suggestion : '',
+        }))
+        .filter(issue => issue.item !== '')
+    : []
+  const score = typeof raw.score === 'number' ? Math.max(0, Math.min(100, Math.round(raw.score))) : 60
+  return {
+    score,
+    passed: score >= config.reviewPassScore,
+    verdict: typeof raw.verdict === 'string' ? raw.verdict.slice(0, 200) : '',
+    issues,
+    reviewedAt: new Date().toISOString(),
+  }
 }
 
 /** Build the rewrite system prompt (fix review issues / instructions). */
@@ -821,8 +868,23 @@ export async function* generateChapterStream(
     }
   }
   const prevSummary = prev?.summary
-  // 事实库注入：最近 20 条已确立事实，约束本章不与既定状态矛盾。
-  const recentFacts = (project.facts ?? []).slice(-20).map(f => f.text)
+  // 事实注入：最近 20 条 + 按本章剧情要点低成本检索的「相关旧事实」。
+  // 长篇后旧设定可能被挤出最近 20 条，相关检索保证关键状态不写飞。
+  const allFacts = project.facts ?? []
+  const recentFacts = allFacts.slice(-20).map(f => f.text)
+  const beatsText = chapter.beats
+  const relatedFacts = allFacts
+    .slice(-120)
+    .filter(f => {
+      const head = f.text.slice(0, 24)
+      for (let i = 0; i + 3 <= head.length; i++) {
+        const tri = head.slice(i, i + 3)
+        if (tri.trim() !== '' && beatsText.includes(tri)) return true
+      }
+      return false
+    })
+    .slice(-15)
+    .map(f => `[第${f.chapterNo}章] ${f.text}`)
 
   const user = [
     `现在写第 ${chapter.no} 章，标题《${chapter.title}》。`,
@@ -830,6 +892,9 @@ export async function* generateChapterStream(
     '',
     recentFacts.length > 0
       ? `本书已确立的事实（新写内容不得与之矛盾）：\n${recentFacts.join('\n')}`
+      : '',
+    relatedFacts.length > 0
+      ? `本章相关的既往事实（同样不得违背）：\n${relatedFacts.join('\n')}`
       : '',
     prevSummary !== undefined && prevSummary !== ''
       ? `上一章摘要：${prevSummary}`
@@ -914,11 +979,51 @@ export async function summarizeChapter(
     '用客观陈述句，不要评价，不要剧透式感叹。只输出摘要正文。',
   ].join('\n')
   const user = body.replace(/^#\s+.*$/m, '').trim()
-  const summary = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: 800 })
+  const summary = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000) })
   chapter.summary = summary.slice(0, 500)
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
   return chapter.summary
+}
+
+/**
+ * 摘要 + 事实抽取合并为一次 LLM 调用（省一次调用与一次正文输入，
+ * 批量生成时整体开销约省 25%）。
+ * @returns 摘要与新增事实条数（失败返回空，调用方 best-effort）。
+ */
+export async function summarizeAndExtractFacts(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+): Promise<{ summary: string; factCount: number }> {
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  if (chapter === undefined) return { summary: '', factCount: 0 }
+  const body = readChapterFile(outputDir, chapter)
+  if (body === undefined) return { summary: '', factCount: 0 }
+  const system = [
+    '你是一位网文编辑。请为下面一章做两件事，输出合法 JSON 对象：',
+    '{"summary": "120-200字摘要，含关键事件/主角状态变化（境界资源伤势心境）/新增伏笔线索/角色关系变化，客观陈述不评价", "facts": ["已确立事实1", "…3-6条"]}',
+    'facts 指：本章明确写出的、对后续有约束力的事实——人物当前状态、重要关系变化、地点与时间线、已落地或新增的伏笔线索、关键道具去向。',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const user = body.replace(/^#\s+.*$/m, '').trim()
+  const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 5000) })
+  const raw = parseJsonObject<{ summary?: unknown; facts?: unknown }>(text)
+  const summary = typeof raw.summary === 'string' ? raw.summary.trim().slice(0, 500) : ''
+  const factLines = Array.isArray(raw.facts)
+    ? raw.facts
+        .filter((v): v is string => typeof v === 'string' && v.trim().length > 8)
+        .map(v => v.trim().slice(0, 140))
+    : []
+  if (summary !== '') chapter.summary = summary
+  const list = project.facts ?? []
+  for (const line of factLines.slice(0, 8)) list.push({ chapterNo, text: line })
+  project.facts = list.slice(-300)
+  project.updatedAt = new Date().toISOString()
+  saveProject(outputDir, project)
+  return { summary, factCount: factLines.length }
 }
 
 /**
@@ -963,18 +1068,19 @@ export async function extractFacts(
 
 // ------------------------------------------------------------ book audit
 
-/** 全书一致性质检：LLM 扫描已生成章节 + 设定 + 事实库，输出矛盾清单。 */
-export async function auditBook(
+const AUDIT_BATCH_SIZE = 10
+
+/** 单批质检：设定 + 事实库 + 该批章节节选 → 矛盾清单。 */
+async function auditBatch(
   ctx: Context,
   config: NovelConfig,
   project: ProjectState,
   outputDir: string,
+  batch: ChapterPlan[],
 ): Promise<AuditIssue[]> {
-  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
-  if (written.length === 0) return []
   const system = [
-    '你是一位严谨的网文连续性审校编辑。你会收到一本小说的设定圣经、事实库和各章正文节选。',
-    '请找出全书的一致性矛盾，例如：',
+    '你是一位严谨的网文连续性审校编辑。你会收到一本小说的设定圣经、事实库和一批章节正文节选。',
+    '请找出这批章节中的一致性矛盾，例如：',
     '- 人物状态冲突：境界/修为/伤势/资源在同一章内或跨章前后矛盾。',
     '- 设定违背：正文与世界观规则、金手指规则、写作红线冲突。',
     '- 时间线错乱：事件顺序、时间跨度、地点移动不合逻辑。',
@@ -985,14 +1091,14 @@ export async function auditBook(
     '3. 输出必须是合法 JSON 数组，格式：[{"chapterNo": 章节号, "severity": "high|medium|low", "item": "矛盾描述", "suggestion": "修改建议"}]',
     '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
   ].join('\n')
-  const factsBlock = (project.facts ?? []).slice(-80).map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')
-  const chapterBlocks = written.map(c => {
+  const factsBlock = (project.facts ?? []).slice(-60).map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')
+  const chapterBlocks = batch.map(c => {
     const body = readChapterFile(outputDir, c)
     const excerpt = (body ?? '').replace(/^#\s+.*$/m, '').trim().slice(0, 700)
     return `【第${c.no}章《${c.title}》】\n${excerpt}`
   }).join('\n\n')
   const user = [
-    '请对以下小说做全书一致性质检。',
+    '请对以下小说做一致性质检。',
     project.bible !== undefined
       ? '设定圣经：\n' + [
           project.bible.worldRules.length > 0 ? `世界规则：\n${project.bible.worldRules.map(r => `- ${r}`).join('\n')}` : '',
@@ -1019,7 +1125,276 @@ export async function auditBook(
       suggestion: typeof entry.suggestion === 'string' ? entry.suggestion : '',
     })
   }
-  return issues.slice(0, 30)
+  return issues
+}
+
+/** 全书一致性质检：LLM 分批扫描已生成章节 + 设定 + 事实库，聚合矛盾清单。 */
+export async function auditBook(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+): Promise<AuditIssue[]> {
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  if (written.length === 0) return []
+  // 分批：每批 AUDIT_BATCH_SIZE 章，避免超长后单次爆上下文。
+  const all: AuditIssue[] = []
+  for (let i = 0; i < written.length; i += AUDIT_BATCH_SIZE) {
+    const batch = written.slice(i, i + AUDIT_BATCH_SIZE)
+    try {
+      all.push(...await auditBatch(ctx, config, project, outputDir, batch))
+    } catch { /* 单批失败不阻断其余批次 */ }
+  }
+  return all.slice(0, 50)
+}
+
+/** 小说简介：AI 生成或按已写开头补全（面向读者的作品门面）。 */
+export async function generateBlurb(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  partial = '',
+): Promise<string> {
+  const system = [
+    '你是一位网文平台编辑，擅长写抓人的作品简介。',
+    '要求：',
+    '1. 120-250 字，突出核心卖点（金手指/题材/爽点/人设反差），用一两句抛出开局钩子。',
+    '2. 不剧透结局与关键反转；语气贴合题材（热血/悬疑/轻松/虐心）。',
+    '3. 中文，直接输出简介正文，不要 Markdown、不要引号包裹、不要「简介：」前缀。',
+  ].join('\n')
+  const genreBlock = project.bible?.genre !== undefined ? `题材：${project.bible.genre}` : ''
+  const volumeBlock = (project.volumes ?? []).slice(0, 3).map(v => v.title).join('、')
+  const user = [
+    `书名：《${project.bookName}》`,
+    genreBlock,
+    volumeBlock !== '' ? `卷结构：${volumeBlock}` : '',
+    `已写章节数：${project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').length}`,
+    '大纲节选：\n' + project.outline.slice(0, 2500),
+    partial.trim() !== ''
+      ? `已有开头草稿（请保留其内容与语气，续写补全为完整简介）：\n${partial.trim()}`
+      : '请全量生成一份完整简介。',
+  ].filter(s => s !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 4000) })
+  const blurb = text.replace(/^["'「『]|["'」』]$/g, '').replace(/^简介[：:]\s*/, '').trim().slice(0, 600)
+  return blurb
+}
+
+// ---------------------------------------------------------------- world
+
+/**
+ * 组装全书上下文包（AI 助手 book_overview 工具）。
+ * 分片策略：章节要点默认只给最近 30 章（避免超长后爆上下文）；
+ * scope='full' 全量；scope=数字 只给该卷章节。
+ */
+export function bookOverview(project: ProjectState, scope: 'recent' | 'full' | number = 'recent'): string {
+  const s: string[] = []
+  s.push(`书名：${project.bookName}`)
+  s.push(`【大纲全文】\n${project.outline}`)
+  if (project.bible !== undefined) {
+    const bible = project.bible
+    s.push('【设定圣经】')
+    if (bible.genre !== '') s.push(`题材基调：${bible.genre}`)
+    if (bible.worldRules.length > 0) s.push('世界规则：\n' + bible.worldRules.map(r => `- ${r}`).join('\n'))
+    if (bible.characters.length > 0) {
+      s.push('角色卡：')
+      for (const card of bible.characters) {
+        const roleName = { protagonist: '主角', supporting: '配角', antagonist: '反派', other: '其他' }[card.role]
+        s.push(`- ${card.name}（${roleName}）：${card.traits.join('、')}${card.goals !== '' ? `；目标：${card.goals}` : ''}${card.relations !== '' ? `；关系：${card.relations}` : ''}`)
+      }
+    }
+    if (bible.redLines.length > 0) s.push('写作红线：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
+    if (bible.style.length > 0) s.push('风格要求：\n' + bible.style.map(r => `- ${r}`).join('\n'))
+  }
+  const worldBlock = renderWorld(project.world)
+  if (worldBlock !== '') s.push(worldBlock)
+  if (project.volumes !== undefined && project.volumes.length > 0) {
+    s.push('【卷结构】')
+    for (const v of project.volumes) {
+      s.push(`第${v.no}卷《${v.title}》：${v.summary}（章节 ${v.chapterStart}-${v.chapterEnd}）`)
+    }
+  }
+  if (project.chapters.length > 0) {
+    // 分片：默认最近 30 章；full 全量；数字 = 指定卷。
+    const maxNo = project.chapters.reduce((m, c) => Math.max(m, c.no), 0)
+    const shown = project.chapters.filter(c => {
+      if (scope === 'full') return true
+      if (typeof scope === 'number') return c.volume === scope
+      return c.no > Math.max(0, maxNo - 30)
+    })
+    const label = scope === 'full' ? '全部章节（标题/状态/剧情要点/摘要）' : typeof scope === 'number' ? `第 ${scope} 卷章节（标题/状态/剧情要点/摘要）` : `最近 ${shown.length} 章（标题/状态/剧情要点/摘要）`
+    s.push(`【${label}】`)
+    const statusText: Record<string, string> = { pending: '待生成', generating: '生成中', written: '待审稿', reviewing: '审稿中', approved: '已通过', rejected: '待修订', error: '失败' }
+    for (const c of shown) {
+      s.push(`第${c.no}章《${c.title}》[${statusText[c.status] ?? c.status}]${c.chars !== undefined ? ` ${c.chars}字` : ''}\n剧情要点：${c.beats}\n摘要：${c.summary ?? '无'}`)
+    }
+    if (scope !== 'full' && project.chapters.length > shown.length) {
+      s.push(`（还有 ${project.chapters.length - shown.length} 章未列出，可用 scope=volume:N 查看指定卷）`)
+    }
+  }
+  if ((project.facts ?? []).length > 0) {
+    s.push('【事实库（最近 40 条；更多用 facts_query 检索）】')
+    for (const f of (project.facts ?? []).slice(-40)) {
+      s.push(`- [第${f.chapterNo}章] ${f.text}`)
+    }
+  }
+  if (project.foreshadows.length > 0) {
+    s.push('【伏笔】')
+    for (const f of project.foreshadows) {
+      s.push(`- [${f.status}] ${f.description}${f.targetChapter !== undefined ? `（预计 ${f.targetChapter} 章回收）` : ''}`)
+    }
+  }
+  if (project.blurb !== undefined && project.blurb !== '') s.push(`【小说简介】${project.blurb}`)
+  return s.join('\n\n')
+}
+
+/** 一条影响分析结果（改动波及处）。 */
+export interface ImpactItem {
+  /** 位置：章节号 / 大纲 / 设定圣经 / 大世界 / 事实库 / 简介。 */
+  location: string
+  /** 原文片段（定位用）。 */
+  quote: string
+  /** 修改建议。 */
+  suggestion: string
+  /** must = 必须同步改；optional = 建议改；note = 备注（如保留旧称作古称）。 */
+  kind: 'must' | 'optional' | 'note'
+}
+
+/**
+ * 影响分析：LLM 扫描全书（大纲/设定/大世界/事实库/已写章节），
+ * 定位一次改动波及的所有位置。助手在修改后主动调用，做连锁维护。
+ */
+export async function analyzeImpact(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  change: string,
+): Promise<ImpactItem[]> {
+  const system = [
+    '你是一位网文一致性审校。作者要做一处修改，请找出这次改动会波及的所有位置（设定、大纲、已写章节正文、事实库、简介中可能因此过时或矛盾的内容）。',
+    '输出必须是合法 JSON 数组，格式：[{"location": "位置（第N章/大纲/设定圣经-世界规则/大世界-境界/事实库/简介）", "quote": "原文片段（20-60字）", "suggestion": "修改建议", "kind": "must|optional|note"}]',
+    'kind 含义：must=必须同步改否则矛盾；optional=建议改（影响观感）；note=备注（如旧称保留为古称、或无需改但需知晓）。',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  // 轻量 base：大纲节选 + 道藏要点 + 编年录最近 40 条（替代全量 bookOverview，
+  // 定位主要靠各批章节节选原文）。
+  const base = [
+    `要做的修改：${change}`,
+    '以下为全书设定与规则要点（章节为分批节选）：',
+    `大纲节选：\n${project.outline.slice(0, 2000)}`,
+    project.bible !== undefined
+      ? `道藏：${project.bible.worldRules.length} 条世界规则 / ${project.bible.redLines.length} 条红线 / 人物 ${project.bible.characters.map(c => c.name).join('、')}`
+      : '',
+    (project.facts ?? []).length > 0
+      ? `编年录最近 40 条：\n${(project.facts ?? []).slice(-40).map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')}`
+      : '',
+  ].filter(s => s !== '').join('\n\n')
+  const items: ImpactItem[] = []
+  // 分批扫描章节正文（每批 8 章），聚合影响清单，避免超长后爆上下文。
+  const IMPACT_BATCH_SIZE = 8
+  for (let i = 0; i < written.length; i += IMPACT_BATCH_SIZE) {
+    const batch = written.slice(i, i + IMPACT_BATCH_SIZE)
+    const chapterBlock = batch.map(c => {
+      const body = readChapterFile(outputDir, c)
+      const excerpt = (body ?? '').replace(/^#\s+.*$/m, '').trim().slice(0, 500)
+      return `【第${c.no}章《${c.title}》】\n${excerpt}`
+    }).join('\n\n')
+    const user = `${base}\n\n本批章节（第 ${batch[0]!.no}-${batch[batch.length - 1]!.no} 章）：\n${chapterBlock}\n\n只输出 JSON 数组。`
+    try {
+      const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 12000) })
+      for (const entry of parseJsonArray<Record<string, unknown>>(text)) {
+        const quote = typeof entry.quote === 'string' ? entry.quote.trim() : ''
+        if (quote === '') continue
+        items.push({
+          location: typeof entry.location === 'string' ? entry.location : '未定位',
+          quote: quote.slice(0, 120),
+          suggestion: typeof entry.suggestion === 'string' ? entry.suggestion : '',
+          kind: entry.kind === 'must' || entry.kind === 'optional' || entry.kind === 'note' ? entry.kind : 'optional',
+        })
+      }
+    } catch { /* 单批失败不阻断其余批次 */ }
+  }
+  return items.slice(0, 30)
+}
+
+/** 把大世界结构化数据渲染成提示词块（境界体系按顺序强约束）。 */
+export function renderWorld(world: WorldState | undefined): string {
+  if (world === undefined) return ''
+  const sections: string[] = ['==================== 大世界（结构化设定，写作时严格遵守） ====================']
+  if (world.realms.length > 0) {
+    sections.push('境界体系（由低到高，不得随意跳级或自创境界）：')
+    world.realms.forEach((realm, i) => {
+      sections.push(`${i + 1}. ${realm.name}${realm.description !== '' ? ` — ${realm.description}` : ''}`)
+    })
+  }
+  if (world.regions.length > 0) {
+    sections.push('地理区域：')
+    for (const region of world.regions) {
+      sections.push(`- ${region.name}${region.description !== '' ? `：${region.description}` : ''}${region.faction !== undefined && region.faction !== '' ? `（势力：${region.faction}）` : ''}`)
+    }
+  }
+  if (world.factions.length > 0) {
+    sections.push('势力分布：')
+    for (const faction of world.factions) {
+      sections.push(`- ${faction.name}（${faction.kind}）${faction.description !== '' ? `：${faction.description}` : ''}${faction.region !== undefined && faction.region !== '' ? `（驻地：${faction.region}）` : ''}`)
+    }
+  }
+  return sections.join('\n')
+}
+
+/** AI 提炼大世界：从大纲 + 设定圣经生成结构化境界体系/区域/势力。 */
+export async function extractWorld(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+): Promise<WorldState> {
+  const system = [
+    '你是一位网文世界观架构师。请根据小说大纲与设定圣经，提炼结构化「大世界」数据。',
+    '输出必须是合法 JSON 对象：',
+    '{"realms": [{"name": "境界名", "description": "突破条件/寿命/标志等"}], "regions": [{"name": "区域名", "description": "描述", "faction": "关联势力名或空"}], "factions": [{"name": "势力名", "kind": "宗门/家族/王朝/组织等", "description": "描述", "region": "驻地区域或空"}]}',
+    '要求：',
+    '1. realms 按由低到高顺序排列（修仙题材必须含完整境界链；无境界设定的题材可输出空数组）。',
+    '2. 数量贴合大纲：realms 3-12 个，regions 2-10 个，factions 2-10 个。',
+    '3. 内容严格来自大纲与设定圣经，不要凭空发明与大纲冲突的设定。',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const bibleBlock = project.bible !== undefined
+    ? [
+        project.bible.genre !== '' ? `题材：${project.bible.genre}` : '',
+        project.bible.worldRules.length > 0 ? `世界规则：\n${project.bible.worldRules.map(r => `- ${r}`).join('\n')}` : '',
+      ].filter(s => s !== '').join('\n')
+    : ''
+  const user = [
+    '请为这部小说提炼大世界数据。',
+    `书名：《${project.bookName}》`,
+    bibleBlock !== '' ? bibleBlock : '',
+    '大纲：\n' + project.outline.slice(0, 5000),
+    '只输出 JSON 对象。',
+  ].filter(s => s !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 12000) })
+  const raw = parseJsonObject<{ realms?: unknown; regions?: unknown; factions?: unknown }>(text)
+  const str = (value: unknown): string => typeof value === 'string' ? value.trim() : ''
+  const objArray = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null) : []
+  const world: WorldState = {
+    realms: objArray(raw.realms).map(entry => ({
+      name: str(entry.name).slice(0, 20) || '未命名境界',
+      description: str(entry.description).slice(0, 200),
+    })).filter(r => r.name !== '未命名境界' || r.description !== ''),
+    regions: objArray(raw.regions).map(entry => ({
+      name: str(entry.name).slice(0, 30) || '未命名区域',
+      description: str(entry.description).slice(0, 200),
+      faction: str(entry.faction).slice(0, 30),
+    })).filter(r => r.name !== '未命名区域' || r.description !== ''),
+    factions: objArray(raw.factions).map(entry => ({
+      name: str(entry.name).slice(0, 30) || '未命名势力',
+      kind: str(entry.kind).slice(0, 20) || '组织',
+      description: str(entry.description).slice(0, 200),
+      region: str(entry.region).slice(0, 30),
+    })).filter(f => f.name !== '未命名势力' || f.description !== ''),
+  }
+  return world
 }
 
 /**
@@ -1156,7 +1531,7 @@ export async function suggestForeshadows(
     `大纲：\n${project.outline}`,
     `已规划章节数：${project.chapters.length}`,
   ].join('\n')
-  const text = await complete(ctx, config, { system: foreshadowSystemPrompt(), user, temperature: 0.5 })
+  const text = await complete(ctx, config, { system: foreshadowSystemPrompt(), user, temperature: 0.5, maxTokens: Math.max(config.maxTokens, 12000) })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const existing = new Set(project.foreshadows.map(f => f.description))
   const created: Foreshadow[] = []
@@ -1190,7 +1565,7 @@ export async function extractStyleAsset(
   sampleText: string,
 ): Promise<{ proseRules: string[]; dialogueRules: string[]; descriptionRules: string[]; boundaries: string[] }> {
   const user = `请分析下面这段样本文本，提炼其叙事风格规则：\n\n${sampleText}`
-  const text = await complete(ctx, config, { system: styleEngineSystemPrompt(), user, temperature: 0.3 })
+  const text = await complete(ctx, config, { system: styleEngineSystemPrompt(), user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 12000) })
   const raw = parseJsonObject<{ proseRules?: unknown; dialogueRules?: unknown; descriptionRules?: unknown; boundaries?: unknown }>(text)
   const strArray = (value: unknown): string[] =>
     Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim() !== '') : []

@@ -51,9 +51,9 @@ type AssetSubTab = 'genre' | 'progression' | 'templates' | 'rules' | 'style'
 const SUB_TABS: ReadonlyArray<{ id: AssetSubTab; label: string }> = [
   { id: 'genre', label: '题材基底' },
   { id: 'progression', label: '推进模式' },
-  { id: 'templates', label: '预置写法' },
-  { id: 'rules', label: '反 AI 规则' },
-  { id: 'style', label: '自定义写法' },
+  { id: 'templates', label: '笔法帖' },
+  { id: 'rules', label: '文戒' },
+  { id: 'style', label: '心法' },
 ]
 
 /** 写作资产页签。 */
@@ -225,31 +225,14 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
           <span className={css.assetStatLabel}>已绑定写法</span>
           <span className={css.assetStatValue}>{assets.styleAssets?.length ?? 0} 套</span>
           <span className={css.assetStatDetail} title={(assets.styleAssets ?? []).map(s => s.name).join('、')}>
-            {(assets.styleAssets ?? []).map(s => s.name).join('、') || '未绑定（可在「预置写法」一键选用）'}
+            {(assets.styleAssets ?? []).map(s => s.name).join('、') || '未绑定（可在「笔法帖」一键选用）'}
           </span>
         </div>
         <div className={css.assetStat}>
-          <span className={css.assetStatLabel}>反 AI 规则</span>
+          <span className={css.assetStatLabel}>文戒</span>
           <span className={css.assetStatValue}>{builtinRules.length} 内置 + {(assets.antiAiRules ?? []).length} 自定义</span>
           <span className={css.assetStatDetail}>全部生效于生成与审稿提示词</span>
         </div>
-      </div>
-
-      {/* 子页签栏 */}
-      <div className={css.tabBar} role="tablist" style={{ padding: '0 0 8px', borderBottom: '1px solid var(--nf-border)' }}>
-        {SUB_TABS.map(tab => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            aria-selected={assetTab === tab.id}
-            data-active={assetTab === tab.id ? '' : undefined}
-            className={css.tab}
-            onClick={() => { setAssetTab(tab.id) }}
-          >
-            {tab.label}
-          </button>
-        ))}
       </div>
 
       {/* 题材基底库 */}
@@ -300,10 +283,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
         </div>
       )}
 
-      {/* 预置写法模板（一键绑定） */}
+      {/* 笔法帖（一键绑定） */}
       {assetTab === 'templates' && (
         <div className={css.card}>
-          <span className={css.cardTitle}>预置写法模板</span>
+          <span className={css.cardTitle}>笔法帖</span>
           <span className={css.meta}>从内置 8 套叙事风格模板中一键选用（来自 AI-Novel-Writing-Assistant 写法引擎），无需样本文本；绑定后生成与润色都遵循该风格。</span>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
             {data.styleTemplates.map(template => {
@@ -340,10 +323,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
         </div>
       )}
 
-      {/* 反 AI 规则 */}
+      {/* 文戒 */}
       {assetTab === 'rules' && (
         <div className={css.card}>
-        <span className={css.cardTitle}>反 AI 规则</span>
+        <span className={css.cardTitle}>文戒</span>
         <span className={css.meta}>写作时必须遵守的表达边界（内置全局 + 项目自定义），生成与审稿都会检查。内置规则可用「覆盖编辑」复制为自定义版本调整。</span>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
           {builtinRules.map(rule => {
@@ -418,10 +401,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
       </div>
       )}
 
-      {/* 自定义写法引擎 */}
+      {/* 心法（自定义写法引擎） */}
       {assetTab === 'style' && (
         <div className={css.card}>
-          <span className={css.cardTitle}>自定义写法引擎</span>
+          <span className={css.cardTitle}>心法</span>
           <span className={css.meta}>粘贴一段你喜欢的样本文本，AI 提取叙事风格规则并绑定到本书，后续章节保持同一味道。</span>
           {assets.styleAssets.map(style => (
             <div key={style.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>

@@ -108,6 +108,16 @@ export class NovelApi {
     return readJson<ChapterResponse>(response)
   }
 
+  /** 审查手动编辑的正文（不落盘）。 */
+  async chapterCheck(no: number, text: string): Promise<{ report: ReviewReport }> {
+    return postJson<{ report: ReviewReport }>(NOVEL_API.chapterCheck, { chapterNo: no, text })
+  }
+
+  /** 保存手动编辑的正文（自动备份 .bak；带报告则沿用落盘，否则保存后自动审稿）。 */
+  async chapterSave(no: number, text: string, report?: ReviewReport): Promise<import('../protocol.ts').ChapterSaveResponse> {
+    return postJson<import('../protocol.ts').ChapterSaveResponse>(NOVEL_API.chapterSave, { chapterNo: no, text, report })
+  }
+
   async patchConfig(patch: ConfigPatch): Promise<{ config: NovelConfig }> {
     return postJson<{ config: NovelConfig }>(NOVEL_API.config, patch)
   }
@@ -150,6 +160,33 @@ export class NovelApi {
   /** 设定圣经局部修补。 */
   async biblePatch(patch: import('../protocol.ts').BiblePatchRequest): Promise<{ bible: import('../protocol.ts').StoryBible }> {
     return postJson<{ bible: import('../protocol.ts').StoryBible }>(NOVEL_API.biblePatch, patch)
+  }
+
+  /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
+  async blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{ blurb: string }> {
+    return postJson<{ blurb: string }>(NOVEL_API.blurb, { action, text, partial })
+  }
+
+  /** 封面：读取（dataUrl；dir 指定某本书的输出目录，省略为当前书）。 */
+  async coverGet(dir?: string): Promise<import('../protocol.ts').CoverResponse> {
+    const query = dir !== undefined ? `?dir=${encodeURIComponent(dir)}` : ''
+    const response = await fetch(NOVEL_API.cover + query)
+    return readJson<import('../protocol.ts').CoverResponse>(response)
+  }
+
+  /** 封面：上传（base64 data URL）或移除。 */
+  async coverPost(action: 'upload' | 'remove', dataUrl?: string): Promise<{ ok: boolean; coverPath?: string | null }> {
+    return postJson<{ ok: boolean; coverPath?: string | null }>(NOVEL_API.cover, { action, dataUrl })
+  }
+
+  /** 重命名当前书（同步项目与书架条目）。 */
+  async rename(bookName: string): Promise<{ bookName: string }> {
+    return postJson<{ bookName: string }>(NOVEL_API.rename, { bookName })
+  }
+
+  /** 大世界：AI 提炼（generate）或手动保存（save）。 */
+  async world(action: 'generate' | 'save', world?: import('../protocol.ts').WorldState): Promise<{ world: import('../protocol.ts').WorldState }> {
+    return postJson<{ world: import('../protocol.ts').WorldState }>(NOVEL_API.world, { action, world })
   }
 
   /** 切换当前书。 */
@@ -285,5 +322,10 @@ export class NovelApi {
     const response = await fetch(NOVEL_API.assistantHistory)
     const body = await readJson<{ messages: import('../protocol.ts').AssistantMessage[] }>(response)
     return body.messages
+  }
+
+  /** 清空助手对话记录。 */
+  async assistantClear(): Promise<{ ok: boolean }> {
+    return postJson<{ ok: boolean }>(NOVEL_API.assistantClear, {})
   }
 }

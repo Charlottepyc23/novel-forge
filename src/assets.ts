@@ -422,13 +422,14 @@ export function effectiveAntiAiRules(assets: ProjectAssets | undefined): AntiAiR
   return [...BUILTIN_ANTI_AI_RULES.filter(r => !customNames.has(r.name)), ...custom]
 }
 
-/** 把生效规则渲染成提示词块。 */
+/** 把生效规则渲染成提示词块（压缩：avoid/fix 截断，省 token）。 */
 export function renderAntiAiRules(assets: ProjectAssets | undefined): string {
   const rules = effectiveAntiAiRules(assets)
   if (rules.length === 0) return ''
+  const clip = (value: string, max: number): string => value.length > max ? value.slice(0, max) + '…' : value
   return [
     '==================== 反 AI 规则（写作时必须遵守的表达边界） ====================',
-    ...rules.map(r => `- ${r.name}：避免——${r.avoid}；修正——${r.fix}`),
+    ...rules.map(r => `- ${r.name}：避免——${clip(r.avoid, 90)}${r.fix !== '' ? `；修正——${clip(r.fix, 50)}` : ''}`),
   ].join('\n')
 }
 
@@ -464,17 +465,18 @@ export function renderGenreAndProgression(assets: ProjectAssets | undefined): st
   return sections.join('\n')
 }
 
-/** 渲染写法资产提示词块。 */
+/** 渲染写法资产提示词块（规则去重，省 token）。 */
 export function renderStyleAssets(assets: ProjectAssets | undefined): string {
   const styles = assets?.styleAssets ?? []
   if (styles.length === 0) return ''
   const sections: string[] = ['==================== 写法资产（本书的叙事风格约束） ====================']
   for (const style of styles) {
     sections.push(`【${style.name}】`)
-    if (style.proseRules.length > 0) sections.push('叙述与节奏：\n' + style.proseRules.map(r => `- ${r}`).join('\n'))
-    if (style.dialogueRules.length > 0) sections.push('台词风格：\n' + style.dialogueRules.map(r => `- ${r}`).join('\n'))
-    if (style.descriptionRules.length > 0) sections.push('描写与情绪：\n' + style.descriptionRules.map(r => `- ${r}`).join('\n'))
-    if (style.boundaries.length > 0) sections.push('表达边界：\n' + style.boundaries.map(r => `- ${r}`).join('\n'))
+    const unique = (rules: string[]): string[] => [...new Set(rules)]
+    if (style.proseRules.length > 0) sections.push('叙述与节奏：\n' + unique(style.proseRules).map(r => `- ${r}`).join('\n'))
+    if (style.dialogueRules.length > 0) sections.push('台词风格：\n' + unique(style.dialogueRules).map(r => `- ${r}`).join('\n'))
+    if (style.descriptionRules.length > 0) sections.push('描写与情绪：\n' + unique(style.descriptionRules).map(r => `- ${r}`).join('\n'))
+    if (style.boundaries.length > 0) sections.push('表达边界：\n' + unique(style.boundaries).map(r => `- ${r}`).join('\n'))
   }
   return sections.join('\n')
 }

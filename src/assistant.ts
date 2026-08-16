@@ -13,21 +13,22 @@
  * result as a tool-role message, and continues the loop (bounded rounds).
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createUserMessage, createAssistantMessage, BlockAssembler, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AssistantMessage, NovelConfig, ProjectState } from './protocol.ts'
 import { emptyProjectAssets } from './assets.ts'
 import {
+  analyzeImpact,
+  bookOverview,
   chapterFileName,
   exportBook,
-  extractFacts,
   generateChapterStream,
   readChapterFile,
   reviewChapter,
-  summarizeChapter,
   saveProject,
+  summarizeAndExtractFacts,
 } from './engine.ts'
 import { rewriteChapterStream } from './engine.ts'
 
@@ -59,10 +60,21 @@ export function loadAssistantHistory(outputDir: string): AssistantMessage[] {
   return messages
 }
 
-/** Append one message to the persisted history. */
+/** Append one message to the persisted history. Tool payloads (e.g. full
+ *  outline / chapter text) are capped so the jsonl and later LLM context
+ *  don't grow unboundedly. */
 function appendHistory(outputDir: string, message: AssistantMessage): void {
   mkdirSync(outputDir, { recursive: true })
-  appendFileSync(join(outputDir, ASSISTANT_HISTORY_FILE), JSON.stringify(message) + '\n', 'utf8')
+  const entry: AssistantMessage = message.role === 'tool' && message.content.length > 4000
+    ? { ...message, content: message.content.slice(0, 4000) + '\n…（已截断，如需完整内容请重新调用工具）' }
+    : message
+  appendFileSync(join(outputDir, ASSISTANT_HISTORY_FILE), JSON.stringify(entry) + '\n', 'utf8')
+}
+
+/** 清空助手对话记录（删除历史文件）。 */
+export function clearAssistantHistory(outputDir: string): void {
+  const file = join(outputDir, ASSISTANT_HISTORY_FILE)
+  if (existsSync(file)) rmSync(file, { force: true })
 }
 
 // ----------------------------------------------------------------- context
@@ -71,6 +83,14 @@ function appendHistory(outputDir: string, message: AssistantMessage): void {
 function renderProjectSnapshot(project: ProjectState): string {
   const sections: string[] = []
   sections.push(`书名：${project.bookName}`)
+  sections.push(`大纲节选（如需全文用 outline_text 工具）：\n${project.outline.slice(0, 2500)}`)
+  // 写作资产名称化（占位小，需要详情用 assets_status）。
+  const assetNames: string[] = []
+  if (project.assets?.genre !== undefined) assetNames.push(`题材：${project.assets.genre.name}`)
+  if (project.assets?.primaryProgression !== undefined) assetNames.push(`主推进：${project.assets.primaryProgression.name}`)
+  if ((project.assets?.styleAssets?.length ?? 0) > 0) assetNames.push(`写法：${project.assets!.styleAssets!.map(s => s.name).join('、')}`)
+  if ((project.assets?.antiAiRules?.length ?? 0) > 0) assetNames.push(`文戒自定义：${project.assets!.antiAiRules!.map(r => r.name).join('、')}`)
+  if (assetNames.length > 0) sections.push(`【写作资产】${assetNames.join(' · ')}`)
   if (project.bible !== undefined) {
     const bible = project.bible
     sections.push('【设定圣经】')
@@ -85,6 +105,13 @@ function renderProjectSnapshot(project: ProjectState): string {
     }
     if (bible.redLines.length > 0) sections.push('写作红线：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
   }
+  if (project.world !== undefined) {
+    const world = project.world
+    sections.push('【大世界】')
+    if (world.realms.length > 0) sections.push('境界体系：' + world.realms.map((r, i) => `${i + 1}.${r.name}（${r.description.slice(0, 40)}）`).join(' → '))
+    if (world.regions.length > 0) sections.push('区域：' + world.regions.map(r => r.name).join('、'))
+    if (world.factions.length > 0) sections.push('势力：' + world.factions.map(f => `${f.name}（${f.kind}）`).join('、'))
+  }
   if (project.volumes !== undefined && project.volumes.length > 0) {
     sections.push('【卷结构】')
     for (const v of project.volumes) {
@@ -92,10 +119,25 @@ function renderProjectSnapshot(project: ProjectState): string {
     }
   }
   if (project.chapters.length > 0) {
-    sections.push('【章节计划与进度】')
-    for (const c of project.chapters) {
+    // 快照只列最近 30 章（长书时防止上下文膨胀；更早章节可用
+    // book_overview scope=volume:N 或 chapter_text 按需查看）。
+    const shown = project.chapters.slice(-30)
+    sections.push(`【章节计划与进度（最近 ${shown.length} 章）】`)
+    for (const c of shown) {
       const statusText = { pending: '待生成', generating: '生成中', written: '待审稿', reviewing: '审稿中', approved: '已通过', rejected: '待修订', error: '失败' }[c.status]
       sections.push(`第${c.no}章《${c.title}》[${statusText}]${c.chars !== undefined ? ` ${c.chars}字` : ''}${c.summary !== undefined && c.summary !== '' ? ` 摘要：${c.summary}` : ''}`)
+    }
+    if (project.chapters.length > shown.length) {
+      sections.push(`（还有 ${project.chapters.length - shown.length} 章未列出，可用 book_overview scope=volume:N 查看）`)
+    }
+    // 最近两章正文节选（讨论细节时参考）
+    const written = project.chapters.filter(c => c.status === 'approved' || c.status === 'written')
+    const recent = written.slice(-2)
+    if (recent.length > 0) {
+      sections.push('【最近章节正文节选】')
+      for (const c of recent) {
+        sections.push(`第${c.no}章《${c.title}》（节选，如需全文用 chapter_text）：${c.beats.slice(0, 300)}`)
+      }
     }
   }
   if (project.foreshadows.length > 0) {
@@ -104,23 +146,42 @@ function renderProjectSnapshot(project: ProjectState): string {
       sections.push(`- [${f.status}] ${f.description}${f.targetChapter !== undefined ? `（预计 ${f.targetChapter} 章回收）` : ''}`)
     }
   }
+  if ((project.facts ?? []).length > 0) {
+    sections.push('【已确立事实库（最近 40 条，回答设定问题必须遵守）】')
+    for (const f of (project.facts ?? []).slice(-40)) {
+      sections.push(`- [第${f.chapterNo}章] ${f.text}`)
+    }
+  }
+  if (project.blurb !== undefined && project.blurb !== '') {
+    sections.push(`【小说简介】${project.blurb}`)
+  }
   return sections.join('\n')
 }
 
 /** The assistant system prompt. */
 function assistantSystemPrompt(project: ProjectState): string {
   return [
-    '你是这部小说的 AI 编辑助理，负责陪作者讨论剧情、人设、世界观，并把讨论结果落实到项目里。',
+    '你是「编辑老师」——服务这本书作者的资深中文网文编辑。',
+    '人设：二十年网文老编辑，懂套路、懂市场、懂节奏，说话直接但句句有用。',
+    '座右铭：「书是你的，但坑我替你盯着。」',
+    '职责边界：陪作者讨论剧情/人设/世界观/爽点节奏并落地修改、维护全书一致性；不闲聊、不彩虹屁、不无意义长篇大论。',
     '==================== 当前项目快照 ====================',
     renderProjectSnapshot(project),
     '==================== 快照结束 ====================',
     '',
-    '你可以：',
-    '1. 与作者讨论剧情走向、人物动机、爽点节奏、伏笔安排等，给出专业建议（直接文字回答）。',
-    '2. 讨论达成一致后，用动作指令实际修改内容。动作指令格式（放在回复末尾单独一行）：',
-    '   <dsh-action name="工具名">{"参数名": 值}</dsh-action>',
+    '工作规则（严格遵守）：',
+    '1. 全量知情：回答和修改必须基于项目真实数据，禁止编造书中不存在的设定。需要完整信息时，先调用 book_overview 获取全书上下文（大纲全文/设定圣经/大世界/事实库/全部章节要点/伏笔/简介）；需要某章正文用 chapter_text。',
+    '2. 修改流程：改前用一句话说明意图 → 执行工具 → 改后简要汇报。',
+    '3. 连锁维护：改动可能波及其它位置（其它章节、设定、事实库、简介）时，执行后主动调用 impact_analysis 分析影响面，并把「必须同步」的项一并处理或明确提示作者逐项确认。',
+    '4. 删除红线：删除章节、清空设定等破坏性操作必须等作者明确同意。',
+    '5. 品质门槛：建议必须具体——指出问题在哪一章、哪一段、哪一句，并给出可落地的改法；禁止"建议增强冲突"这类空话。',
+    '6. 设定忠诚：忠于大纲、设定圣经、大世界、事实库；发现书中已有内容与设定冲突时，主动指出并给修正方案。',
+    '7. 中文回复，简洁有干货。',
     '',
     '可用工具：',
+    '- book_overview：{"scope": "recent|full|volume:2"(可选，默认 recent)}。返回全书上下文包（大纲/道藏/大世界/章节要点/事实库/伏笔/简介）。recent=最近30章；full=全部章节（书很长时慎用）；volume:N=只看第N卷。',
+    '- facts_query：{"keyword": "关键词"}。从编年录（事实库）按关键词检索相关事实（如灵石、境界名、人物名）。',
+    '- impact_analysis：{"change": "要做的修改描述"}。分析这次改动会波及哪些位置，返回影响清单（定位到章节/设定/事实库）。',
     '- outline_text：无参数。返回当前大纲全文。',
     '- outline_replace：{"old": "要替换的原文片段", "new": "新文本"}。在大纲中替换一段文字（old 必须能在大纲中找到）。',
     '- bible_set_rule：{"index": 序号(0起), "text": "新规则文本"} 或 {"append": "追加的规则"}。修改设定圣经的世界规则。',
@@ -135,7 +196,14 @@ function assistantSystemPrompt(project: ProjectState): string {
     '- assets_status：无参数。查看本书当前写作资产（题材/推进模式/反AI规则/写法）。',
     '- assets_set_genre：{"name": "题材名", "description": "题材说明(可选)"}。设置本书题材基底。',
     '- assets_set_progression：{"name": "模式名", "driver": "驱动力", "primary": true/false}。设置主/辅助推进模式。',
-    '- assets_add_rule：{"name": "规则名(可选)", "avoid": "要避免的表达问题", "fix": "修正方向(可选)"}。新增反 AI 规则。',
+    '- assets_add_rule：{"name": "规则名(可选)", "avoid": "要避免的表达问题", "fix": "修正方向(可选)}。新增反 AI 规则。',
+    '',
+    '回答质量要求（非常重要）：',
+    '- 具体：回答必须引用项目里的真实内容（人名、境界、章节、伏笔、设定），禁止空泛套话。快照里没有的信息，先调用工具获取（chapter_text / outline_text）再回答。',
+    '- 专业：给建议时说明理由，指出问题所在章节/段落，给出可直接落地的修改方案（改什么、怎么改）。',
+    '- 主动：作者说"改一下"，主动调用对应工具执行，不要只给建议不动手；执行前用一句话说明意图，执行后简短汇报结果。',
+    '- 忠于设定：以大纲、设定圣经、事实库为准，不得自相矛盾；发现问题（如剧情与设定冲突）主动指出。',
+    '- 中文回复；文字量适中，别啰嗦。',
     '',
     '使用规则（非常重要）：',
     '- 当你想执行任何工具时，你的【整个回复】必须只包含动作指令标签，格式如下（不要有任何解释文字、不要用自然语言说"我要去改"，直接输出标签）：',
@@ -149,7 +217,7 @@ function assistantSystemPrompt(project: ProjectState): string {
     '- 如果工具执行失败（例如片段未找到），根据错误信息修正参数后自动重试一次，不要直接放弃或让作者手动操作。',
     '- 修改前先向作者说明你要改什么、为什么；动作执行后简要汇报结果。',
     '- 涉及删除类操作（删除章节、清空设定）必须等作者明确同意。',
-    '- 严格忠于设定圣经与大刚；不得自行发明与既有设定冲突的内容。',
+    '- 严格忠于设定圣经与大纲；不得自行发明与既有设定冲突的内容。',
     '- 用中文回复。',
   ].join('\n')
 }
@@ -181,6 +249,32 @@ export async function* executeAction(
   }
 
   switch (name) {
+    case 'book_overview': {
+      // 全书上下文包（分片：默认最近 30 章；scope=full 全量；scope=volume:N 指定卷）。
+      const scopeArg = str(args.scope)
+      const scope = scopeArg === 'full'
+        ? 'full' as const
+        : /^volume:(\d+)$/.test(scopeArg)
+          ? Number(scopeArg.slice(7))
+          : 'recent' as const
+      return bookOverview(project, scope)
+    }
+    case 'facts_query': {
+      // 从编年录（事实库）按关键词检索相关事实。
+      const keyword = str(args.keyword).trim()
+      if (keyword === '') throw new Error('facts_query 需要 keyword')
+      const hits = (project.facts ?? []).filter(f => f.text.includes(keyword)).slice(-30)
+      if (hits.length === 0) return `编年录中未找到与「${keyword}」相关的事实记录。`
+      return `编年录中与「${keyword}」相关的事实（${hits.length} 条）：\n` + hits.map(f => `- [第${f.chapterNo}章] ${f.text}`).join('\n')
+    }
+    case 'impact_analysis': {
+      const change = str(args.change)
+      if (change === '') throw new Error('impact_analysis 需要 change（要做的修改描述）')
+      const items = await analyzeImpact(ctx, config, project, outputDir, change)
+      if (items.length === 0) return '影响分析：未发现需要同步修改的位置。'
+      const lines = items.map((it, i) => `${i + 1}. [${it.location}]「${it.quote}」${it.suggestion !== '' ? ` → ${it.suggestion}` : ''}（${it.kind === 'must' ? '必须同步' : it.kind === 'optional' ? '建议' : '备注'}）`)
+      return `影响分析：这次改动波及 ${items.length} 处——\n${lines.join('\n')}\n请据此提示作者逐项处理；章节内的修改可引导作者在工作区查看。`
+    }
     case 'outline_text': {
       return project.outline
     }
@@ -196,7 +290,7 @@ export async function* executeAction(
       return `大纲已修改：替换了 ${old.length} 字符的片段。`
     }
     case 'bible_set_rule': {
-      if (project.bible === undefined) throw new Error('尚无设定圣经，请先提炼')
+      if (project.bible === undefined) throw new Error('尚无道藏，请先提炼')
       const index = num(args.index)
       if (index !== undefined) {
         project.bible.worldRules[index] = str(args.text)
@@ -210,7 +304,7 @@ export async function* executeAction(
       return `世界规则已更新（当前 ${project.bible.worldRules.length} 条）。`
     }
     case 'bible_set_redline': {
-      if (project.bible === undefined) throw new Error('尚无设定圣经，请先提炼')
+      if (project.bible === undefined) throw new Error('尚无道藏，请先提炼')
       const index = num(args.index)
       if (index !== undefined) {
         project.bible.redLines[index] = str(args.text)
@@ -258,10 +352,10 @@ export async function* executeAction(
       chapter.error = undefined
       project.updatedAt = new Date().toISOString()
       saveProject(outputDir, project)
-      yield '（已采纳修订稿，正在生成章节摘要…）'
+      yield '（已采纳修订稿，正在生成章节摘要与编年录…）'
       try {
-        await summarizeChapter(ctx, config, project, outputDir, no)
-      } catch { /* summary is best-effort */ }
+        await summarizeAndExtractFacts(ctx, config, project, outputDir, no)
+      } catch { /* best-effort */ }
       yield '（正在 AI 审稿…）'
       const report = await reviewChapter(ctx, config, project, outputDir, no)
       return `章节 ${no} 已${target === '' ? '整章' : '局部'}修订完成（${project.chapters.find(c => c.no === no)?.chars ?? '?'} 字）。重新审稿：${report.score} 分 — ${report.verdict}`
@@ -272,12 +366,9 @@ export async function* executeAction(
       for await (const chunk of forward(generateChapterStream(ctx, config, project, outputDir, no))) {
         yield chunk
       }
-      yield '（正在生成章节摘要…）'
+      yield '（正在生成章节摘要与编年录…）'
       try {
-        await summarizeChapter(ctx, config, project, outputDir, no)
-      } catch { /* best-effort */ }
-      try {
-        await extractFacts(ctx, config, project, outputDir, no)
+        await summarizeAndExtractFacts(ctx, config, project, outputDir, no)
       } catch { /* best-effort */ }
       yield '（正在 AI 审稿…）'
       const report = await reviewChapter(ctx, config, project, outputDir, no)
@@ -390,18 +481,19 @@ export async function* executeAction(
 
 // ------------------------------------------------------------------- chat
 
-/** Extract the first action directive from a reply. */
+/** Extract the first action directive from a reply (tolerant to common tag misspellings). */
 function extractAction(reply: string): { name: string; args: Record<string, unknown>; index: number } | undefined {
-  const match = /<dsh-action\s+name="([^"]+)"\s*>([\s\S]*?)<\/dsh-action>/.exec(reply)
+  // 容错：dsh-action 的常见误拼（dash-action / dsah-action / dhs-action 等）。
+  const match = /<([a-z_]*d[a-z]?sh?-action)\s+name="([^"]+)"\s*>([\s\S]*?)<\/\1>/.exec(reply)
   if (match === null) return undefined
-  const rawArgs = match[2]?.trim() ?? ''
+  const rawArgs = match[3]?.trim() ?? ''
   let args: Record<string, unknown>
   try {
     args = rawArgs === '' ? {} : JSON.parse(rawArgs) as Record<string, unknown>
   } catch {
     throw new Error(`动作参数不是合法 JSON：${rawArgs.slice(0, 80)}`)
   }
-  return { name: match[1] ?? '', args, index: match.index }
+  return { name: match[2] ?? '', args, index: match.index }
 }
 
 /** Render the recent history as LLM messages (skipping tool chatter in early rounds). */
@@ -420,8 +512,13 @@ function historyToMessages(history: AssistantMessage[]): Message[] {
         source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       }))
     } else if (entry.role === 'tool') {
+      // 工具结果（book_overview/大纲全文等可能很大）截断后进上下文，
+      // 避免多轮对话上下文翻倍膨胀触发「上下文到限制」。
+      const body = entry.content.length > 2000
+        ? entry.content.slice(0, 2000) + '\n…（结果过长已截断，需要完整内容请重新调用工具）'
+        : entry.content
       messages.push(createUserMessage({
-        content: [{ type: 'text', text: `【工具 ${entry.tool ?? ''} 的执行结果】\n${entry.content}` }],
+        content: [{ type: 'text', text: `【工具 ${entry.tool ?? ''} 的执行结果】\n${body}` }],
         source: { kind: 'plugin', plugin: 'dsh-novel-forge' },
       }))
     }
@@ -442,7 +539,8 @@ async function chatOnce(
     model: config.model,
     messages,
     system,
-    maxTokens: config.maxTokens,
+    // v4-flash 推理模型：reasoning channel 占预算，给足避免回复被截断。
+    maxTokens: Math.max(config.maxTokens, 16000),
     temperature: 0.7,
   }
   const assembler = new BlockAssembler()
@@ -499,12 +597,13 @@ export async function* runAssistantTurn(
     const action = extractAction(reply)
 
     if (action === undefined) {
-      // No action tag. If the reply clearly intends to modify something but
-      // forgot the tag, nudge once and continue; otherwise it's plain prose.
+      // No parseable action tag. If the reply clearly intends to modify
+      // something (or contains a malformed action tag), nudge once.
       const intendsAction = /(改|修改|修订|重写|替换|调整|生成|新增|删除|导出|看看|查看|调出|读一下|加上|加一个|去掉|删掉|把.+改成)/.test(reply)
-      if (intendsAction && !nudged) {
+      const strayTag = /<[a-z_-]*action[^>]*>/.test(reply)
+      if ((intendsAction || strayTag) && !nudged) {
         nudged = true
-        const nudge = '你的上一条回复表达了想操作项目的意图（如查看/修改大纲、章节等），但没有输出动作指令标签，因此没有执行任何操作。请直接输出 <dsh-action name="工具名">{"参数":值}</dsh-action> 标签来执行，不要用文字描述意图。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
+        const nudge = '你的上一条回复表达了想操作项目的意图（或动作标签格式有误），因此没有执行任何操作。请直接输出动作标签来执行，格式必须为 <dsh-action name="工具名">{"参数":值}</dsh-action>（注意拼写是 dsh-action，不是 dash-action；标签成对出现，参数为合法 JSON）。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
         history.push({ role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
         appendHistory(outputDir, { role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
         continue

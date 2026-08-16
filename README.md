@@ -12,6 +12,11 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | 中文 | English |
 |---|---|
 | **创作工作流仪表盘**：主行动卡（推荐下一步）+ 创作旅程进度条 + 状态条 + 待办队列 + 资产健康 | **Workflow dashboard**: next-action hero card, journey progress bar, status strip, todo queue, asset health |
+| **书架首页**：书卡网格（封面/简介/进度）+ 开书向导独立页，进入工坊先选书 | **Bookshelf home**: book card grid with covers, blurbs and progress, plus a dedicated book-wizard page |
+| **正文编辑 + AI 审查 + 保存**：章节工作区直接改文，审查草稿不落盘，保存即审稿（沿用报告不重复审） | **Edit → AI check → save**: edit chapter text, review the draft without persisting, save-with-review reuses the report |
+| **按意见修订**：审稿未通过时一键按意见自动修订（指令自动预填 high 优先问题） | **Revise by review**: one click to revise with the review feedback pre-filled |
+| **国风模块**：总纲 / 道藏 / 大世界 / 人物志 / 暗线 / 编年录 / 文戒 / 笔法帖 / 心法 | **Wuxia-flavored modules**: outline, story bible, world, characters, foreshadows, fact ledger, anti-AI rules, style templates, custom style |
+| **规模化加固**：上下文分片、相关事实注入、质检/影响分析分批、status 瘦身、按卷折叠、token 优化（摘要+事实合并省 25%） | **Scale hardening**: sharded contexts, related-fact injection, batched audit/impact, slim status, volume folding, token optimizations |
 | **开书向导**：书架新建书时直接导入大纲（docx/粘贴），开书即建项目，书名自动识别 | **Book wizard**: create a book with its outline in one step — project is built immediately |
 | **大纲只读化**：开书后大纲页只读展示；「更新大纲」可选仅改文本（保留进度）或重置项目重来 | **Read-only outline**: after opening a book the outline is read-only; update offers keep-progress or full reset |
 | **章节计划结构化**：每章含 本章目标 / 剧情要点 / 爽点·钩子 / 结尾钩子 | **Structured chapter beats**: goal / plot points / payoff-hook / ending hook per chapter |
@@ -19,10 +24,10 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **全书一致性质检**：LLM 扫描全本，输出矛盾清单（定位到章），一键去修订 | **Book audit**: LLM scans all chapters for contradictions, locates them, one-click to revise |
 | **角色卡**：出场统计精确计算 + LLM 聚合当前状态，历史章节可回填事实库 | **Character cards**: precise appearance stats + LLM-aggregated status; backfill for old chapters |
 | **润色/修订工作区**：左栏原文（选中即局部修订）+ 右栏指令/预览/应用，草稿制不覆盖原稿，自动备份 .bak | **Revision workspace**: editable original + selection-targeted local edits, draft-apply flow with auto-backup |
-| **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆，不占用工作台 | **Floating AI assistant**: draggable, resizable, position remembered |
+| **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆；「编辑老师」全量知情 + 影响分析 + 步骤卡片 + 思考计时 + 清空聊天 | **Floating AI assistant**: draggable, resizable, position remembered; full-context "editor" persona with impact analysis and live step cards |
 | **分组导航 + 状态角标**：创作/工具/数据库分组，章节待办/伏笔/进度角标 | **Grouped nav + badges**: creation/tools/database groups with live badges |
 | **iOS 风格毛玻璃 UI**（浅色/深色） | **iOS-style frosted glass UI** (light/dark) |
-| **书架 / 伏笔管理 / 写作资产（题材·推进·写法·反AI规则·自定义引擎）/ 全本导出（TXT/MD）** | **Bookshelf / foreshadowing / writing assets / full-book export (TXT/MD)** |
+| **书架 / 伏笔管理 / 写作资产（题材·推进·写法·反AI规则·自定义引擎）/ 全本导出（TXT/MD）/ 卷首语与封面** | **Bookshelf / foreshadowing / writing assets / full-book export (TXT/MD) / blurb & cover** |
 
 ## 快速开始 / Quick Start
 
@@ -131,8 +136,14 @@ and mount it any time.
 
 - **Workflow dashboard**: next-action hero card with a reason, a 6-stage journey
   progress bar, a status strip, a todo queue, and asset health
-- **Book wizard**: create a book with its outline in one step — project is built
-  immediately and the title is inferred from the outline
+- **Bookshelf home**: book card grid with covers, blurbs and progress; a
+  dedicated book-wizard page opens a new book with its outline in one step
+- **Edit → AI check → save**: edit chapter text in the workspace, review the
+  draft without persisting, and save-with-review reuses the report (never
+  double-review); one-click "revise by review" pre-fills the feedback
+- **Wuxia-flavored modules**: 总纲 (outline), 道藏 (story bible), 大世界 (world),
+  人物志 (characters), 暗线 (foreshadows), 编年录 (fact ledger), 文戒 (anti-AI
+  rules), 笔法帖 (style templates), 心法 (custom style)
 - **Read-only outline**: after opening a book the outline page is read-only;
   "Update outline" offers either keep-progress text update or full project reset
 - **Structured chapter beats**: every planned chapter carries goal / plot points /
@@ -147,13 +158,18 @@ and mount it any time.
 - **Revision workspace**: editable original on the left (select text for
   targeted local edits), instruction + preview + apply/cancel on the right;
   drafts never overwrite until applied, and applying auto-backs-up the original
-- **Floating AI assistant**: draggable, resizable, position-remembered dialog —
-  chat while working in other tabs
+- **Floating AI assistant**: draggable, resizable, position-remembered dialog
+  with a full-context "editor" persona, impact analysis, live step cards and
+  conversation clearing
 - **Grouped navigation with live badges**: creation / tools / database groups,
   badges for chapter todos, foreshadows and journey progress
+- **Scale hardening**: sharded book contexts, related-fact injection, batched
+  audit/impact analysis, slim status payload, volume folding and token
+  optimizations (summary+facts merged into one call, ~25% cheaper batches)
 - **iOS-style frosted glass UI** with light & dark palettes
 - Bookshelf, foreshadowing management, writing assets (genre / progression /
-  style templates / anti-AI rules / custom style engine), full-book export
+  style templates / anti-AI rules / custom style engine), full-book export,
+  blurb & cover
 
 ## Getting Started
 

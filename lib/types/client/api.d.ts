@@ -28,6 +28,12 @@ export declare class NovelApi {
     foreshadow(req: ForeshadowRequest): Promise<ForeshadowResponse>;
     exportBook(format: 'txt' | 'md'): Promise<ExportResponse>;
     chapter(no: number): Promise<ChapterResponse>;
+    /** 审查手动编辑的正文（不落盘）。 */
+    chapterCheck(no: number, text: string): Promise<{
+        report: ReviewReport;
+    }>;
+    /** 保存手动编辑的正文（自动备份 .bak；带报告则沿用落盘，否则保存后自动审稿）。 */
+    chapterSave(no: number, text: string, report?: ReviewReport): Promise<import('../protocol.ts').ChapterSaveResponse>;
     patchConfig(patch: ConfigPatch): Promise<{
         config: NovelConfig;
     }>;
@@ -55,6 +61,25 @@ export declare class NovelApi {
     /** 设定圣经局部修补。 */
     biblePatch(patch: import('../protocol.ts').BiblePatchRequest): Promise<{
         bible: import('../protocol.ts').StoryBible;
+    }>;
+    /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
+    blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{
+        blurb: string;
+    }>;
+    /** 封面：读取（dataUrl；dir 指定某本书的输出目录，省略为当前书）。 */
+    coverGet(dir?: string): Promise<import('../protocol.ts').CoverResponse>;
+    /** 封面：上传（base64 data URL）或移除。 */
+    coverPost(action: 'upload' | 'remove', dataUrl?: string): Promise<{
+        ok: boolean;
+        coverPath?: string | null;
+    }>;
+    /** 重命名当前书（同步项目与书架条目）。 */
+    rename(bookName: string): Promise<{
+        bookName: string;
+    }>;
+    /** 大世界：AI 提炼（generate）或手动保存（save）。 */
+    world(action: 'generate' | 'save', world?: import('../protocol.ts').WorldState): Promise<{
+        world: import('../protocol.ts').WorldState;
     }>;
     /** 切换当前书。 */
     bookActivate(id: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
@@ -95,4 +120,8 @@ export declare class NovelApi {
     assistant(message: string, onFrame: (frame: import('../protocol.ts').AssistantFrame) => void): Promise<void>;
     /** Load the persisted assistant conversation. */
     assistantHistory(): Promise<import('../protocol.ts').AssistantMessage[]>;
+    /** 清空助手对话记录。 */
+    assistantClear(): Promise<{
+        ok: boolean;
+    }>;
 }

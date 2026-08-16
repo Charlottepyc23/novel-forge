@@ -575,6 +575,37 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   gap: 8px;
 }
 
+/* 章节按卷分组 */
+.volumeGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.volumeGroupHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--nf-bg-inset);
+  border: 1px solid var(--nf-border);
+  cursor: pointer;
+  user-select: none;
+  font-size: 13px;
+  transition: border-color 0.15s ease;
+}
+
+.volumeGroupHeader:hover {
+  border-color: var(--nf-accent);
+}
+
+.volumeGroupToggle {
+  flex: none;
+  font-size: 11px;
+  color: var(--nf-text-2);
+}
+
 .chapter {
   display: flex;
   align-items: center;
@@ -780,6 +811,92 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   color: var(--nf-text-2);
   max-height: 180px;
   overflow-y: auto;
+}
+
+/* 助手状态条：编辑老师正在做什么 */
+.assistantStatus {
+  flex: none;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--nf-text-2);
+  background: var(--nf-bg-inset);
+  border: 1px solid var(--nf-border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistantStatusBusy {
+  color: var(--nf-accent);
+  border-color: var(--nf-accent);
+  background: var(--nf-accent-soft);
+  font-weight: 600;
+}
+
+/* 工具步骤卡片 */
+.toolSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.toolStep {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  background: var(--nf-bg-inset);
+  border: 1px solid var(--nf-border);
+}
+
+.toolStepActive {
+  border-color: var(--nf-accent);
+  background: var(--nf-accent-soft);
+}
+
+.toolStepError {
+  border-color: var(--nf-error);
+  background: color-mix(in srgb, var(--nf-error) 8%, transparent);
+}
+
+.toolStepIcon {
+  flex: none;
+  font-size: 13px;
+}
+
+.toolStepName {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolStepStatus {
+  flex: none;
+  color: var(--nf-text-2);
+  font-size: 11px;
+}
+
+.toolStepActive .toolStepStatus {
+  color: var(--nf-accent);
+}
+
+.toolStepError .toolStepStatus {
+  color: var(--nf-error);
+}
+
+.toolStepDetail {
+  width: 100%;
+  color: var(--nf-error);
+  font-size: 11px;
+  word-break: break-all;
 }
 
 /* ------------------------------------------------------------ progress console */
@@ -1406,6 +1523,236 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   cursor: nwse-resize;
   background:
     linear-gradient(135deg, transparent 0 55%, var(--nf-border-strong) 55% 62%, transparent 62%) no-repeat 4px 4px / 12px 12px;
+}
+
+/* 封面预览：完整显示（contain），不裁剪 */
+.coverPreview {
+  flex: none;
+  width: 150px;
+  height: 200px;
+  border: 1px solid var(--nf-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--nf-bg-inset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.coverPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.coverPlaceholder {
+  font-size: 12px;
+  color: var(--nf-text-3);
+}
+
+/* ------------------------------------------------------------ shelf view */
+
+.shelfView {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.shelfHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shelfGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+.bookCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--nf-border);
+  border-radius: 16px;
+  padding: 12px;
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--nf-shadow);
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.bookCard:hover {
+  border-color: var(--nf-accent);
+  transform: translateY(-2px);
+  box-shadow: var(--nf-shadow-lg);
+}
+
+.bookCardActive {
+  border-color: var(--nf-accent);
+  box-shadow: 0 0 0 3px var(--nf-accent-soft);
+}
+
+.bookCardCover {
+  flex: none;
+  aspect-ratio: 3 / 4;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--nf-bg-inset);
+  border: 1px solid var(--nf-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bookCardCover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.bookCardCoverFallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(400px 200px at 80% -20%, color-mix(in srgb, var(--nf-accent) 25%, transparent), transparent 70%),
+    linear-gradient(155deg, var(--nf-bg-inset), color-mix(in srgb, var(--nf-accent) 10%, var(--nf-bg-inset)));
+}
+
+.bookCardCoverTitle {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--nf-accent);
+  letter-spacing: 2px;
+}
+
+.bookCardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.bookCardTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.bookCardName {
+  font-weight: 700;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookCardBlurb {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 34px;
+}
+
+.bookCardProgressBar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--nf-border);
+  overflow: hidden;
+}
+
+.bookCardProgressFill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--nf-info), var(--nf-accent));
+  transition: width 0.3s ease;
+}
+
+.bookAddCard {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  border-style: dashed;
+  color: var(--nf-text-2);
+  min-height: 260px;
+}
+
+.bookAddCard:hover {
+  color: var(--nf-accent);
+}
+
+.bookAddIcon {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--nf-accent);
+}
+
+.bookCreateCard {
+  min-height: 260px;
+  border-color: var(--nf-accent);
+}
+
+/* -------------------------------------------------------- create book view */
+
+.createBookView {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.createBookTop {
+  display: flex;
+  align-items: center;
+}
+
+.createBookCard {
+  align-self: center;
+  width: min(520px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--nf-border);
+  border-radius: 20px;
+  padding: 26px 28px;
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  box-shadow: var(--nf-shadow-lg);
+}
+
+.createBookIcon {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.createBookTitle {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
 }
 
 .progressLineDone {

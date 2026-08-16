@@ -57,11 +57,14 @@ export function bookshelfSnapshot(store: BookshelfStore): BookshelfSnapshot {
     books: store.books.map(book => {
       const project = loadProject(book.outputDir)
       const done = project === undefined ? 0 : project.chapters.filter(c => c.status === 'approved' || c.status === 'written' || c.status === 'rejected').length
+      const hasCover = project?.coverPath !== undefined && project.coverPath !== '' && existsSync(join(book.outputDir, project.coverPath))
       return {
         ...book,
         done,
         total: project?.chapters.length ?? 0,
         hasProject: project !== undefined,
+        hasCover,
+        blurb: project?.blurb,
       }
     }),
     activeBookId: store.activeBookId,
