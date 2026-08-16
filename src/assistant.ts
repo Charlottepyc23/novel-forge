@@ -39,7 +39,7 @@ export const ASSISTANT_HISTORY_FILE = 'novel-assistant.jsonl'
 const MAX_TOOL_ROUNDS = 6
 
 /** Max history messages kept in context (older ones summarized away). */
-const MAX_HISTORY_MESSAGES = 24
+const MAX_HISTORY_MESSAGES = 18
 
 // ------------------------------------------------------------------ history
 
@@ -83,7 +83,7 @@ export function clearAssistantHistory(outputDir: string): void {
 function renderProjectSnapshot(project: ProjectState): string {
   const sections: string[] = []
   sections.push(`书名：${project.bookName}`)
-  sections.push(`大纲节选（如需全文用 outline_text 工具）：\n${project.outline.slice(0, 2500)}`)
+  sections.push(`总纲节选（如需全文用 outline_text 工具）：\n${project.outline.slice(0, 2500)}`)
   // 写作资产名称化（占位小，需要详情用 assets_status）。
   const assetNames: string[] = []
   if (project.assets?.genre !== undefined) assetNames.push(`题材：${project.assets.genre.name}`)
@@ -93,7 +93,7 @@ function renderProjectSnapshot(project: ProjectState): string {
   if (assetNames.length > 0) sections.push(`【写作资产】${assetNames.join(' · ')}`)
   if (project.bible !== undefined) {
     const bible = project.bible
-    sections.push('【设定圣经】')
+    sections.push('【道藏】')
     if (bible.genre !== '') sections.push(`题材基调：${bible.genre}`)
     if (bible.worldRules.length > 0) sections.push('世界规则：\n' + bible.worldRules.map(r => `- ${r}`).join('\n'))
     if (bible.characters.length > 0) {
@@ -141,19 +141,19 @@ function renderProjectSnapshot(project: ProjectState): string {
     }
   }
   if (project.foreshadows.length > 0) {
-    sections.push('【伏笔】')
+    sections.push('【暗线】')
     for (const f of project.foreshadows) {
       sections.push(`- [${f.status}] ${f.description}${f.targetChapter !== undefined ? `（预计 ${f.targetChapter} 章回收）` : ''}`)
     }
   }
   if ((project.facts ?? []).length > 0) {
-    sections.push('【已确立事实库（最近 40 条，回答设定问题必须遵守）】')
+    sections.push('【已确立编年录（最近 40 条，回答设定问题必须遵守）】')
     for (const f of (project.facts ?? []).slice(-40)) {
       sections.push(`- [第${f.chapterNo}章] ${f.text}`)
     }
   }
   if (project.blurb !== undefined && project.blurb !== '') {
-    sections.push(`【小说简介】${project.blurb}`)
+    sections.push(`【卷首语】${project.blurb}`)
   }
   return sections.join('\n')
 }
@@ -165,33 +165,35 @@ function assistantSystemPrompt(project: ProjectState): string {
     '人设：二十年网文老编辑，懂套路、懂市场、懂节奏，说话直接但句句有用。',
     '座右铭：「书是你的，但坑我替你盯着。」',
     '职责边界：陪作者讨论剧情/人设/世界观/爽点节奏并落地修改、维护全书一致性；不闲聊、不彩虹屁、不无意义长篇大论。',
+    '==================== 模块正式名称（回复作者时一律使用，禁止使用括号里的旧称） ====================',
+    '总纲 = 总纲；道藏 = 道藏；暗线 = 暗线；卷首语 = 卷首语；编年录 = 编年录。',
     '==================== 当前项目快照 ====================',
     renderProjectSnapshot(project),
     '==================== 快照结束 ====================',
     '',
     '工作规则（严格遵守）：',
-    '1. 全量知情：回答和修改必须基于项目真实数据，禁止编造书中不存在的设定。需要完整信息时，先调用 book_overview 获取全书上下文（大纲全文/设定圣经/大世界/事实库/全部章节要点/伏笔/简介）；需要某章正文用 chapter_text。',
+    '1. 全量知情：回答和修改必须基于项目真实数据，禁止编造书中不存在的设定。需要完整信息时，先调用 book_overview 获取全书上下文（总纲全文/道藏/大世界/编年录/全部章节要点/暗线/卷首语）；需要某章正文用 chapter_text。',
     '2. 修改流程：改前用一句话说明意图 → 执行工具 → 改后简要汇报。',
-    '3. 连锁维护：改动可能波及其它位置（其它章节、设定、事实库、简介）时，执行后主动调用 impact_analysis 分析影响面，并把「必须同步」的项一并处理或明确提示作者逐项确认。',
+    '3. 连锁维护：改动可能波及其它位置（其它章节、设定、编年录、卷首语）时，执行后主动调用 impact_analysis 分析影响面，并把「必须同步」的项一并处理或明确提示作者逐项确认。',
     '4. 删除红线：删除章节、清空设定等破坏性操作必须等作者明确同意。',
     '5. 品质门槛：建议必须具体——指出问题在哪一章、哪一段、哪一句，并给出可落地的改法；禁止"建议增强冲突"这类空话。',
-    '6. 设定忠诚：忠于大纲、设定圣经、大世界、事实库；发现书中已有内容与设定冲突时，主动指出并给修正方案。',
+    '6. 设定忠诚：忠于总纲、道藏、大世界、编年录；发现书中已有内容与设定冲突时，主动指出并给修正方案。',
     '7. 中文回复，简洁有干货。',
     '',
     '可用工具：',
-    '- book_overview：{"scope": "recent|full|volume:2"(可选，默认 recent)}。返回全书上下文包（大纲/道藏/大世界/章节要点/事实库/伏笔/简介）。recent=最近30章；full=全部章节（书很长时慎用）；volume:N=只看第N卷。',
-    '- facts_query：{"keyword": "关键词"}。从编年录（事实库）按关键词检索相关事实（如灵石、境界名、人物名）。',
-    '- impact_analysis：{"change": "要做的修改描述"}。分析这次改动会波及哪些位置，返回影响清单（定位到章节/设定/事实库）。',
-    '- outline_text：无参数。返回当前大纲全文。',
-    '- outline_replace：{"old": "要替换的原文片段", "new": "新文本"}。在大纲中替换一段文字（old 必须能在大纲中找到）。',
-    '- bible_set_rule：{"index": 序号(0起), "text": "新规则文本"} 或 {"append": "追加的规则"}。修改设定圣经的世界规则。',
+    '- book_overview：{"scope": "recent|full|volume:2"(可选，默认 recent)}。返回全书上下文包（总纲/道藏/大世界/章节要点/编年录/暗线/卷首语）。recent=最近30章；full=全部章节（书很长时慎用）；volume:N=只看第N卷。',
+    '- facts_query：{"keyword": "关键词"}。从编年录按关键词检索相关事实（如灵石、境界名、人物名）。',
+    '- impact_analysis：{"change": "要做的修改描述"}。分析这次改动会波及哪些位置，返回影响清单（定位到章节/设定/编年录）。',
+    '- outline_text：无参数。返回当前总纲全文。',
+    '- outline_replace：{"old": "要替换的原文片段", "new": "新文本"}。在总纲中替换一段文字（old 必须能在总纲中找到）。',
+    '- bible_set_rule：{"index": 序号(0起), "text": "新规则文本"} 或 {"append": "追加的规则"}。修改道藏的世界规则。',
     '- bible_set_redline：同上，修改写作红线。',
     '- chapter_text：{"no": 章节号}。返回该章正文。',
     '- chapter_rewrite：{"no": 章节号, "instructions": "修改要求", "target": "原文片段(可选，留空整章)"}。按讨论结果修订章节；给了 target 只改该自然段。',
     '- chapter_generate：{"no": 章节号}。重新生成该章。',
     '- chapter_review：{"no": 章节号}。对该章执行 AI 审稿。',
-    '- foreshadow_add：{"description": "伏笔描述", "targetChapter": 预计回收章(可选)}。新增伏笔。',
-    '- foreshadow_update：{"id": "伏笔id", "status": "planned|planted|progressing|resolved|abandoned"}。更新伏笔状态。',
+    '- foreshadow_add：{"description": "暗线描述", "targetChapter": 预计回收章(可选)}。新增暗线。',
+    '- foreshadow_update：{"id": "暗线id", "status": "planned|planted|progressing|resolved|abandoned"}。更新暗线状态。',
     '- export_txt：无参数。导出全本 TXT。',
     '- assets_status：无参数。查看本书当前写作资产（题材/推进模式/反AI规则/写法）。',
     '- assets_set_genre：{"name": "题材名", "description": "题材说明(可选)"}。设置本书题材基底。',
@@ -199,25 +201,29 @@ function assistantSystemPrompt(project: ProjectState): string {
     '- assets_add_rule：{"name": "规则名(可选)", "avoid": "要避免的表达问题", "fix": "修正方向(可选)}。新增反 AI 规则。',
     '',
     '回答质量要求（非常重要）：',
-    '- 具体：回答必须引用项目里的真实内容（人名、境界、章节、伏笔、设定），禁止空泛套话。快照里没有的信息，先调用工具获取（chapter_text / outline_text）再回答。',
+    '- 具体：回答必须引用项目里的真实内容（人名、境界、章节、暗线、设定），禁止空泛套话。快照里没有的信息，先调用工具获取（chapter_text / outline_text）再回答。',
     '- 专业：给建议时说明理由，指出问题所在章节/段落，给出可直接落地的修改方案（改什么、怎么改）。',
     '- 主动：作者说"改一下"，主动调用对应工具执行，不要只给建议不动手；执行前用一句话说明意图，执行后简短汇报结果。',
-    '- 忠于设定：以大纲、设定圣经、事实库为准，不得自相矛盾；发现问题（如剧情与设定冲突）主动指出。',
+    '- 忠于设定：以总纲、道藏、编年录为准，不得自相矛盾；发现问题（如剧情与设定冲突）主动指出。',
     '- 中文回复；文字量适中，别啰嗦。',
     '',
     '使用规则（非常重要）：',
     '- 当你想执行任何工具时，你的【整个回复】必须只包含动作指令标签，格式如下（不要有任何解释文字、不要用自然语言说"我要去改"，直接输出标签）：',
     '  正确示例：<dsh-action name="outline_replace">{"old":"要替换的原文","new":"新文本"}</dsh-action>',
     '  正确示例：<dsh-action name="chapter_text">{"no":1}</dsh-action>',
-    '  错误示例（绝对不要这样回复）："好的，我先看一下大纲，马上改。" ← 这只是文字，不会执行任何操作',
+    '  错误示例（绝对不要这样回复）："好的，我先看一下总纲，马上改。" ← 这只是文字，不会执行任何操作',
+    '  错误示例（绝对不要这样回复）："先拉完整上下文确认改动落地情况，避免继续空转。" ← 没有动作标签，不会执行任何操作',
+    '  错误示例（绝对不要这样回复）："现在处理暗线库，我先看当前列表定位 id。" ← 没有动作标签，不会执行任何操作',
+    '- 铁律：只要你想执行任何操作，你的【整个回复】必须只包含一个动作标签，禁止先说话、禁止解释"我要做什么"、禁止铺垫——直接输出标签。',
+    '- 如果你收到「格式提示」（宿主说你没有输出动作标签）：你的下一条回复必须只输出动作标签，禁止再解释、禁止再道歉、禁止再描述计划。',
     '- 工具调用是自动的：你输出标签后，宿主会执行并把结果反馈给你，你再基于结果继续。',
     '- 每次回复最多调用 1 个动作；执行结果会反馈给你，你可以继续讨论或再调用。',
-    '- 需要先看大纲/章节再决定怎么改？那就先输出一个 outline_text / chapter_text 的标签，等结果回来。',
+    '- 需要先看总纲/章节再决定怎么改？那就先输出一个 outline_text / chapter_text 的标签，等结果回来。',
     '- chapter_rewrite 的 target 参数：从章节正文中复制一小段（一句话或几句话即可），不要带换行、不要带引号，取连续文本片段。',
     '- 如果工具执行失败（例如片段未找到），根据错误信息修正参数后自动重试一次，不要直接放弃或让作者手动操作。',
     '- 修改前先向作者说明你要改什么、为什么；动作执行后简要汇报结果。',
     '- 涉及删除类操作（删除章节、清空设定）必须等作者明确同意。',
-    '- 严格忠于设定圣经与大纲；不得自行发明与既有设定冲突的内容。',
+    '- 严格忠于道藏与总纲；不得自行发明与既有设定冲突的内容。',
     '- 用中文回复。',
   ].join('\n')
 }
@@ -260,7 +266,7 @@ export async function* executeAction(
       return bookOverview(project, scope)
     }
     case 'facts_query': {
-      // 从编年录（事实库）按关键词检索相关事实。
+      // 从编年录按关键词检索相关事实。
       const keyword = str(args.keyword).trim()
       if (keyword === '') throw new Error('facts_query 需要 keyword')
       const hits = (project.facts ?? []).filter(f => f.text.includes(keyword)).slice(-30)
@@ -282,12 +288,12 @@ export async function* executeAction(
       const old = str(args.old)
       const next = str(args.new)
       if (old === '' || !project.outline.includes(old)) {
-        throw new Error(`大纲中未找到片段「${old.slice(0, 40)}…」`)
+        throw new Error(`总纲中未找到片段「${old.slice(0, 40)}…」`)
       }
       project.outline = project.outline.replace(old, next)
       project.updatedAt = new Date().toISOString()
       saveProject(outputDir, project)
-      return `大纲已修改：替换了 ${old.length} 字符的片段。`
+      return `总纲已修改：替换了 ${old.length} 字符的片段。`
     }
     case 'bible_set_rule': {
       if (project.bible === undefined) throw new Error('尚无道藏，请先提炼')
@@ -393,20 +399,20 @@ export async function* executeAction(
       })
       project.updatedAt = new Date().toISOString()
       saveProject(outputDir, project)
-      return `已新增伏笔：「${description.slice(0, 50)}」`
+      return `已新增暗线：「${description.slice(0, 50)}」`
     }
     case 'foreshadow_update': {
       const id = str(args.id)
       const status = str(args.status) as 'planned' | 'planted' | 'progressing' | 'resolved' | 'abandoned'
       const target = project.foreshadows.find(f => f.id === id)
-      if (target === undefined) throw new Error(`伏笔 ${id} 不存在`)
+      if (target === undefined) throw new Error(`暗线 ${id} 不存在`)
       if (!['planned', 'planted', 'progressing', 'resolved', 'abandoned'].includes(status)) {
         throw new Error(`非法状态 ${status}`)
       }
       target.status = status
       project.updatedAt = new Date().toISOString()
       saveProject(outputDir, project)
-      return `伏笔已更新为 ${status}：「${target.description.slice(0, 50)}」`
+      return `暗线已更新为 ${status}：「${target.description.slice(0, 50)}」`
     }
     case 'export_txt': {
       const result = exportBook(outputDir, project, 'txt')
@@ -512,7 +518,7 @@ function historyToMessages(history: AssistantMessage[]): Message[] {
         source: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
       }))
     } else if (entry.role === 'tool') {
-      // 工具结果（book_overview/大纲全文等可能很大）截断后进上下文，
+      // 工具结果（book_overview/总纲全文等可能很大）截断后进上下文，
       // 避免多轮对话上下文翻倍膨胀触发「上下文到限制」。
       const body = entry.content.length > 2000
         ? entry.content.slice(0, 2000) + '\n…（结果过长已截断，需要完整内容请重新调用工具）'
@@ -534,6 +540,15 @@ async function chatOnce(
   history: AssistantMessage[],
 ): Promise<string> {
   const messages = historyToMessages(history)
+  // 纪律提醒贴在最后一条消息（当前用户输入）末尾：紧邻模型要生成回复的位置，
+  // 比放在 system 里更不容易被长上下文稀释（位置效应）。
+  const last = messages[messages.length - 1]
+  if (last?.role === 'user' && Array.isArray(last.content)) {
+    const text = (last.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')
+    if (text !== undefined && typeof text.text === 'string') {
+      text.text += '\n\n（回复格式提醒：如果你需要执行任何操作，你的回复必须【只包含】一个 <dsh-action name="工具名">{"参数":值}</dsh-action> 标签，禁止先说话、禁止解释、禁止铺垫；如果你只是在回答或讨论，正常回复即可，不要输出标签。）'
+    }
+  }
   const request: GenerateOptions = {
     provider: config.provider,
     model: config.model,
@@ -590,20 +605,28 @@ export async function* runAssistantTurn(
   appendHistory(outputDir, userEntry)
 
   let round = 0
-  /** Whether we already nudged the model to emit an action tag (avoid loops). */
-  let nudged = false
+  /** 已提示模型输出动作标签的次数（0 = 尚未提示；超过上限则按纯文字回复结束，防死循环）。 */
+  let nudged = 0
+  const MAX_NUDGES = 6
   for (;;) {
+    if (round++ > 20) break
     const reply = await chatOnce(ctx, config, system, history)
     const action = extractAction(reply)
 
     if (action === undefined) {
       // No parseable action tag. If the reply clearly intends to modify
-      // something (or contains a malformed action tag), nudge once.
-      const intendsAction = /(改|修改|修订|重写|替换|调整|生成|新增|删除|导出|看看|查看|调出|读一下|加上|加一个|去掉|删掉|把.+改成)/.test(reply)
+      // something (or contains a malformed action tag), nudge — repeatedly,
+      // with escalating firmness, until the model emits a tag or gives up.
+      const intendsAction = /(改|修改|修订|重写|替换|调整|生成|新增|删除|导出|看看|查看|调出|读一下|加上|加一个|去掉|删掉|把.+改成|定位|处理|转轨|检查|确认|搜索|找一下|列一下|查一下|查一遍|查一查|再查|查查|核实|核对|清点|盘点|看一下|看下|继续)/.test(reply)
+      // 兜底：回复提到任何可操作对象名词（即使动词是"看/查/说"的变体）也视为有操作意图，
+      // 避免"先查一遍编年录"这类措辞漏网被静默当作纯聊天。
+      const mentionsTarget = /(编年录|道藏|暗线|总纲|卷首语|章节|正文|规则|红线|伏笔|简介|大纲|事实|设定|世界|角色|人物|第\s*\d+\s*章)/.test(reply)
       const strayTag = /<[a-z_-]*action[^>]*>/.test(reply)
-      if ((intendsAction || strayTag) && !nudged) {
-        nudged = true
-        const nudge = '你的上一条回复表达了想操作项目的意图（或动作标签格式有误），因此没有执行任何操作。请直接输出动作标签来执行，格式必须为 <dsh-action name="工具名">{"参数":值}</dsh-action>（注意拼写是 dsh-action，不是 dash-action；标签成对出现，参数为合法 JSON）。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
+      if ((intendsAction || mentionsTarget || strayTag) && nudged < MAX_NUDGES) {
+        const nudge = nudged === 0
+          ? '你的上一条回复表达了想操作项目的意图（或动作标签格式有误），因此没有执行任何操作。请直接输出动作标签来执行，格式必须为 <dsh-action name="工具名">{"参数":值}</dsh-action>（注意拼写是 dsh-action，不是 dash-action；标签成对出现，参数为合法 JSON）。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
+          : `你第 ${nudged + 1} 次表达了操作意图但没有输出动作标签，因此仍未执行任何操作。铁律：你的【整个回复】现在必须只包含一个 <dsh-action> 标签（例如 <dsh-action name="chapter_text">{"no":1}</dsh-action>），禁止任何解释、铺垫或"我这就去"之类的文字。若你其实不打算执行任何操作，请明确回复「不执行」。`
+        nudged++
         history.push({ role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
         appendHistory(outputDir, { role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
         continue

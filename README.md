@@ -29,7 +29,10 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **审稿问题勾选修复**：审查报告每条问题可勾选，一键按所选问题修订（默认勾 high） | **Selective review fixes**: check any review issues (high pre-checked) and fix them in one click |
 | **编辑器字号可调**：设置页 12-24px + 编辑页 A−/A＋ 快捷调整（localStorage 记忆） | **Adjustable editor font size**: 12-24px in settings plus A−/A＋ in the editor toolbar (localStorage) |
 | **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆；「编辑老师」全量知情 + 影响分析 + 步骤卡片 + 思考计时 + 清空聊天 | **Floating AI assistant**: draggable, resizable, position remembered; full-context "editor" persona with impact analysis and live step cards |
-| **剧情线管理**：主线/支线/人物线/悬念线，目标与进度追踪、章节关联；生成时强制每章推进至少一条活跃线，工作流页实时进度 | **Plotline management**: main/branch/character/mystery arcs with goals, progress and linked chapters; generation must advance an active arc, live progress on the dashboard |
+| **剧情线管理**：主线/支线/人物线/悬念线，目标与进度追踪、章节关联；生成时强制每章推进至少一条活跃线，工作台实时进度 | **Plotline management**: main/branch/character/mystery arcs with goals, progress and linked chapters; generation must advance an active arc, live progress on the workbench |
+| **AI 剧情规划**：健康检查（是否需要新线/多少章后加/各线健康度）+ 一键设计剧情方案（下一阶段方向 + 建议新线可采纳）+ 单线 AI 刷新进度 | **AI plotline planning**: health check (need new arcs? when?) + one-click design plan (next-stage direction + adoptable arcs) + per-arc progress refresh |
+| **作者复盘**：每章自动复盘（钩子兑现/结尾钩子强度/剧情线推进/连续性/节奏趋势），按卷分组的复盘记录页，复盘自动关联推进的剧情线 | **Author review**: per-chapter structural review (hook payoff / ending hook / arc progress / continuity / pacing), volume-grouped records page, auto-links advanced arcs |
+| **工作进度悬浮窗**：工具组入口，可拖拽/缩放/位置记忆；当前任务大进度条 + 全量活动记录，任务开始自动弹出 | **Floating progress console**: draggable/resizable window from the tools nav with live task progress bar + full activity log, auto-opens on task start |
 | **角色知情度**：每个角色"已知信息"清单，生成与审稿严格维护信息差（未列出的信息角色一律不知道） | **Character knowledge**: per-character known-info lists; writing & review enforce information asymmetry strictly |
 | **敏感词检查**：内置违禁词库（政治/擦边/暴力/辱骂/广告）全书一键扫描，命中定位到章并一键去修订 | **Sensitive-word check**: built-in banned-word library scans all chapters, hits located per chapter with one-click fix |
 | **编年录独立页**：事实库从设置页移入数据库导航，支持一键回填历史章节 | **Chronicle tab**: the fact ledger moved into the database nav with one-click backfill |

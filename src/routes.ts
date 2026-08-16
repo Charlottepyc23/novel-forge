@@ -22,6 +22,7 @@ import {
   type AssistantHistoryResponse,
   type AssistantRequest,
   type AuditResponse,
+  type AuthorReview,
   type BiblePatchRequest,
   type BibleRequest,
   type BlurbRequest,
@@ -74,6 +75,8 @@ import { BUILTIN_ANTI_AI_RULES, BUILTIN_GENRE_LIBRARY, BUILTIN_PROGRESSION_MODES
 import {
   chapterFileName,
   auditBook,
+  authorReviewChapter,
+  autoLinkPlotlines,
   backfillFacts,
   createProject,
   exportBook,
@@ -89,12 +92,16 @@ import {
   polishChapterStream,
   readChapterFile,
   refreshCharacters,
+  refreshPlotlineProgress,
   reviewChapter,
   reviewChapterText,
   rewriteChapterStream,
   saveProject,
+  analyzePlotlineHealth,
+  designPlotlinePlan,
   checkSensitiveText,
   suggestForeshadows,
+  suggestPlotlines,
   summarizeAndExtractFacts,
   summarizeChapter,
   syncProjectWithDisk,
@@ -444,6 +451,31 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         } else {
           chapter.status = 'approved'
           saveProject(config.outputDir, project)
+        }
+        // 作者复盘：叙事结构检查（钩子兑现/结尾钩子/推进/连续性/趋势；不改变章节状态）。
+        if (config.autoAuthorReview ?? true) {
+          try {
+            const currentBody = readChapterFile(config.outputDir, chapter)
+            let prevTail = ''
+            if (no > 1) {
+              const prev = project.chapters.find(c => c.no === no - 1)
+              if (prev !== undefined) {
+                prevTail = (readChapterFile(config.outputDir, prev) ?? '').replace(/^#.*$/m, '').trim().slice(-600)
+              }
+            }
+            if (currentBody !== undefined) {
+              const review = await authorReviewChapter(ctx, config, project, no, currentBody, prevTail)
+              chapter.authorReview = review
+              // 复盘标记推进的剧情线 → 自动关联本章。
+              if (review.advancedLines !== undefined) {
+                autoLinkPlotlines(project, no, review.advancedLines)
+              }
+              saveProject(config.outputDir, project)
+              send({ type: 'author-review', no, review })
+            }
+          } catch (error) {
+            console.warn('[dsh-novel-forge] author review failed:', (error as Error).message)
+          }
         }
         res.end()
       } catch (error) {
@@ -1430,6 +1462,51 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
             line.progress = `推进至第 ${body.chapterNo} 章`
           }
         }
+      } else if (op === 'suggest') {
+        try {
+          const suggestions = await suggestPlotlines(ctx, config, project)
+          writeJson(res, 200, { plotlines: project.plotlines, suggestions } satisfies PlotlinesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `AI 建议失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'refresh' && body?.id !== undefined) {
+        const line = project.plotlines.find(l => l.id === body.id)
+        if (line === undefined) {
+          writeJson(res, 404, { error: '剧情线不存在' })
+          return
+        }
+        try {
+          const progress = await refreshPlotlineProgress(ctx, config, project, line)
+          line.progress = progress
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { plotlines: project.plotlines } satisfies PlotlinesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `刷新进度失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'health') {
+        try {
+          const health = await analyzePlotlineHealth(ctx, config, project)
+          writeJson(res, 200, { plotlines: project.plotlines, health } satisfies PlotlinesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `健康检查失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'plan') {
+        try {
+          const health = await analyzePlotlineHealth(ctx, config, project)
+          const plan = await designPlotlinePlan(ctx, config, project, health)
+          writeJson(res, 200, { plotlines: project.plotlines, health, plan } satisfies PlotlinesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `剧情方案生成失败：${(error as Error).message}` })
+          return
+        }
       }
       project.updatedAt = new Date().toISOString()
       saveProject(config.outputDir, project)
@@ -1482,6 +1559,95 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       }
       const response: SensitiveCheckResponse = { hits, scannedChapters: scanned }
       writeJson(res, 200, response)
+    },
+  }
+
+  // ------------------------------------------------------ author review backfill
+  /** 作者复盘补跑：对已写章节补齐 authorReview（body.chapterNo=单章 JSON，缺省=全书 NDJSON 流）。 */
+  const reviewBackfillRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.reviewBackfill,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<{ chapterNo?: number }>(req)
+
+      /** 对一章执行作者复盘（读取已落盘正文，不改变章节状态/正文）。 */
+      const runOne = async (chapter: ChapterPlan): Promise<AuthorReview> => {
+        const currentBody = readChapterFile(config.outputDir, chapter)
+        if (currentBody === undefined) throw new Error(`章节 ${chapter.no} 的正文文件不存在`)
+        let prevTail = ''
+        if (chapter.no > 1) {
+          const prev = project.chapters.find(c => c.no === chapter.no - 1)
+          if (prev !== undefined) {
+            prevTail = (readChapterFile(config.outputDir, prev) ?? '').replace(/^#.*$/m, '').trim().slice(-600)
+          }
+        }
+        return authorReviewChapter(ctx, config, project, chapter.no, currentBody, prevTail)
+      }
+
+      // 单章：JSON 响应。
+      if (typeof body?.chapterNo === 'number' && body.chapterNo > 0) {
+        const chapter = project.chapters.find(c => c.no === body.chapterNo)
+        if (chapter === undefined) {
+          writeJson(res, 404, { error: `章节 ${body.chapterNo} 不在计划中` })
+          return
+        }
+        if (chapter.status === 'pending') {
+          writeJson(res, 400, { error: '该章尚未生成正文，无法复盘' })
+          return
+        }
+        try {
+          const review = await runOne(chapter)
+          chapter.authorReview = review
+          if (review.advancedLines !== undefined) {
+            autoLinkPlotlines(project, chapter.no, review.advancedLines)
+          }
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { no: chapter.no, review } satisfies { no: number; review: AuthorReview })
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: (error as Error).message })
+          return
+        }
+      }
+
+      // 全书：NDJSON 流式补跑缺失复盘的已写章节。
+      const missing = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined)
+      if (missing.length === 0) {
+        writeJson(res, 200, { count: 0 })
+        return
+      }
+      res.writeHead(200, {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+        'cache-control': 'no-cache',
+        'referrer-policy': 'no-referrer',
+      })
+      const send = (frame: JobFrame): void => {
+        res.write(JSON.stringify(frame) + '\n')
+      }
+      let done = 0
+      for (const chapter of missing) {
+        try {
+          const review = await runOne(chapter)
+          chapter.authorReview = review
+          if (review.advancedLines !== undefined) {
+            autoLinkPlotlines(project, chapter.no, review.advancedLines)
+          }
+          done++
+          saveProject(config.outputDir, project)
+          send({ type: 'author-review', no: chapter.no, review })
+        } catch (error) {
+          console.warn(`[dsh-novel-forge] author backfill ch.${chapter.no} failed:`, (error as Error).message)
+        }
+      }
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      send({ type: 'author-backfill-done', count: done })
+      res.end()
     },
   }
 
@@ -1561,6 +1727,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     renameRoute,
     plotlinesRoute,
     sensitiveRoute,
+    reviewBackfillRoute,
     configRoute,
     openFolderRoute,
   ]

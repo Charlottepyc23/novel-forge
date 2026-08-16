@@ -13,9 +13,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import { emptyProjectAssets, renderAllAssets, styleEngineSystemPrompt } from './assets.ts'
 import type {
   AuditIssue,
+  AuthorReview,
   ChapterPlan,
   Foreshadow,
   NovelConfig,
+  Plotline,
+  PlotlineHealthReport,
+  PlotlinePlan,
   ProjectState,
   ReviewReport,
   RoleStatusCard,
@@ -785,6 +789,292 @@ export async function reviewChapterText(
     verdict: typeof raw.verdict === 'string' ? raw.verdict.slice(0, 200) : '',
     issues,
     reviewedAt: new Date().toISOString(),
+  }
+}
+
+/** Build the author-review system prompt (narrative structure, not prose). */
+function authorReviewSystemPrompt(): string {
+  return [
+    '你是一位网文作者复盘助手。你会收到：本章正文、上一章结尾（钩子）、上一章作者复盘（如有）、活跃剧情线与编年录近期事实。',
+    '请从叙事结构层面复盘本章（不评文笔，那是审稿的事）：',
+    '1. hookHonored：上一章结尾的钩子/悬念是否在本章兑现或推进（true/false）。',
+    '2. hookNote：钩子兑现情况一句话；未兑现时说明并给出"建议在第几章补"的建议。',
+    '3. endingHook：本章结尾钩子强度，0-10 的整数（低于 6 说明结尾平淡，读者可能不想看下一章）。',
+    '4. plotlineProgress：本章推进了哪条剧情线（主线/支线名），或"无实质推进"（连续无推进要提醒）。',
+    '5. advancedLines：本章实际推进的剧情线名称数组——从「活跃剧情线」清单中选出推进了的线（名称必须与清单中的线名一字不差；没推进任何线则输出空数组）。',
+    '6. continuity：与上一章结尾的衔接检查（人物位置/时间/伤势/资源/对话状态），发现问题要指出。',
+    '7. trend：结合上一章复盘看近期节奏趋势（是否连续拖沓、爽点密度是否下降、是否需要调整）。',
+    '输出必须是合法 JSON 对象，不要输出任何其他文字：',
+    '{"hookHonored": true或false, "hookNote": "一句话", "endingHook": 0-10整数, "plotlineProgress": "一句话", "advancedLines": ["线名"], "continuity": "一句话", "trend": "一句话"}',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '重要：直接输出 JSON 结果本身，不要把思考过程写在输出里。',
+  ].join('\n')
+}
+
+/** 作者复盘：对一章做叙事结构复盘（钩子兑现/结尾钩子/推进/连续性/趋势）。 */
+export async function authorReviewChapter(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  chapterNo: number,
+  body: string,
+  prevTail: string,
+): Promise<AuthorReview> {
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  const prevChapter = chapterNo > 1 ? project.chapters.find(c => c.no === chapterNo - 1) : undefined
+  const lines = (project.plotlines ?? []).filter(l => l.status === 'active' || l.status === 'paused')
+  const facts = (project.facts ?? []).slice(-10)
+  const user = [
+    `书名：《${project.bookName}》`,
+    chapter !== undefined ? `本章：第 ${chapter.no} 章《${chapter.title}》` : `本章：第 ${chapterNo} 章`,
+    prevTail !== ''
+      ? `==================== 上一章（第 ${chapterNo - 1} 章）结尾（钩子） ====================\n${prevTail}`
+      : '（本书第一章，无上一章钩子；hookHonored 视为 true，hookNote 写"开篇无前置钩子"）',
+    prevChapter?.authorReview !== undefined
+      ? `==================== 上一章作者复盘 ====================\n${JSON.stringify(prevChapter.authorReview)}`
+      : '',
+    lines.length > 0
+      ? `==================== 活跃剧情线 ====================\n${lines.map(l => `- [${l.kind}] ${l.name}：${l.goal}${l.progress !== '' ? `（${l.progress}）` : ''}`).join('\n')}`
+      : '',
+    facts.length > 0
+      ? `==================== 编年录近期事实 ====================\n${facts.map(f => `[第${f.chapterNo}章] ${f.text}`).join('\n')}`
+      : '',
+    '==================== 本章正文 ====================',
+    body.slice(0, 16000),
+    '',
+    '只输出 JSON 对象。',
+  ].join('\n')
+  const raw = parseJsonObject<{
+    hookHonored?: unknown
+    hookNote?: unknown
+    endingHook?: unknown
+    plotlineProgress?: unknown
+    advancedLines?: unknown
+    continuity?: unknown
+    trend?: unknown
+  }>(
+    await complete(ctx, config, { system: authorReviewSystemPrompt(), user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000) }),
+  )
+  // 解析推进的线名（与项目线名精确匹配；过滤不存在的名字）。
+  const knownLineNames = new Set((project.plotlines ?? []).map(l => l.name))
+  const advancedLines = Array.isArray(raw.advancedLines)
+    ? raw.advancedLines.filter((n): n is string => typeof n === 'string' && n.trim() !== '' && knownLineNames.has(n.trim())).map(n => n.trim())
+    : []
+  return {
+    hookHonored: raw.hookHonored === true,
+    hookNote: typeof raw.hookNote === 'string' ? raw.hookNote.slice(0, 200) : '',
+    endingHook: typeof raw.endingHook === 'number' ? Math.max(0, Math.min(10, Math.round(raw.endingHook))) : 5,
+    plotlineProgress: typeof raw.plotlineProgress === 'string' ? raw.plotlineProgress.slice(0, 200) : '',
+    advancedLines,
+    continuity: typeof raw.continuity === 'string' ? raw.continuity.slice(0, 200) : '',
+    trend: typeof raw.trend === 'string' ? raw.trend.slice(0, 200) : '',
+    reviewedAt: new Date().toISOString(),
+  }
+}
+
+/** 复盘后自动关联：把本章号写入复盘标记推进的剧情线（按名称匹配，去重）。 */
+export function autoLinkPlotlines(project: ProjectState, chapterNo: number, advancedLines: string[]): void {
+  if (!Array.isArray(project.plotlines) || advancedLines.length === 0) return
+  for (const line of project.plotlines) {
+    if (advancedLines.includes(line.name) && !line.chapters.includes(chapterNo)) {
+      line.chapters.push(chapterNo)
+    }
+  }
+}
+
+/** AI 建议剧情线：基于大纲/卷计划/已写章节/编年录，提炼候选线。 */
+export async function suggestPlotlines(ctx: Context, config: NovelConfig, project: ProjectState): Promise<Plotline[]> {
+  const system = [
+    '你是一位网文剧情架构师。根据本书的大纲、卷计划、已写章节标题与编年录，为作者提炼建议的剧情线（主线/支线/人物线/悬念线）。',
+    '每条线要：名称简洁有力；目标写清楚这条线最终要完成什么；progress 写当前推进到哪（没有就空字符串）。',
+    '建议 4-8 条，覆盖：1 条主线、1-2 条人物线、1-2 条悬念线、1-3 条支线。避免与大纲明显重复的废话线。',
+    '输出必须是合法 JSON 数组，格式：[{"name": "线名", "kind": "main|branch|character|mystery", "goal": "目标", "progress": ""}]',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '重要：直接输出 JSON 结果本身，不要把思考过程写在输出里。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending')
+  const user = [
+    `书名：《${project.bookName}》`,
+    `大纲（节选前 4000 字）：\n${project.outline.slice(0, 4000)}`,
+    project.volumes !== undefined && project.volumes.length > 0
+      ? `卷计划：\n${project.volumes.map(v => `第${v.no}卷《${v.title}》：${v.summary}`).join('\n')}`
+      : '',
+    written.length > 0
+      ? `已写章节：\n${written.map(c => `第${c.no}章《${c.title}》${c.summary !== undefined && c.summary !== '' ? `：${c.summary.slice(0, 80)}` : ''}`).join('\n')}`
+      : '',
+    (project.facts ?? []).length > 0
+      ? `编年录近期事实（最近 15 条）：\n${(project.facts ?? []).slice(-15).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 100)}`).join('\n')}`
+      : '',
+    '只输出 JSON 数组。',
+  ].join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.6, maxTokens: Math.max(config.maxTokens, 4000) })
+  const raw = parseJsonArray<Record<string, unknown>>(text)
+  const lines: Plotline[] = []
+  const kinds = new Set(['main', 'branch', 'character', 'mystery'])
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 40) : ''
+    if (name === '') continue
+    lines.push({
+      id: '',
+      name,
+      kind: kinds.has(entry.kind as string) ? entry.kind as Plotline['kind'] : 'branch',
+      goal: typeof entry.goal === 'string' ? entry.goal.trim().slice(0, 300) : '',
+      progress: typeof entry.progress === 'string' ? entry.progress.trim().slice(0, 300) : '',
+      status: 'active',
+      chapters: [],
+      createdAt: new Date().toISOString(),
+    })
+  }
+  return lines
+}
+
+/** AI 刷新单条剧情线的进度：结合编年录与各章摘要分析该线推进到哪。 */
+export async function refreshPlotlineProgress(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  line: Plotline,
+): Promise<string> {
+  const system = [
+    '你是一位网文剧情线管理员。请根据「剧情线信息」与「本书已写章节摘要/编年录」，判断这条线目前推进到了哪一步。',
+    '输出一句话（30-60 字）：这条线当前的状态、最近一次推进发生在第几章、下一步可能的方向。如果这条线还没开始推进，明确说"尚未推进"。',
+    '输出必须是合法 JSON 对象：{"progress": "一句话"}',
+    '重要：不要输出任何其他文字。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending' && (c.summary !== undefined && c.summary !== ''))
+  const user = [
+    `剧情线：${line.name}（${line.kind}）`,
+    `目标：${line.goal}`,
+    `已知进度：${line.progress !== '' ? line.progress : '（无）'}`,
+    `已关联章节：${line.chapters.length > 0 ? line.chapters.map(n => `第${n}章`).join('、') : '（无）'}`,
+    `章节摘要（最近 8 章）：\n${written.slice(-8).map(c => `第${c.no}章《${c.title}》：${c.summary!.slice(0, 120)}`).join('\n')}`,
+    (project.facts ?? []).length > 0
+      ? `编年录近期事实（最近 15 条）：\n${(project.facts ?? []).slice(-15).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 100)}`).join('\n')}`
+      : '',
+    '只输出 JSON 对象。',
+  ].join('\n\n')
+  const raw = parseJsonObject<{ progress?: unknown }>(
+    await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 2000) }),
+  )
+  return typeof raw.progress === 'string' ? raw.progress.trim().slice(0, 300) : ''
+}
+
+/** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
+export async function analyzePlotlineHealth(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+): Promise<PlotlineHealthReport> {
+  const system = [
+    '你是一位网文剧情架构师。请对本书的「剧情线体系」做健康检查，判断当前是否需要新增剧情线、应在多少章后添加。',
+    '评估维度：各线最近推进到第几章（已写章节与关联章节的差值越大越危险）、各线状态、已写章节总数、卷计划当前进度、编年录近期事实。',
+    '输出规则：',
+    '1. verdict：一句话结论——"需要新增线" / "暂不需要" / "再写 N 章后需要"（N 给出具体章数）。',
+    '2. timing：说明建议添加的时机（如：第 25 章前引入新支线，因为主线预计第 22 章告一段落）。',
+    '3. reasons：3-5 条依据（引用具体数据：哪条线多少章没推进、已写章节数、卷进度等）。',
+    '4. lines：对每条线给健康度——ok（近期推进过）/ warning（超过 5 章未推进）/ stale（超过 10 章未推进或悬置过久）。',
+    '输出必须是合法 JSON 对象：{"verdict": "...", "timing": "...", "reasons": ["..."], "lines": [{"name": "线名", "health": "ok|warning|stale", "note": "一句说明"}]}',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '重要：直接输出 JSON 结果本身，不要把思考过程写在输出里。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  const lines = (project.plotlines ?? []).filter(l => l.status === 'active' || l.status === 'paused')
+  const user = [
+    `书名：《${project.bookName}》`,
+    `已写章节数：${written.length}（最新章号 ${written.length > 0 ? written[written.length - 1]!.no : 0}）`,
+    project.volumes !== undefined && project.volumes.length > 0
+      ? `卷计划：\n${project.volumes.map(v => `第${v.no}卷《${v.title}》（${v.chapterStart}-${v.chapterEnd}）：${v.summary.slice(0, 60)}`).join('\n')}`
+      : '',
+    `剧情线（${lines.length} 条）：\n${lines.length > 0
+      ? lines.map(l => `- [${l.kind}] ${l.name}｜目标：${l.goal}｜进度：${l.progress !== '' ? l.progress : '未推进'}｜最近关联章节：${l.chapters.length > 0 ? '第' + Math.max(...l.chapters) + '章' : '无'}`).join('\n')
+      : '（暂无剧情线）'}`,
+    (project.facts ?? []).length > 0
+      ? `编年录近期事实（最近 10 条）：\n${(project.facts ?? []).slice(-10).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 80)}`).join('\n')}`
+      : '',
+    '只输出 JSON 对象。',
+  ].join('\n\n')
+  const raw = parseJsonObject<{
+    verdict?: unknown
+    timing?: unknown
+    reasons?: unknown
+    lines?: unknown
+  }>(await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 3000) }))
+  const strArr = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []
+  const lineArr = Array.isArray(raw.lines)
+    ? raw.lines
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map(entry => ({
+          name: typeof entry.name === 'string' ? entry.name.slice(0, 40) : '',
+          health: (['ok', 'warning', 'stale'] as const).includes(entry.health as never) ? entry.health as 'ok' | 'warning' | 'stale' : 'ok',
+          note: typeof entry.note === 'string' ? entry.note.slice(0, 150) : '',
+        }))
+        .filter(x => x.name !== '')
+    : []
+  return {
+    verdict: typeof raw.verdict === 'string' ? raw.verdict.slice(0, 100) : '',
+    timing: typeof raw.timing === 'string' ? raw.timing.slice(0, 200) : '',
+    reasons: strArr(raw.reasons).map(r => r.slice(0, 200)),
+    lines: lineArr,
+  }
+}
+
+/** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */
+export async function designPlotlinePlan(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  health?: PlotlineHealthReport,
+): Promise<PlotlinePlan> {
+  const system = [
+    '你是一位网文剧情架构师。请为本书设计「下一阶段的剧情方案」：给出未来 5-10 章的剧情方向，并建议 2-3 条值得新增的剧情线。',
+    '要求：方向必须结合本书大纲/卷计划/现有线/编年录；新线要能落地（和当前主角处境、已有伏笔、下一阶段舞台相关），不得重复已有线。',
+    '输出必须是合法 JSON 对象：{"direction": "下一阶段方向 60-120 字", "suggestions": [{"name": "线名", "kind": "main|branch|character|mystery", "goal": "目标", "progress": "初始进度（可空）"}]}',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '重要：直接输出 JSON 结果本身，不要把思考过程写在输出里。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  const user = [
+    `书名：《${project.bookName}》`,
+    health !== undefined
+      ? `健康检查结论：\n判定：${health.verdict}\n时机：${health.timing}\n依据：${health.reasons.join('；')}`
+      : '',
+    `大纲（节选前 3000 字）：\n${project.outline.slice(0, 3000)}`,
+    project.volumes !== undefined && project.volumes.length > 0
+      ? `卷计划：\n${project.volumes.map(v => `第${v.no}卷《${v.title}》：${v.summary.slice(0, 60)}`).join('\n')}`
+      : '',
+    `现有剧情线：\n${(project.plotlines ?? []).map(l => `- [${l.kind}${l.status === 'resolved' ? '·已完结' : ''}] ${l.name}：${l.goal}`).join('\n') || '（无）'}`,
+    written.length > 0
+      ? `最近写的章节：\n${written.slice(-5).map(c => `第${c.no}章《${c.title}》`).join('、')}`
+      : '',
+    '只输出 JSON 对象。',
+  ].join('\n\n')
+  const raw = parseJsonObject<{ direction?: unknown; suggestions?: unknown }>(
+    await complete(ctx, config, { system, user, temperature: 0.6, maxTokens: Math.max(config.maxTokens, 3000) }),
+  )
+  const suggestions: Plotline[] = []
+  const kinds = new Set(['main', 'branch', 'character', 'mystery'])
+  if (Array.isArray(raw.suggestions)) {
+    for (const entry of raw.suggestions) {
+      if (typeof entry !== 'object' || entry === null) continue
+      const e = entry as Record<string, unknown>
+      const name = typeof e.name === 'string' ? e.name.trim().slice(0, 40) : ''
+      if (name === '') continue
+      suggestions.push({
+        id: '',
+        name,
+        kind: kinds.has(e.kind as string) ? e.kind as Plotline['kind'] : 'branch',
+        goal: typeof e.goal === 'string' ? e.goal.trim().slice(0, 300) : '',
+        progress: typeof e.progress === 'string' ? e.progress.trim().slice(0, 300) : '',
+        status: 'active',
+        chapters: [],
+        createdAt: new Date().toISOString(),
+      })
+    }
+  }
+  return {
+    direction: typeof raw.direction === 'string' ? raw.direction.slice(0, 300) : '',
+    suggestions,
   }
 }
 

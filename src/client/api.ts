@@ -172,6 +172,16 @@ export class NovelApi {
     return postJson<import('../protocol.ts').SensitiveCheckResponse>(NOVEL_API.sensitiveCheck, req)
   }
 
+  /** 作者复盘补跑：单章（JSON）。 */
+  async reviewBackfillChapter(no: number): Promise<{ no: number; review: import('../protocol.ts').AuthorReview }> {
+    return postJson<{ no: number; review: import('../protocol.ts').AuthorReview }>(NOVEL_API.reviewBackfill, { chapterNo: no })
+  }
+
+  /** 作者复盘补跑：全书缺失章节（NDJSON 流）。 */
+  async reviewBackfillAll(onFrame: (frame: JobFrame) => void): Promise<void> {
+    await this.streamJob(NOVEL_API.reviewBackfill, {}, onFrame)
+  }
+
   /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
   async blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{ blurb: string }> {
     return postJson<{ blurb: string }>(NOVEL_API.blurb, { action, text, partial })

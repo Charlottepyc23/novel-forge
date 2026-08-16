@@ -56,6 +56,8 @@ export const NOVEL_API = {
   cover: '/api/dsh-novel-forge/blurb/cover',
   /** 剧情线管理：增删改 + 关联章节。 */
   plotlines: '/api/dsh-novel-forge/plotlines',
+  /** 作者复盘补跑：对已写章节补齐 authorReview（全书流式 / 单章 JSON）。 */
+  reviewBackfill: '/api/dsh-novel-forge/review/backfill',
   /** 敏感词检查：全书已写章节或指定文本。 */
   sensitiveCheck: '/api/dsh-novel-forge/sensitive-check',
   config: '/api/dsh-novel-forge/config',
@@ -141,11 +143,33 @@ export interface ChapterPlan {
   summary?: string
   /** Latest review report (present once reviewed). */
   review?: ReviewReport
+  /** 作者复盘：钩子兑现/结尾钩子/剧情线推进/连续性/节奏趋势（生成后自动）。 */
+  authorReview?: AuthorReview
   /**
    * 待确认草稿：润色（去AI味）或整章重写的产物正文。生成时先存这里，
    * 用户看过对比后点「采纳」才覆盖正文文件；点「放弃」则丢弃。刷新页面不丢失。
    */
   pendingDraft?: string
+}
+
+/** 作者复盘：叙事结构层面的逐章检查（钩子/推进/连续性/趋势）。 */
+export interface AuthorReview {
+  /** 上一章结尾钩子是否在本章兑现。 */
+  hookHonored: boolean
+  /** 钩子兑现说明（未兑现时给出建议）。 */
+  hookNote: string
+  /** 本章结尾钩子强度 0-10。 */
+  endingHook: number
+  /** 剧情线推进情况（推进了哪条线/或未推进）。 */
+  plotlineProgress: string
+  /** 结构化：本章推进的剧情线名称列表（与项目剧情线 name 精确匹配，复盘后自动关联章节）。 */
+  advancedLines?: string[]
+  /** 连续性检查（人物位置/时间/伤势/资源是否与上章衔接）。 */
+  continuity: string
+  /** 近期节奏趋势提示（拖沓/爽点密度等）。 */
+  trend: string
+  /** 复盘时间。 */
+  reviewedAt: string
 }
 
 /** One review finding. */
@@ -280,20 +304,51 @@ export interface Plotline {
   createdAt: string
 }
 
-/** POST /plotlines 请求：剧情线增删改 + 关联章节。 */
+/** POST /plotlines 请求：剧情线增删改 + 关联章节 + AI 辅助。 */
 export interface PlotlinesRequest {
-  op: 'add' | 'update' | 'remove' | 'link'
+  op: 'add' | 'update' | 'remove' | 'link' | 'suggest' | 'refresh' | 'health' | 'plan'
   /** add / update 时传入的完整剧情线。 */
   line?: Plotline
-  /** remove / link 时的目标线 id。 */
+  /** remove / link / refresh 时的目标线 id。 */
   id?: string
   /** link 时关联的章节号。 */
   chapterNo?: number
 }
 
+/** 剧情线健康检查报告。 */
+export interface PlotlineHealthReport {
+  /** 是否需要新线（需要 / 暂不需要 / 再写 X 章后需要）。 */
+  verdict: string
+  /** 建议添加新线的时机说明。 */
+  timing: string
+  /** 依据（基于数据的理由，每条一句）。 */
+  reasons: string[]
+  /** 各线健康度。 */
+  lines: Array<{
+    name: string
+    /** ok=健康 / warning=预警 / stale=搁置过久。 */
+    health: 'ok' | 'warning' | 'stale'
+    note: string
+  }>
+}
+
+/** AI 剧情方案：下一阶段目标 + 建议新线。 */
+export interface PlotlinePlan {
+  /** 下一阶段（未来 5-10 章）剧情方向。 */
+  direction: string
+  /** 建议的新线（可逐条采纳）。 */
+  suggestions: Plotline[]
+}
+
 /** POST /plotlines 响应。 */
 export interface PlotlinesResponse {
   plotlines: Plotline[]
+  /** op=suggest 时的 AI 建议候选线。 */
+  suggestions?: Plotline[]
+  /** op=health 时的健康检查报告。 */
+  health?: PlotlineHealthReport
+  /** op=plan 时的剧情方案。 */
+  plan?: PlotlinePlan
 }
 
 /** 一条敏感词命中。 */
@@ -482,6 +537,8 @@ export interface NovelConfig {
   reviewPassScore: number
   /** Whether generation auto-runs review after writing. */
   autoReview: boolean
+  /** Whether generation auto-runs the author review (hook/continuity/trend) after writing. */
+  autoAuthorReview: boolean
 }
 
 /** GET /status response. */
@@ -557,6 +614,8 @@ export type JobFrame =
   | { type: 'progress'; chars: number }
   | { type: 'done'; no: number; file: string; chars: number; title: string }
   | { type: 'review'; no: number; report: ReviewReport }
+  | { type: 'author-review'; no: number; review: AuthorReview }
+  | { type: 'author-backfill-done'; count: number }
   | { type: 'rewritten'; no: number; file: string; chars: number }
   /** 润色/重写完成，产物作为待确认草稿（尚未覆盖正文）。 */
   | { type: 'drafted'; no: number; chars: number; draft: string }
@@ -637,6 +696,7 @@ export interface ConfigPatch {
   maxTokens?: number
   reviewPassScore?: number
   autoReview?: boolean
+  autoAuthorReview?: boolean
 }
 
 // ------------------------------------------------------------ assistant
