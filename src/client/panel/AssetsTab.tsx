@@ -205,7 +205,7 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
   const genreLibrary = data.genreLibrary
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
       {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
       {notice !== '' && <div className={css.card}><span style={{ color: 'var(--nf-success)' }}>{notice}</span></div>}
 
@@ -254,7 +254,7 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
 
       {/* 推进模式库 */}
       {assetTab === 'progression' && (
-        <div className={css.card}>
+        <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
           <span className={css.cardTitle}>推进模式库</span>
           <span className={css.meta}>读者为什么继续看下一章？主模式 + 辅助模式注入卷规划与章节生成。</span>
           {assets.primaryProgression !== undefined && (
@@ -268,7 +268,7 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
             </div>
           ))}
           <span className={css.meta}>从内置推进模式库选择添加（第一个设为主推进）：</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {data.progressionLibrary.map(mode => {
               const alreadyPrimary = assets.primaryProgression?.name === mode.name
               const alreadyAux = assets.auxiliaryProgressions.some(m => m.name === mode.name)
@@ -285,10 +285,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
 
       {/* 笔法帖（一键绑定） */}
       {assetTab === 'templates' && (
-        <div className={css.card}>
+        <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
           <span className={css.cardTitle}>笔法帖</span>
           <span className={css.meta}>从内置 8 套叙事风格模板中一键选用（来自 AI-Novel-Writing-Assistant 写法引擎），无需样本文本；绑定后生成与润色都遵循该风格。</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {data.styleTemplates.map(template => {
               const bound = assets.styleAssets.some(s => s.name === template.name)
               return (
@@ -325,10 +325,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
 
       {/* 文戒 */}
       {assetTab === 'rules' && (
-        <div className={css.card}>
+        <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
         <span className={css.cardTitle}>文戒</span>
         <span className={css.meta}>写作时必须遵守的表达边界（内置全局 + 项目自定义），生成与审稿都会检查。内置规则可用「覆盖编辑」复制为自定义版本调整。</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {builtinRules.map(rule => {
             const overridden = customRules.some(r => r.name === rule.name)
             return (

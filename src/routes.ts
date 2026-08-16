@@ -48,6 +48,8 @@ import {
   type LoadOutlineRequest,
   type LoadOutlineResponse,
   type NovelConfig,
+  type PlotlinesRequest,
+  type PlotlinesResponse,
   type PlanRequest,
   type PlanResponse,
   type PolishRequest,
@@ -55,7 +57,11 @@ import {
   type ReviewReport,
   type ReviewRequest,
   type RewriteRequest,
+  type SensitiveCheckRequest,
+  type SensitiveCheckResponse,
+  type SensitiveHit,
   type StatusResponse,
+  type StoryBible,
   type StyleEngineRequest,
   type SummaryRequest,
   type VolumesRequest,
@@ -87,6 +93,7 @@ import {
   reviewChapterText,
   rewriteChapterStream,
   saveProject,
+  checkSensitiveText,
   suggestForeshadows,
   summarizeAndExtractFacts,
   summarizeChapter,
@@ -1180,6 +1187,22 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       if (Array.isArray(body?.worldRules)) project.bible.worldRules = body.worldRules.filter(r => r.trim() !== '')
       if (Array.isArray(body?.redLines)) project.bible.redLines = body.redLines.filter(r => r.trim() !== '')
       if (Array.isArray(body?.style)) project.bible.style = body.style.filter(r => r.trim() !== '')
+      if (Array.isArray(body?.characters)) {
+        project.bible.characters = body.characters
+          .filter(c => c !== undefined && c !== null && typeof c.name === 'string' && c.name.trim() !== '')
+          .map(c => ({
+            name: c.name.trim(),
+            role: (['protagonist', 'supporting', 'antagonist', 'other'] as const).includes(c.role as never)
+              ? c.role as StoryBible['characters'][number]['role']
+              : 'other',
+            traits: Array.isArray(c.traits) ? c.traits.filter((t): t is string => typeof t === 'string' && t.trim() !== '') : [],
+            goals: typeof c.goals === 'string' ? c.goals : '',
+            relations: typeof c.relations === 'string' ? c.relations : '',
+            knowledge: Array.isArray(c.knowledge)
+              ? c.knowledge.filter((k): k is string => typeof k === 'string' && k.trim() !== '')
+              : undefined,
+          }))
+      }
       project.updatedAt = new Date().toISOString()
       saveProject(config.outputDir, project)
       writeJson(res, 200, { bible: project.bible })
@@ -1359,6 +1382,109 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------------------- plotlines
+  /** 剧情线管理：增删改 + 关联章节（主线/支线/人物线/悬念线）。 */
+  const plotlinesRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.plotlines,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<PlotlinesRequest>(req)
+      if (project.plotlines === undefined) project.plotlines = []
+      const op = body?.op
+      if (op === 'add' && body?.line !== undefined) {
+        const line = body.line
+        project.plotlines.push({
+          id: line.id !== '' ? line.id : `pl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: line.name.slice(0, 40),
+          kind: line.kind,
+          goal: line.goal.slice(0, 300),
+          progress: line.progress.slice(0, 300),
+          status: line.status,
+          chapters: Array.isArray(line.chapters) ? line.chapters.filter((n): n is number => typeof n === 'number') : [],
+          createdAt: line.createdAt !== '' ? line.createdAt : new Date().toISOString(),
+        })
+      } else if (op === 'update' && body?.line !== undefined && body.line.id !== '') {
+        const idx = project.plotlines.findIndex(l => l.id === body.line!.id)
+        if (idx !== -1) {
+          const line = body.line
+          project.plotlines[idx] = {
+            ...project.plotlines[idx]!,
+            name: line.name.slice(0, 40),
+            kind: line.kind,
+            goal: line.goal.slice(0, 300),
+            progress: line.progress.slice(0, 300),
+            status: line.status,
+          }
+        }
+      } else if (op === 'remove' && body?.id !== undefined) {
+        project.plotlines = project.plotlines.filter(l => l.id !== body.id)
+      } else if (op === 'link' && body?.id !== undefined && typeof body.chapterNo === 'number' && body.chapterNo > 0) {
+        const line = project.plotlines.find(l => l.id === body.id)
+        if (line !== undefined && !line.chapters.includes(body.chapterNo)) {
+          line.chapters.push(body.chapterNo)
+          if (line.status === 'active' && line.progress === '') {
+            line.progress = `推进至第 ${body.chapterNo} 章`
+          }
+        }
+      }
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      const response: PlotlinesResponse = { plotlines: project.plotlines }
+      writeJson(res, 200, response)
+    },
+  }
+
+  // --------------------------------------------------------- sensitive
+  /** 敏感词检查：指定章节 / 任意文本 / 全书已写章节。 */
+  const sensitiveRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.sensitiveCheck,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<SensitiveCheckRequest>(req)
+      const hits: SensitiveHit[] = []
+      let scanned = 0
+      if (body?.text !== undefined) {
+        for (const hit of checkSensitiveText(body.text)) {
+          hits.push({ chapterNo: 0, word: hit.word, category: hit.category, count: hit.count })
+        }
+      } else if (typeof body?.chapterNo === 'number') {
+        const chapter = project.chapters.find(c => c.no === body.chapterNo)
+        if (chapter !== undefined) {
+          const text = readChapterFile(config.outputDir, chapter)
+          if (text !== undefined) {
+            scanned = 1
+            for (const hit of checkSensitiveText(text)) {
+              hits.push({ chapterNo: chapter.no, word: hit.word, category: hit.category, count: hit.count })
+            }
+          }
+        }
+      } else if (body?.all === true) {
+        for (const chapter of project.chapters) {
+          if (chapter.status === 'pending' || chapter.status === 'generating') continue
+          const text = readChapterFile(config.outputDir, chapter)
+          if (text === undefined) continue
+          scanned++
+          for (const hit of checkSensitiveText(text)) {
+            hits.push({ chapterNo: chapter.no, word: hit.word, category: hit.category, count: hit.count })
+          }
+        }
+      } else {
+        writeJson(res, 400, { error: '请提供 chapterNo / text / all 之一' })
+        return
+      }
+      const response: SensitiveCheckResponse = { hits, scannedChapters: scanned }
+      writeJson(res, 200, response)
+    },
+  }
+
   // --------------------------------------------------------------- config
   const configRoute: WebRoute = {
     kind: 'exact',
@@ -1433,6 +1559,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     coverRoute,
     worldRoute,
     renameRoute,
+    plotlinesRoute,
+    sensitiveRoute,
     configRoute,
     openFolderRoute,
   ]

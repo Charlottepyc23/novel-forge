@@ -29,6 +29,13 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **审稿问题勾选修复**：审查报告每条问题可勾选，一键按所选问题修订（默认勾 high） | **Selective review fixes**: check any review issues (high pre-checked) and fix them in one click |
 | **编辑器字号可调**：设置页 12-24px + 编辑页 A−/A＋ 快捷调整（localStorage 记忆） | **Adjustable editor font size**: 12-24px in settings plus A−/A＋ in the editor toolbar (localStorage) |
 | **AI 助手悬浮窗**：可拖动、可拉大小、位置记忆；「编辑老师」全量知情 + 影响分析 + 步骤卡片 + 思考计时 + 清空聊天 | **Floating AI assistant**: draggable, resizable, position remembered; full-context "editor" persona with impact analysis and live step cards |
+| **剧情线管理**：主线/支线/人物线/悬念线，目标与进度追踪、章节关联；生成时强制每章推进至少一条活跃线，工作流页实时进度 | **Plotline management**: main/branch/character/mystery arcs with goals, progress and linked chapters; generation must advance an active arc, live progress on the dashboard |
+| **角色知情度**：每个角色"已知信息"清单，生成与审稿严格维护信息差（未列出的信息角色一律不知道） | **Character knowledge**: per-character known-info lists; writing & review enforce information asymmetry strictly |
+| **敏感词检查**：内置违禁词库（政治/擦边/暴力/辱骂/广告）全书一键扫描，命中定位到章并一键去修订 | **Sensitive-word check**: built-in banned-word library scans all chapters, hits located per chapter with one-click fix |
+| **编年录独立页**：事实库从设置页移入数据库导航，支持一键回填历史章节 | **Chronicle tab**: the fact ledger moved into the database nav with one-click backfill |
+| **三套主题**：iOS 液态玻璃（绿）/ 经典毛玻璃（蓝）/ 新拟物双阴影，设置页即时切换（localStorage） | **Three themes**: iOS Liquid Glass (green) / classic frosted (blue) / neumorphism, instant switching in settings |
+| **活动输出控制台**：工作流页实时记录生成/审稿/润色/质检等全部活动，自动滚动 + 一键清空 | **Activity console**: dashboard records every action (writing/review/polish/audit), auto-scrolls, one-click clear |
+| **iOS 字体统一**：SF Pro + 苹方/冬青黑体/微软雅黑全站统一，编辑区不再等宽 | **iOS font stack**: SF Pro + PingFang/Hiragino/YaHei unified across the panel; editor no longer monospace |
 | **分组导航 + 状态角标**：创作/工具/数据库分组，章节待办/伏笔/进度角标 | **Grouped nav + badges**: creation/tools/database groups with live badges |
 | **iOS 风格毛玻璃 UI**（浅色/深色） | **iOS-style frosted glass UI** (light/dark) |
 | **书架 / 伏笔管理 / 写作资产（题材·推进·写法·反AI规则·自定义引擎）/ 全本导出（TXT/MD）/ 卷首语与封面** | **Bookshelf / foreshadowing / writing assets / full-book export (TXT/MD) / blurb & cover** |

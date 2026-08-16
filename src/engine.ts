@@ -69,6 +69,7 @@ export function loadProject(outputDir: string): ProjectState | undefined {
     if (!Array.isArray(raw.assets.auxiliaryProgressions)) raw.assets.auxiliaryProgressions = []
     if (!Array.isArray(raw.assets.styleAssets)) raw.assets.styleAssets = []
     if (!Array.isArray(raw.facts)) raw.facts = []
+    if (!Array.isArray(raw.plotlines)) raw.plotlines = []
     return raw
   } catch {
     return undefined
@@ -79,6 +80,78 @@ export function loadProject(outputDir: string): ProjectState | undefined {
 export function saveProject(outputDir: string, project: ProjectState): void {
   mkdirSync(outputDir, { recursive: true })
   writeFileSync(join(outputDir, PROJECT_FILE), JSON.stringify(project, null, 2), 'utf8')
+}
+
+// ------------------------------------------------------------ sensitive words
+
+/**
+ * 内置违禁词库（网文平台常见审查类别）。只做硬匹配提示，不代替人工判断。
+ * 词语刻意保持常见写法；作者可自行判断是否修改。
+ */
+const SENSITIVE_WORDS: ReadonlyArray<{ word: string; category: string }> = [
+  // 政治敏感
+  { word: '共匪', category: '政治' }, { word: '独裁', category: '政治' },
+  { word: '法轮', category: '政治' }, { word: '六四', category: '政治' },
+  { word: '天安门事件', category: '政治' }, { word: '翻墙', category: '政治' },
+  { word: '政治敏感', category: '政治' },
+  // 色情擦边
+  { word: '乳沟', category: '擦边' }, { word: '酥胸', category: '擦边' },
+  { word: '淫荡', category: '擦边' }, { word: '做爱', category: '擦边' },
+  { word: '上床', category: '擦边' }, { word: '裸体', category: '擦边' },
+  { word: '一丝不挂', category: '擦边' }, { word: '胴体', category: '擦边' },
+  { word: '春药', category: '擦边' }, { word: '催情', category: '擦边' },
+  { word: '迷奸', category: '擦边' }, { word: '强暴', category: '擦边' },
+  { word: '轮奸', category: '擦边' }, { word: '援交', category: '擦边' },
+  { word: '嫖娼', category: '擦边' }, { word: '卖淫', category: '擦边' },
+  { word: '色情', category: '擦边' }, { word: '情色', category: '擦边' },
+  { word: '撸管', category: '擦边' }, { word: '自慰', category: '擦边' },
+  { word: '口交', category: '擦边' }, { word: '打炮', category: '擦边' },
+  { word: '约炮', category: '擦边' }, { word: '一夜情', category: '擦边' },
+  // 暴力血腥
+  { word: '碎尸', category: '暴力' }, { word: '分尸', category: '暴力' },
+  { word: '凌迟', category: '暴力' }, { word: '剥皮', category: '暴力' },
+  { word: '开膛', category: '暴力' }, { word: '剖腹', category: '暴力' },
+  { word: '挖心', category: '暴力' }, { word: '虐杀', category: '暴力' },
+  { word: '凌辱', category: '暴力' }, { word: '血腥', category: '暴力' },
+  { word: '大屠杀', category: '暴力' }, { word: '灭门', category: '暴力' },
+  { word: '满门抄斩', category: '暴力' }, { word: '腰斩', category: '暴力' },
+  { word: '活埋', category: '暴力' }, { word: '点天灯', category: '暴力' },
+  // 辱骂攻击
+  { word: '傻逼', category: '辱骂' }, { word: '傻B', category: '辱骂' },
+  { word: '草泥马', category: '辱骂' }, { word: '妈的', category: '辱骂' },
+  { word: '尼玛', category: '辱骂' }, { word: '去死', category: '辱骂' },
+  { word: '废物', category: '辱骂' }, { word: '垃圾', category: '辱骂' },
+  { word: '人渣', category: '辱骂' }, { word: '贱人', category: '辱骂' },
+  { word: '婊子', category: '辱骂' }, { word: '狗日的', category: '辱骂' },
+  // 广告引流
+  { word: '加微信', category: '广告' }, { word: '加QQ', category: '广告' },
+  { word: '微信公众号', category: '广告' }, { word: '淘宝', category: '广告' },
+  { word: '拼多多', category: '广告' }, { word: '刷单', category: '广告' },
+  { word: '充值返利', category: '广告' }, { word: '扫码领', category: '广告' },
+  { word: '加群领', category: '广告' }, { word: 'vx', category: '广告' },
+  { word: '扣扣', category: '广告' },
+  // 其他违禁
+  { word: '赌博', category: '其他' }, { word: '赌场', category: '其他' },
+  { word: '毒品', category: '其他' }, { word: '冰毒', category: '其他' },
+  { word: '摇头丸', category: '其他' }, { word: '自杀方法', category: '其他' },
+  { word: '邪教', category: '其他' }, { word: '传销', category: '其他' },
+  { word: '军火', category: '其他' }, { word: '枪支', category: '其他' },
+  { word: '管制刀具', category: '其他' },
+]
+
+/** 对一段文本做违禁词硬匹配，返回命中（词/类别/次数）。 */
+export function checkSensitiveText(text: string): Array<{ word: string; category: string; count: number }> {
+  const hits: Array<{ word: string; category: string; count: number }> = []
+  for (const entry of SENSITIVE_WORDS) {
+    let count = 0
+    let idx = text.indexOf(entry.word)
+    while (idx !== -1) {
+      count++
+      idx = text.indexOf(entry.word, idx + entry.word.length)
+    }
+    if (count > 0) hits.push({ word: entry.word, category: entry.category, count })
+  }
+  return hits
 }
 
 /** List generated chapter files in the output dir (sorted). */
@@ -337,6 +410,7 @@ export async function extractBible(ctx: Context, config: NovelConfig, outline: s
           traits: strArray(entry.traits),
           goals: typeof entry.goals === 'string' ? entry.goals : '',
           relations: typeof entry.relations === 'string' ? entry.relations : '',
+          knowledge: strArray(entry.knowledge),
         }))
         .filter(card => card.name !== '')
     : []
@@ -443,6 +517,9 @@ function writeSystemPrompt(project: ProjectState): string {
       for (const card of bible.characters) {
         const roleName = { protagonist: '主角', supporting: '配角', antagonist: '反派', other: '其他' }[card.role]
         sections.push(`- ${card.name}（${roleName}）：${card.traits.join('、')}${card.goals !== '' ? `；目标：${card.goals}` : ''}${card.relations !== '' ? `；关系：${card.relations}` : ''}`)
+        if (Array.isArray(card.knowledge) && card.knowledge.length > 0) {
+          sections.push(`  已知信息（该角色知道的：${card.knowledge.join('；')}；未列出的信息该角色一律不知道，不得写其知晓或提及）`)
+        }
       }
     }
     if (bible.redLines.length > 0) sections.push('写作红线（违反即失败）：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
@@ -464,6 +541,14 @@ function writeSystemPrompt(project: ProjectState): string {
     sections.push('==================== 活跃伏笔（近期需推进或回收的线索） ====================')
     for (const f of active) {
       sections.push(`- [${f.status === 'planted' ? '已埋设' : '推进中'}] ${f.description}${f.targetChapter !== undefined ? `（预计 ${f.targetChapter} 章回收）` : ''}`)
+    }
+  }
+  const lines = (project.plotlines ?? []).filter(l => l.status === 'active' || l.status === 'paused')
+  if (lines.length > 0) {
+    const kindName = { main: '主线', branch: '支线', character: '人物线', mystery: '悬念线' }
+    sections.push('==================== 剧情线（本章应推进至少一条活跃线） ====================')
+    for (const l of lines) {
+      sections.push(`- [${kindName[l.kind]}${l.status === 'paused' ? '·暂停中' : ''}] ${l.name}：${l.goal}${l.progress !== '' ? `（当前进度：${l.progress}）` : ''}`)
     }
   }
   sections.push('')
@@ -606,6 +691,9 @@ function reviewSystemPrompt(project: ProjectState): string {
       sections.push('角色卡：')
       for (const card of bible.characters) {
         sections.push(`- ${card.name}（${card.role}）：${card.traits.join('、')}`)
+        if (Array.isArray(card.knowledge) && card.knowledge.length > 0) {
+          sections.push(`  该角色知道：${card.knowledge.join('；')}（未列出的信息该角色不知道）`)
+        }
       }
     }
     if (bible.redLines.length > 0) sections.push('红线：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))

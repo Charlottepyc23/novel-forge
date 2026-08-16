@@ -54,6 +54,10 @@ export const NOVEL_API = {
   world: '/api/dsh-novel-forge/world',
   /** 封面：GET 读取（dataUrl）/ POST 上传或移除。 */
   cover: '/api/dsh-novel-forge/blurb/cover',
+  /** 剧情线管理：增删改 + 关联章节。 */
+  plotlines: '/api/dsh-novel-forge/plotlines',
+  /** 敏感词检查：全书已写章节或指定文本。 */
+  sensitiveCheck: '/api/dsh-novel-forge/sensitive-check',
   config: '/api/dsh-novel-forge/config',
   openFolder: '/api/dsh-novel-forge/open-folder',
 } as const
@@ -192,6 +196,8 @@ export interface CharacterCard {
   goals: string
   /** Key relations to other characters. */
   relations: string
+  /** 知情度：该角色已经知道的事实/秘密（未列出的信息该角色不知道）。 */
+  knowledge?: string[]
 }
 
 /** The structured story bible (worldbuilding extracted from the outline). */
@@ -254,6 +260,71 @@ export interface AuditResponse {
   auditedAt: string
 }
 
+/** 一条剧情线（主线/支线/人物线/悬念线）。 */
+export interface Plotline {
+  /** 稳定 id。 */
+  id: string
+  /** 线名。 */
+  name: string
+  /** 类型：主线 / 支线 / 人物线 / 悬念线。 */
+  kind: 'main' | 'branch' | 'character' | 'mystery'
+  /** 目标/终点（这条线最终要完成什么）。 */
+  goal: string
+  /** 当前进度说明（最近推进到哪）。 */
+  progress: string
+  /** 生命周期状态。 */
+  status: 'active' | 'paused' | 'resolved' | 'abandoned'
+  /** 关联章节号（推进/落地的章节）。 */
+  chapters: number[]
+  /** 创建时间。 */
+  createdAt: string
+}
+
+/** POST /plotlines 请求：剧情线增删改 + 关联章节。 */
+export interface PlotlinesRequest {
+  op: 'add' | 'update' | 'remove' | 'link'
+  /** add / update 时传入的完整剧情线。 */
+  line?: Plotline
+  /** remove / link 时的目标线 id。 */
+  id?: string
+  /** link 时关联的章节号。 */
+  chapterNo?: number
+}
+
+/** POST /plotlines 响应。 */
+export interface PlotlinesResponse {
+  plotlines: Plotline[]
+}
+
+/** 一条敏感词命中。 */
+export interface SensitiveHit {
+  /** 命中章节号（文本检测时为 0）。 */
+  chapterNo: number
+  /** 命中的违禁词。 */
+  word: string
+  /** 类别：政治 / 擦边 / 暴力 / 辱骂 / 广告 / 其他。 */
+  category: string
+  /** 出现次数。 */
+  count: number
+}
+
+/** POST /sensitive-check 请求：检测指定章节/任意文本/全书。 */
+export interface SensitiveCheckRequest {
+  /** 检测该章正文。 */
+  chapterNo?: number
+  /** 检测任意文本（优先于 chapterNo）。 */
+  text?: string
+  /** 扫描全部已写章节。 */
+  all?: boolean
+}
+
+/** POST /sensitive-check 响应。 */
+export interface SensitiveCheckResponse {
+  hits: SensitiveHit[]
+  /** 参与扫描的章节数。 */
+  scannedChapters: number
+}
+
 /** 角色卡：角色当前状态（从事实库聚合）。 */
 export interface RoleStatusCard {
   name: string
@@ -272,6 +343,8 @@ export interface BiblePatchRequest {
   worldRules?: string[]
   redLines?: string[]
   style?: string[]
+  /** 角色卡整体替换（人物志编辑知情度等）。 */
+  characters?: CharacterCard[]
 }
 
 /** POST /blurb 请求：AI 生成/补全或手动保存小说简介。 */
@@ -384,6 +457,8 @@ export interface ProjectState {
   coverPath?: string
   /** 大世界结构化数据（境界体系/区域/势力）。 */
   world?: WorldState
+  /** 剧情线（主线/支线/人物线/悬念线）。 */
+  plotlines?: Plotline[]
   /** ISO timestamps. */
   createdAt: string
   updatedAt: string

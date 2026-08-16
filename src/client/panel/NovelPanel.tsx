@@ -21,8 +21,10 @@ import type {
   Foreshadow,
   JobFrame,
   NovelConfig,
+  Plotline,
   ProjectState,
   ReviewReport,
+  SensitiveHit,
   StoryBible,
   Volume,
 } from '../../protocol.ts'
@@ -31,7 +33,7 @@ import css from './panel.module.css'
 /** The panel's tab identifiers. */
 export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
-  | 'characters'
+  | 'characters' | 'facts' | 'plotlines'
   | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle'
 
 /** Panel shell props. */
@@ -63,6 +65,7 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'overview', label: tt('tab.overview'), icon: '📄' },
       { id: 'blurb', label: '卷首语', icon: '📖' },
       { id: 'plan', label: tt('tab.plan'), icon: '📚' },
+      { id: 'plotlines', label: tt('tab.plotlines'), icon: '🧵' },
     ],
   },
   {
@@ -80,6 +83,7 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'world', label: '大世界', icon: '🌍' },
       { id: 'characters', label: '人物志', icon: '👥' },
       { id: 'foreshadow', label: tt('tab.foreshadow'), icon: '🔮' },
+      { id: 'facts', label: tt('tab.facts'), icon: '📜' },
       { id: 'assetsGenre', label: '题材基底', icon: '🏷️' },
       { id: 'assetsProgression', label: '推进模式', icon: '📈' },
       { id: 'assetsTemplates', label: '笔法帖', icon: '🖋️' },
@@ -347,6 +351,17 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setEditorFontSize(v)
     try { window.localStorage.setItem('dsh-novel-forge.editor.fontSize', String(v)) } catch { /* ignore */ }
   }
+  /** 面板主题（localStorage 记忆）：'liquid'=iOS 液态玻璃（绿） / 'classic'=经典毛玻璃（蓝） / 'neumorph'=新拟物（浅色）。 */
+  const [panelTheme, setPanelTheme] = useState<'liquid' | 'classic' | 'neumorph'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.theme')
+      return v === 'classic' || v === 'neumorph' ? v : 'liquid'
+    } catch { return 'liquid' }
+  })
+  const changePanelTheme = (next: 'liquid' | 'classic' | 'neumorph'): void => {
+    setPanelTheme(next)
+    try { window.localStorage.setItem('dsh-novel-forge.theme', next) } catch { /* ignore */ }
+  }
   /** 有未采纳草稿的章节号（refresh 后检测到遗留草稿时提示）。 */
   const [draftNo, setDraftNo] = useState<number | null>(null)
   /** 大纲页「更新大纲」编辑区是否展开。 */
@@ -367,8 +382,29 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const coverFileRef = useRef<HTMLInputElement | null>(null)
   /** 章节列表按卷折叠（存已折叠的卷号）。 */
   const [collapsedVolumes, setCollapsedVolumes] = useState<number[]>([])
+  /** 章节页当前选中的卷（'all' = 全部卷显示在一起）。 */
+  const [selectedVolume, setSelectedVolume] = useState<number | 'all'>('all')
+  /** 剧情线编辑草稿（null = 未在编辑）。 */
+  const [plotlineDraft, setPlotlineDraft] = useState<{
+    id: string
+    name: string
+    kind: Plotline['kind']
+    goal: string
+    progress: string
+    status: Plotline['status']
+  } | null>(null)
+  /** 角色知情度编辑草稿（角色名 → 文本，每行一条）。 */
+  const [knowledgeDraft, setKnowledgeDraft] = useState<Record<string, string>>({})
+  /** 全书敏感词检查结果（null = 未运行）。 */
+  const [sensHits, setSensHits] = useState<SensitiveHit[] | null>(null)
+  const [sensScanned, setSensScanned] = useState(0)
   /** npm 最新版本（更新检测；null = 未检测/检测失败）。 */
   const [npmLatest, setNpmLatest] = useState<string | null>(null)
+  /** 活动输出容器：自动滚动锚点（有新活动时跟随到底部）。 */
+  const progressEndRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    progressEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [progress])
 
   /** 后台检测 npm 最新版本（失败静默，不打扰）。 */
   useEffect(() => {
@@ -665,6 +701,116 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } finally {
       setBusy(false)
       setBusyLabel('')
+    }
+  }
+
+  /** 剧情线：保存草稿（新增或更新）。 */
+  const handlePlotlineSave = async (): Promise<void> => {
+    if (plotlineDraft === null) return
+    const line: Plotline = {
+      id: plotlineDraft.id,
+      name: plotlineDraft.name.trim(),
+      kind: plotlineDraft.kind,
+      goal: plotlineDraft.goal.trim(),
+      progress: plotlineDraft.progress.trim(),
+      status: plotlineDraft.status,
+      chapters: plotlineDraft.id !== ''
+        ? (project?.plotlines?.find(l => l.id === plotlineDraft.id)?.chapters ?? [])
+        : [],
+      createdAt: plotlineDraft.id !== ''
+        ? (project?.plotlines?.find(l => l.id === plotlineDraft.id)?.createdAt ?? new Date().toISOString())
+        : new Date().toISOString(),
+    }
+    if (line.name === '') {
+      setError('剧情线名称不能为空')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.plotlines({ op: plotlineDraft.id !== '' ? 'update' : 'add', line })
+      setProject(prev => prev === null ? prev : { ...prev, plotlines: result.plotlines, updatedAt: new Date().toISOString() })
+      setPlotlineDraft(null)
+      pushProgress(plotlineDraft.id !== '' ? `剧情线已更新：${line.name}` : `剧情线已创建：${line.name}`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`保存剧情线失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 剧情线：删除。 */
+  const handlePlotlineRemove = async (id: string): Promise<void> => {
+    if (!window.confirm('确定删除这条剧情线？关联章节记录会一并移除。')) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.plotlines({ op: 'remove', id })
+      setProject(prev => prev === null ? prev : { ...prev, plotlines: result.plotlines, updatedAt: new Date().toISOString() })
+      pushProgress('剧情线已删除', 'done')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 剧情线：把本章关联到某条线（推进节点）。 */
+  const handlePlotlineLink = async (id: string, chapterNo: number): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.plotlines({ op: 'link', id, chapterNo })
+      setProject(prev => prev === null ? prev : { ...prev, plotlines: result.plotlines, updatedAt: new Date().toISOString() })
+      pushProgress(`已把第 ${chapterNo} 章关联到剧情线`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 全书敏感词检查（硬匹配内置词库）。 */
+  const handleSensitiveScan = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel('敏感词检查中…')
+    setError('')
+    try {
+      const result = await api.sensitiveCheck({ all: true })
+      setSensHits(result.hits)
+      setSensScanned(result.scannedChapters)
+      pushProgress(result.hits.length > 0
+        ? `敏感词检查：${result.hits.length} 处命中（${new Set(result.hits.map(h => h.chapterNo)).size} 章受影响）`
+        : `敏感词检查完成：扫描 ${result.scannedChapters} 章，未命中违禁词`, result.hits.length > 0 ? 'error' : 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`敏感词检查失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 保存角色知情度（bible.characters 整体更新）。 */
+  const handleKnowledgeSave = async (): Promise<void> => {
+    if (bible === undefined) return
+    const characters = bible.characters.map(card => ({
+      ...card,
+      knowledge: (knowledgeDraft[card.name] ?? (card.knowledge ?? []).join('\n'))
+        .split('\n').map(l => l.trim()).filter(l => l !== ''),
+    }))
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.biblePatch({ characters })
+      setProject(prev => prev === null || prev.bible === undefined ? prev : { ...prev, bible: result.bible, updatedAt: new Date().toISOString() })
+      pushProgress('角色知情度已保存（生成/审稿都会严格遵守信息差）', 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`保存知情度失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -1489,7 +1635,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   })()
 
   return (
-    <div className={css.panel}>
+    <div className={css.panel} data-nf-theme={panelTheme}>
       {viewMode === 'shelf' ? (
         /* 书架首页：默认视图，选择一本书进入工作台 */
         <ShelfView
@@ -1548,22 +1694,26 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       ) : (
         <>
       <div className={css.panelHeader}>
-        <h2 className={css.panelTitle}>
-          <button type="button" className={css.iconButton} title="返回书架" aria-label="返回书架" onClick={() => { setViewMode('shelf') }}>
-            ←
-          </button>
-          {tt('panel.title')}
-          {project?.bookName !== '' && project?.bookName !== undefined && (
-            <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', fontSize: 11 }}>{project.bookName}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <h2 className={css.panelTitle}>
+            <button type="button" className={css.iconButton} title="返回书架" aria-label="返回书架" onClick={() => { setViewMode('shelf') }}>
+              ←
+            </button>
+            {tt('panel.title')}
+          </h2>
+          {(project?.bookName !== '' && project?.bookName !== undefined) && (
+            <div className={css.panelSubtitle}>
+              <span>📖 {project.bookName}</span>
+              {chapters.length > 0 && (
+                <span className={css.headerProgress}>
+                  已完成 <b>{doneCount}</b>/{chapters.length} 章
+                  <span className={css.headerProgressDot} />
+                  通过 <b>{chapters.filter(c => c.status === 'approved').length}</b>
+                </span>
+              )}
+            </div>
           )}
-          {chapters.length > 0 && (
-            <span className={css.headerProgress}>
-              已完成 <b>{doneCount}</b>/{chapters.length} 章
-              <span className={css.headerProgressDot} />
-              通过 <b>{chapters.filter(c => c.status === 'approved').length}</b>
-            </span>
-          )}
-        </h2>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <button
             type="button"
@@ -1700,10 +1850,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
-        {/* 章节编辑页（独占整页：点「编辑」进入，返回后回到原页面） */}
+        {/* 章节编辑页（独占整页：点「编辑」进入，返回后回到原页面；无卡片盒子，撑满内容区） */}
         {workspace !== null && (
-          <div className={css.card} style={{ borderColor: 'var(--nf-accent)' }}>
-            <div className={css.busyRow} style={{ flexWrap: 'wrap', gap: 8 }}>
+          <div className={css.wsPage}>
+            <div className={css.wsPageHeader}>
               <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorkspace(null) }} title="返回章节列表（草稿不丢失）">
                 ← 返回
               </button>
@@ -1820,7 +1970,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   </div>
                 )}
                 {workspace.draft !== null && (
-                  <div className={css.wsPreview}>
+                  <div className={css.wsPreview} style={{ flex: 1, minHeight: 0 }}>
                     <div className={css.busyRow}>
                       <span className={css.meta}>优化预览（{workspace.draft.length} 字）</span>
                       <span style={{ display: 'flex', gap: 8 }}>
@@ -1901,6 +2051,43 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <div className={css.dashFact}><span className={css.meta}>当前卷</span><b>{currentVolumeName}</b></div>
                 <div className={css.dashFact}><span className={css.meta}>最近创作</span><b>{lastUpdated}</b></div>
               </div>
+            </div>
+
+            {/* 全书进度条（原章节页进度移入工作流） */}
+            <div className={css.card} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+              <span className={css.meta} style={{ fontWeight: 600 }}>
+                📊 全书进度：已完成 <b style={{ color: 'var(--nf-accent)' }}>{doneCount}</b>/{chapters.length} 章（{chapters.length > 0 ? Math.round((doneCount / chapters.length) * 100) : 0}%）
+              </span>
+              <span className={css.meta}>
+                待生成 {pendingCount} · 待审稿 {reviewPendingCount} · 通过 {approvedCount}
+              </span>
+            </div>
+
+            {/* 剧情线进度（工作流实时视图） */}
+            <div className={css.card}>
+              <span className={css.cardTitle}>🧵 {tt('plotlines.workflowTitle')}</span>
+              {(project?.plotlines ?? []).filter(l => l.status === 'active' || l.status === 'paused').length === 0 ? (
+                <span className={css.meta}>{tt('plotlines.workflowEmpty')}</span>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {(project?.plotlines ?? []).filter(l => l.status === 'active' || l.status === 'paused').map(line => {
+                    const kindLabel = { main: tt('plotlines.kindMain'), branch: tt('plotlines.kindBranch'), character: tt('plotlines.kindCharacter'), mystery: tt('plotlines.kindMystery') }[line.kind]
+                    return (
+                      <div key={line.id} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                        <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <b>{line.name}</b>
+                            <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{kindLabel}</span>
+                            {line.status === 'paused' && <span className={css.badge} style={{ borderColor: 'var(--nf-warn)', color: 'var(--nf-warn)' }}>{tt('plotlines.statusPaused')}</span>}
+                          </span>
+                          <span className={css.meta}>{tt('plotlines.chapters')} {line.chapters.length} 章</span>
+                        </div>
+                        {line.progress !== '' && <div className={css.meta}>{line.progress}</div>}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {/* 状态摘要条 */}
@@ -2028,6 +2215,35 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 )}
               </div>
             )}
+
+            {/* 📟 活动输出：无论生成 / 审稿 / 润色 / 质检 / 助手操作，全部活动实时显示于此 */}
+            <div className={css.card}>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <span className={css.cardTitle}>📟 活动输出（{progress.length}）</span>
+                <div className={css.row}>
+                  <span className={css.meta}>生成/审稿/润色/质检等所有操作都会记录在这里</span>
+                  {progress.length > 0 && (
+                    <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setProgress([]) }}>
+                      清空
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className={css.progress} style={{ maxHeight: 260, overflowY: 'auto' }}>
+                {progress.length === 0 && <span className={css.meta}>{tt('progress.empty')}</span>}
+                {progress.map(line => (
+                  <div key={line.id} className={line.kind === 'done' ? css.progressLineDone : line.kind === 'error' ? css.progressLineError : line.live === true ? css.progressLineLive : css.progressLine}>
+                    {line.live === true && (
+                      <span className={css.progressBar}>
+                        <span className={css.progressBarFill} style={{ width: `${Math.round((line.ratio ?? 0) * 100)}%` }} />
+                      </span>
+                    )}
+                    {line.text}
+                  </div>
+                ))}
+                <div ref={progressEndRef} />
+              </div>
+            </div>
           </>
         )}
 
@@ -2239,9 +2455,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'plan' && (
           <>
             <div className={css.card}>
-              <div className={css.row} style={{ justifyContent: 'space-between' }}>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
                 <span className={css.cardTitle}>{tt('tab.plan')}</span>
-                <div className={css.row}>
+                <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <span className={css.meta}>{tt('plan.generateHint')}</span>
                   <input
                     className={css.input}
@@ -2256,23 +2472,78 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy || outlineText.length < 50} onClick={() => { void handlePlan() }}>
                     {tt('plan.generate')}
                   </button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || doneCount === 0} onClick={() => { void handleSensitiveScan() }} title={tt('sensitive.hint')}>
+                    🔞 {tt('sensitive.scanAll')}
+                  </button>
                 </div>
               </div>
-              {volumes !== undefined && volumes.length > 0 && (
-                <div className={css.row}>
-                  {volumes.map(v => (
-                    <span key={v.no} className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>
-                      {v.no}. {v.title}（{v.chapterStart}-{v.chapterEnd}）
-                    </span>
-                  ))}
-                </div>
-              )}
             </div>
+
+            {sensHits !== null && (
+              <div className={css.card} style={{ borderColor: sensHits.length > 0 ? 'var(--nf-warn)' : 'var(--nf-success)' }}>
+                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <span className={css.cardTitle}>
+                    {sensHits.length === 0
+                      ? tt('sensitive.clean', { n: sensScanned })
+                      : tt('sensitive.hits', { n: sensHits.length, chapters: new Set(sensHits.map(h => h.chapterNo)).size })}
+                  </span>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setSensHits(null) }}>收起</button>
+                </div>
+                <span className={css.meta}>{tt('sensitive.hint')}</span>
+                {sensHits.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
+                    {sensHits.map((hit, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', border: '1px solid var(--nf-border)', borderRadius: 6, padding: '4px 8px' }}>
+                        <span className={css.badge} style={{ borderColor: 'var(--nf-warn)', color: 'var(--nf-warn)', flex: 'none' }}>
+                          {hit.chapterNo > 0 ? `第${hit.chapterNo}章` : '文本'}
+                        </span>
+                        <span className={css.meta} style={{ flex: 1 }}>
+                          <b style={{ color: 'var(--nf-error)' }}>{hit.word}</b> ×{hit.count} · [{hit.category}]
+                        </span>
+                        {hit.chapterNo > 0 && (
+                          <button
+                            type="button"
+                            className={`${css.button} ${css.buttonSmall}`}
+                            disabled={busy}
+                            onClick={() => { void openWorkspace(hit.chapterNo, tt('sensitive.fixPrefill', { word: hit.word, category: hit.category })) }}
+                          >
+                            {tt('sensitive.goFix')}
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {chapters.length > 0 && (
               <div className={css.card}>
-                <div className={css.row} style={{ justifyContent: 'space-between' }}>
-                  <span className={css.meta}>共 {chapters.length} 章 · 已完成 {doneCount} · 待生成 {pendingCount}</span>
+                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                    {(volumes !== undefined && volumes.length > 0) && (
+                      <>
+                        <button
+                          type="button"
+                          className={`${css.button} ${css.buttonSmall} ${selectedVolume === 'all' ? css.buttonPrimary : ''}`}
+                          onClick={() => { setSelectedVolume('all') }}
+                        >
+                          全部卷
+                        </button>
+                        {volumes.map(v => (
+                          <button
+                            key={v.no}
+                            type="button"
+                            className={`${css.button} ${css.buttonSmall} ${selectedVolume === v.no ? css.buttonPrimary : ''}`}
+                            onClick={() => { setSelectedVolume(v.no) }}
+                            title={`第${v.no}卷 · ${v.chapterStart}-${v.chapterEnd} 章`}
+                          >
+                            {v.no}. {v.title}（{v.chapterStart}-{v.chapterEnd}）
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
                   {pendingCount > 0 && (
                     <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleWriteAll() }}>
                       {tt('plan.writeAllPending')}（{pendingCount}）
@@ -2280,7 +2551,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   )}
                 </div>
                 <div className={css.chapterList}>
-                  {chapterGroups.map(group => {
+                  {chapterGroups.filter(g => selectedVolume === 'all' || g.no === selectedVolume).map(group => {
                     const collapsed = group.no !== 0 && collapsedVolumes.includes(group.no)
                     const groupDone = group.chapters.filter(c => c.status === 'approved' || c.status === 'written' || c.status === 'rejected').length
                     return (
@@ -2411,23 +2682,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </div>
               </div>
             )}
-
-            <div className={css.card}>
-              <span className={css.cardTitle}>{tt('plan.progress')}</span>
-              <div className={css.progress}>
-                {progress.length === 0 && <span className={css.meta}>{tt('progress.empty')}</span>}
-                {progress.map(line => (
-                  <div key={line.id} className={line.kind === 'done' ? css.progressLineDone : line.kind === 'error' ? css.progressLineError : line.live === true ? css.progressLineLive : css.progressLine}>
-                    {line.live === true && (
-                      <span className={css.progressBar}>
-                        <span className={css.progressBarFill} style={{ width: `${Math.round((line.ratio ?? 0) * 100)}%` }} />
-                      </span>
-                    )}
-                    {line.text}
-                  </div>
-                ))}
-              </div>
-            </div>
           </>
         )}
 
@@ -2561,6 +2815,44 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
             <span className={css.meta}>人物志由「道藏」人物名单 + 「编年录」聚合而来，随章节生成自动保持最新。</span>
+          </div>
+        )}
+
+        {/* 角色知情度：信息差管理 */}
+        {activeTab === 'characters' && (
+          <div className={css.card}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>角色知情度（信息差管理）</span>
+              <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || (bible?.characters ?? []).length === 0} onClick={() => { void handleKnowledgeSave() }}>
+                💾 保存知情度
+              </button>
+            </div>
+            <span className={css.meta}>
+              填写每个角色「已经知道」的事实/秘密（每行一条）。生成与审稿会严格遵守：未列出的信息该角色一律不知道——避免"不该知道的人知道了"。
+            </span>
+            {(bible?.characters ?? []).length === 0 ? (
+              <span className={css.meta}>暂无角色卡——先在「道藏」提炼设定。</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {bible!.characters.map(card => (
+                  <div key={card.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px', fontSize: 12 }}>
+                    <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                      <b>{card.name}</b>
+                      <span className={css.meta}>
+                        {card.role === 'protagonist' ? '主角' : card.role === 'supporting' ? '配角' : card.role === 'antagonist' ? '反派' : '其他'}
+                      </span>
+                    </div>
+                    <textarea
+                      className={css.textarea}
+                      style={{ minHeight: 52, fontSize: 12 }}
+                      placeholder="每行一条该角色知道的信息，例如：林越的真实身份 / 古玉残片的秘密…"
+                      value={knowledgeDraft[card.name] ?? (card.knowledge ?? []).join('\n')}
+                      onChange={e => { setKnowledgeDraft(prev => ({ ...prev, [card.name]: e.target.value })) }}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -2702,23 +2994,168 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 {tt('settings.exportMd')}
               </button>
             </div>
-            {/* 编年录 / 时间线 */}
-            {(project?.facts ?? []).length > 0 && (
-              <div className={css.card}>
-                <span className={css.cardTitle}>编年录 / 时间线（{(project?.facts ?? []).length} 条）</span>
-                <span className={css.meta}>
-                  每章生成后自动抽取「已确立事实」（人物状态/境界资源/关系变化/伏笔落地），最近 20 条注入后续章节生成，保证长期一致。
-                </span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
-                  {[...(project?.facts ?? [])].reverse().slice(0, 60).map((fact, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                      <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)', flex: 'none', marginTop: 1 }}>
-                        第 {fact.chapterNo} 章
-                      </span>
-                      <span className={css.meta}>{fact.text}</span>
-                    </div>
-                  ))}
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
+          <div className={css.card}>
+            <span className={css.cardTitle}>{tt('settings.theme')}</span>
+            <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'liquid' ? css.buttonPrimary : ''}`}
+                onClick={() => { changePanelTheme('liquid') }}
+                title="iOS 液态玻璃质感 · 绿色强调（当前默认）"
+              >
+                🧊 {tt('settings.themeLiquid')}
+              </button>
+              <button
+                type="button"
+                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'classic' ? css.buttonPrimary : ''}`}
+                onClick={() => { changePanelTheme('classic') }}
+                title="经典 iOS 毛玻璃 · 蓝色强调"
+              >
+                💠 {tt('settings.themeClassic')}
+              </button>
+              <button
+                type="button"
+                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'neumorph' ? css.buttonPrimary : ''}`}
+                onClick={() => { changePanelTheme('neumorph') }}
+                title="新拟物派 · 双阴影立体（仅浅色；深色下自动回退液态）"
+              >
+                🔘 {tt('settings.themeNeumorph')}
+              </button>
+              <span className={css.meta}>{tt('settings.themeHint')}</span>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'facts' && (
+          <div className={css.card}>
+            <div className={css.busyRow} style={{ flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>{tt('facts.title', { n: (project?.facts ?? []).length })}</span>
+              <button
+                type="button"
+                className={`${css.button} ${css.buttonSmall}`}
+                disabled={busy || chapters.length === 0}
+                onClick={() => { void handleFactsBackfill() }}
+                title="用 LLM 从历史章节正文重新抽取事实，补齐缺失的编年录条目"
+              >
+                📥 {tt('facts.backfill')}
+              </button>
+            </div>
+            <span className={css.meta}>{tt('facts.hint')}</span>
+            {(project?.facts ?? []).length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '60vh', overflowY: 'auto', fontSize: 12 }}>
+                {[...(project?.facts ?? [])].reverse().map((fact, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                    <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)', flex: 'none', marginTop: 1 }}>
+                      第 {fact.chapterNo} 章
+                    </span>
+                    <span className={css.meta}>{fact.text}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className={css.meta}>暂无事实条目——写一章后会自动生成，或点击上方「回填」。</span>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'plotlines' && (
+          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>{tt('tab.plotlines')}（{project?.plotlines?.length ?? 0}）</span>
+              {plotlineDraft === null && (
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                  onClick={() => { setPlotlineDraft({ id: '', name: '', kind: 'main', goal: '', progress: '', status: 'active' }) }}
+                >
+                  {tt('plotlines.new')}
+                </button>
+              )}
+            </div>
+            <span className={css.meta}>{tt('plotlines.hint')}</span>
+
+            {plotlineDraft !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--nf-accent)', borderRadius: 12, padding: 10 }}>
+                <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                  <div className={css.field} style={{ flex: 2, minWidth: 160 }}>
+                    <label className={css.fieldLabel}>{tt('plotlines.name')}</label>
+                    <input className={css.input} value={plotlineDraft.name} onChange={e => { setPlotlineDraft({ ...plotlineDraft, name: e.target.value }) }} placeholder="如：集齐古玉残片" />
+                  </div>
+                  <div className={css.field} style={{ flex: 1 }}>
+                    <label className={css.fieldLabel}>{tt('plotlines.kind')}</label>
+                    <select className={css.input} value={plotlineDraft.kind} onChange={e => { setPlotlineDraft({ ...plotlineDraft, kind: e.target.value as Plotline['kind'] }) }}>
+                      <option value="main">{tt('plotlines.kindMain')}</option>
+                      <option value="branch">{tt('plotlines.kindBranch')}</option>
+                      <option value="character">{tt('plotlines.kindCharacter')}</option>
+                      <option value="mystery">{tt('plotlines.kindMystery')}</option>
+                    </select>
+                  </div>
+                  <div className={css.field} style={{ flex: 1 }}>
+                    <label className={css.fieldLabel}>{tt('plotlines.status')}</label>
+                    <select className={css.input} value={plotlineDraft.status} onChange={e => { setPlotlineDraft({ ...plotlineDraft, status: e.target.value as Plotline['status'] }) }}>
+                      <option value="active">{tt('plotlines.statusActive')}</option>
+                      <option value="paused">{tt('plotlines.statusPaused')}</option>
+                      <option value="resolved">{tt('plotlines.statusResolved')}</option>
+                      <option value="abandoned">{tt('plotlines.statusAbandoned')}</option>
+                    </select>
+                  </div>
                 </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>{tt('plotlines.goal')}</label>
+                  <textarea className={css.textarea} style={{ minHeight: 48 }} value={plotlineDraft.goal} onChange={e => { setPlotlineDraft({ ...plotlineDraft, goal: e.target.value }) }} />
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>{tt('plotlines.progress')}</label>
+                  <textarea className={css.textarea} style={{ minHeight: 40 }} value={plotlineDraft.progress} onChange={e => { setPlotlineDraft({ ...plotlineDraft, progress: e.target.value }) }} placeholder="如：已取得第二枚残片，正追踪第三枚线索" />
+                </div>
+                <div className={css.row}>
+                  <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handlePlotlineSave() }}>
+                    {tt('plotlines.save')}
+                  </button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setPlotlineDraft(null) }}>
+                    {tt('plotlines.cancel')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {(project?.plotlines ?? []).length === 0 ? (
+              <span className={css.meta}>{tt('plotlines.empty')}</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+                {(project?.plotlines ?? []).map(line => {
+                  const kindLabel = { main: tt('plotlines.kindMain'), branch: tt('plotlines.kindBranch'), character: tt('plotlines.kindCharacter'), mystery: tt('plotlines.kindMystery') }[line.kind]
+                  const statusLabel = { active: tt('plotlines.statusActive'), paused: tt('plotlines.statusPaused'), resolved: tt('plotlines.statusResolved'), abandoned: tt('plotlines.statusAbandoned') }[line.status]
+                  const statusColor = line.status === 'resolved' ? 'var(--nf-success)' : line.status === 'abandoned' ? 'var(--nf-text-3)' : line.status === 'paused' ? 'var(--nf-warn)' : 'var(--nf-accent)'
+                  return (
+                    <div key={line.id} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <b>{line.name}</b>
+                          <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{kindLabel}</span>
+                          <span className={css.badge} style={{ borderColor: statusColor, color: statusColor }}>{statusLabel}</span>
+                        </span>
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setPlotlineDraft({ id: line.id, name: line.name, kind: line.kind, goal: line.goal, progress: line.progress, status: line.status }) }}>
+                            {tt('plotlines.edit')}
+                          </button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handlePlotlineRemove(line.id) }}>
+                            {tt('plotlines.remove')}
+                          </button>
+                        </span>
+                      </div>
+                      {line.goal !== '' && <div className={css.meta}><b>{tt('plotlines.goal')}：</b>{line.goal}</div>}
+                      {line.progress !== '' && <div className={css.meta}><b>{tt('plotlines.progress')}：</b>{line.progress}</div>}
+                      <div className={css.meta}>
+                        {tt('plotlines.chapters')}：{line.chapters.length > 0 ? line.chapters.map(n => `第${n}章`).join('、') : '—'}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>

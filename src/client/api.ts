@@ -162,6 +162,16 @@ export class NovelApi {
     return postJson<{ bible: import('../protocol.ts').StoryBible }>(NOVEL_API.biblePatch, patch)
   }
 
+  /** 剧情线管理：增删改 + 关联章节。 */
+  async plotlines(req: import('../protocol.ts').PlotlinesRequest): Promise<import('../protocol.ts').PlotlinesResponse> {
+    return postJson<import('../protocol.ts').PlotlinesResponse>(NOVEL_API.plotlines, req)
+  }
+
+  /** 敏感词检查：指定章节 / 任意文本 / 全书。 */
+  async sensitiveCheck(req: import('../protocol.ts').SensitiveCheckRequest): Promise<import('../protocol.ts').SensitiveCheckResponse> {
+    return postJson<import('../protocol.ts').SensitiveCheckResponse>(NOVEL_API.sensitiveCheck, req)
+  }
+
   /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
   async blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{ blurb: string }> {
     return postJson<{ blurb: string }>(NOVEL_API.blurb, { action, text, partial })

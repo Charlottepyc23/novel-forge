@@ -63,8 +63,11 @@ body[data-ds-dark-theme] .entry {
   inset: 0;
   overflow: auto;
   color-scheme: light;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro SC', 'PingFang SC', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-  /* iOS light palette (system colors, frosted translucency) */
+  /* 统一 iOS 字体栈：SF Pro + 苹方/冬青黑体中文回退，Windows 回落微软雅黑 */
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --nf-font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --nf-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* iOS light palette (Liquid-Glass green, frosted translucency) */
   --nf-bg: rgba(242, 242, 247, 0.86);
   --nf-bg-raise: rgba(255, 255, 255, 0.72);
   --nf-bg-inset: rgba(118, 118, 128, 0.12);
@@ -74,17 +77,28 @@ body[data-ds-dark-theme] .entry {
   --nf-text-2: #3c3c43;
   --nf-text-2-alpha: rgba(60, 60, 67, 0.68);
   --nf-text-3: #8e8e93;
-  --nf-accent: #007aff;
-  --nf-accent-hover: #0071e3;
-  --nf-accent-soft: rgba(0, 122, 255, 0.12);
+  --nf-accent: #00b85c;
+  --nf-accent-hover: #00a04e;
+  --nf-accent-soft: rgba(0, 184, 92, 0.12);
   --nf-accent-fg: #ffffff;
   --nf-hover: rgba(0, 0, 0, 0.05);
   --nf-success: #34c759;
   --nf-error: #ff3b30;
   --nf-warn: #ff9500;
-  --nf-info: #5856d6;
+  --nf-info: #00b85c;
   --nf-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 12px 32px rgba(0, 0, 0, 0.08);
   --nf-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.07), 0 20px 48px rgba(0, 0, 0, 0.12);
+  --nf-card-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 14px 38px rgba(0, 0, 0, 0.14);
+  --nf-card-shadow-hover: 0 4px 10px rgba(0, 0, 0, 0.08), 0 22px 52px rgba(0, 0, 0, 0.20);
+  /* Liquid Glass: vertical glass face + soft top-left core + sheen border */
+  --nf-glass-face: linear-gradient(180deg, #f6f7f9 0%, #f0f2f5 26%, #e9ebef 52%, #e0e3e8 78%, #d6d9df 100%);
+  --nf-glass-core: radial-gradient(30% 24% at 36% 28%, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.22) 45%, rgba(255, 255, 255, 0) 78%);
+  --nf-glass-sheen: rgba(255, 255, 255, 0.55);
+  --nf-glass-border: rgba(255, 255, 255, 0.65);
+  --nf-glass-inset: rgba(255, 255, 255, 0.55);
+  --nf-glass-orb-a: rgba(0, 184, 92, 0.14);
+  --nf-glass-orb-b: rgba(120, 160, 255, 0.10);
+  --nf-glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
   background: var(--nf-bg);
   /* Frosted glass: blur whatever is behind the panel (the chat dialog),
    * so translucency shows a soft blur instead of readable content. */
@@ -95,8 +109,8 @@ body[data-ds-dark-theme] .entry {
 
 body[data-ds-dark-theme] .view {
   color-scheme: dark;
-  /* iOS dark palette */
-  --nf-bg: rgba(0, 0, 0, 0.72);
+  /* iOS dark palette — near-black canvas with green Liquid-Glass accents */
+  --nf-bg: rgba(10, 11, 13, 0.86);
   --nf-bg-raise: rgba(28, 28, 30, 0.78);
   --nf-bg-inset: rgba(118, 118, 128, 0.18);
   --nf-border: rgba(255, 255, 255, 0.12);
@@ -105,21 +119,193 @@ body[data-ds-dark-theme] .view {
   --nf-text-2: #d1d1d6;
   --nf-text-2-alpha: rgba(209, 209, 214, 0.72);
   --nf-text-3: #8e8e93;
-  --nf-accent: #0a84ff;
-  --nf-accent-hover: #3a9bff;
-  --nf-accent-soft: rgba(10, 132, 255, 0.2);
-  --nf-accent-fg: #ffffff;
+  --nf-accent: #35d07a;
+  --nf-accent-hover: #5ce695;
+  --nf-accent-soft: rgba(53, 208, 122, 0.2);
+  --nf-accent-fg: #062b18;
   --nf-hover: rgba(255, 255, 255, 0.09);
   --nf-success: #30d158;
   --nf-error: #ff453a;
   --nf-warn: #ff9f0a;
-  --nf-info: #bf5af2;
+  --nf-info: #35d07a;
   --nf-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.4);
   --nf-shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.4), 0 20px 48px rgba(0, 0, 0, 0.55);
+  --nf-card-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 14px 38px rgba(0, 0, 0, 0.45);
+  --nf-card-shadow-hover: 0 4px 10px rgba(0, 0, 0, 0.4), 0 22px 52px rgba(0, 0, 0, 0.55);
+  /* Liquid Glass (dark): translucent charcoal glass face + soft bright core */
+  --nf-glass-face: linear-gradient(180deg, rgba(112, 116, 122, 0.42) 0%, rgba(96, 100, 106, 0.42) 26%, rgba(82, 85, 90, 0.42) 52%, rgba(68, 71, 76, 0.42) 78%, rgba(56, 58, 63, 0.42) 100%);
+  --nf-glass-core: radial-gradient(30% 24% at 36% 28%, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.10) 45%, rgba(255, 255, 255, 0) 78%);
+  --nf-glass-sheen: rgba(255, 255, 255, 0.26);
+  --nf-glass-border: rgba(255, 255, 255, 0.14);
+  --nf-glass-inset: rgba(255, 255, 255, 0.07);
+  --nf-glass-orb-a: rgba(0, 202, 82, 0.20);
+  --nf-glass-orb-b: rgba(190, 200, 215, 0.07);
+  --nf-glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-ssh-active]) .view {
   display: block;
+}
+
+/* ------------------------------------------------------------ themes
+ * 'liquid' (default): iOS Liquid Glass, green accent — set on .view above.
+ * 'classic': original frosted iOS look, blue accent — overrides below.
+ */
+.panel[data-nf-theme='classic'] {
+  --nf-accent: #007aff;
+  --nf-accent-hover: #0071e3;
+  --nf-accent-soft: rgba(0, 122, 255, 0.12);
+  --nf-accent-fg: #ffffff;
+  --nf-info: #5856d6;
+  --nf-glass-face: var(--nf-bg-raise);
+  --nf-glass-core: transparent;
+  --nf-glass-sheen: rgba(255, 255, 255, 0);
+  --nf-glass-border: var(--nf-border);
+  --nf-glass-inset: var(--nf-bg-inset);
+  --nf-glass-orb-a: transparent;
+  --nf-glass-orb-b: transparent;
+  --nf-glass-noise: none;
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='classic'] {
+  --nf-accent: #0a84ff;
+  --nf-accent-hover: #3a9bff;
+  --nf-accent-soft: rgba(10, 132, 255, 0.2);
+  --nf-accent-fg: #ffffff;
+  --nf-info: #bf5af2;
+  --nf-glass-face: var(--nf-bg-raise);
+  --nf-glass-core: transparent;
+  --nf-glass-sheen: rgba(255, 255, 255, 0);
+  --nf-glass-border: var(--nf-border);
+  --nf-glass-inset: var(--nf-bg-inset);
+  --nf-glass-orb-a: transparent;
+  --nf-glass-orb-b: transparent;
+  --nf-glass-noise: none;
+}
+
+/* ------------------------------------------------------------
+ * 'neumorph': Neumorphism (dual-shadow soft UI).
+ * Light variant in light mode; a dark dual-shadow variant in dark
+ * mode so switching always has a visible effect.
+ * ------------------------------------------------------------ */
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] {
+  --nf-bg: #e4e9f2;
+  --nf-bg-raise: #e4e9f2;
+  --nf-bg-inset: #d9dfe8;
+  --nf-border: rgba(140, 155, 175, 0.35);
+  --nf-border-strong: rgba(120, 135, 158, 0.5);
+  --nf-text: #3a4250;
+  --nf-text-2: #5b6472;
+  --nf-text-2-alpha: rgba(70, 80, 96, 0.7);
+  --nf-text-3: #8b94a3;
+  --nf-hover: rgba(90, 105, 125, 0.08);
+  --nf-shadow: 4px 4px 10px rgba(163, 177, 198, 0.55), -4px -4px 10px rgba(255, 255, 255, 0.85);
+  --nf-shadow-lg: 6px 6px 14px rgba(163, 177, 198, 0.6), -6px -6px 14px rgba(255, 255, 255, 0.9);
+  --nf-card-shadow: 9px 9px 18px rgba(163, 177, 198, 0.55), -9px -9px 18px rgba(255, 255, 255, 0.85);
+  --nf-card-shadow-hover: 12px 12px 24px rgba(163, 177, 198, 0.65), -12px -12px 24px rgba(255, 255, 255, 0.95);
+  --nf-glass-face: #e4e9f2;
+  --nf-glass-core: transparent;
+  --nf-glass-sheen: rgba(255, 255, 255, 0);
+  --nf-glass-border: rgba(163, 177, 198, 0.4);
+  --nf-glass-inset: #d9dfe8;
+  --nf-glass-orb-a: transparent;
+  --nf-glass-orb-b: transparent;
+  --nf-glass-noise: none;
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] {
+  --nf-bg: #2b2f36;
+  --nf-bg-raise: #2b2f36;
+  --nf-bg-inset: #25292f;
+  --nf-border: rgba(10, 12, 16, 0.5);
+  --nf-border-strong: rgba(8, 10, 14, 0.6);
+  --nf-text: #d6dae1;
+  --nf-text-2: #a8aeb8;
+  --nf-text-2-alpha: rgba(168, 174, 184, 0.7);
+  --nf-text-3: #757c88;
+  --nf-hover: rgba(255, 255, 255, 0.05);
+  --nf-shadow: 4px 4px 10px rgba(0, 0, 0, 0.5), -4px -4px 10px rgba(96, 104, 118, 0.24);
+  --nf-shadow-lg: 6px 6px 14px rgba(0, 0, 0, 0.55), -6px -6px 14px rgba(96, 104, 118, 0.26);
+  --nf-card-shadow: 9px 9px 18px rgba(0, 0, 0, 0.5), -9px -9px 18px rgba(96, 104, 118, 0.24);
+  --nf-card-shadow-hover: 12px 12px 24px rgba(0, 0, 0, 0.6), -12px -12px 24px rgba(96, 104, 118, 0.28);
+  --nf-glass-face: #2b2f36;
+  --nf-glass-core: transparent;
+  --nf-glass-sheen: rgba(255, 255, 255, 0);
+  --nf-glass-border: rgba(12, 14, 18, 0.45);
+  --nf-glass-inset: #25292f;
+  --nf-glass-orb-a: transparent;
+  --nf-glass-orb-b: transparent;
+  --nf-glass-noise: none;
+}
+
+/* Neumorphic inset inputs (sunken). */
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .input,
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .textarea {
+  background: var(--nf-bg-inset);
+  border-color: transparent;
+  box-shadow: inset 3px 3px 7px rgba(163, 177, 198, 0.55), inset -3px -3px 7px rgba(255, 255, 255, 0.9);
+}
+
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .input:focus,
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .textarea:focus {
+  border-color: var(--nf-accent);
+  box-shadow: inset 2px 2px 6px rgba(163, 177, 198, 0.5), inset -2px -2px 6px rgba(255, 255, 255, 0.85), 0 0 0 3px var(--nf-accent-soft);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .input,
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .textarea {
+  background: var(--nf-bg-inset);
+  border-color: transparent;
+  box-shadow: inset 3px 3px 7px rgba(0, 0, 0, 0.55), inset -3px -3px 7px rgba(96, 104, 118, 0.24);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .input:focus,
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .textarea:focus {
+  border-color: var(--nf-accent);
+  box-shadow: inset 2px 2px 6px rgba(0, 0, 0, 0.5), inset -2px -2px 6px rgba(96, 104, 118, 0.22), 0 0 0 3px var(--nf-accent-soft);
+}
+
+/* Neumorphic raised buttons. */
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .button {
+  border-color: transparent;
+  background: var(--nf-bg-raise);
+  box-shadow: 5px 5px 10px rgba(163, 177, 198, 0.55), -5px -5px 10px rgba(255, 255, 255, 0.9);
+}
+
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .button:hover:not([disabled]) {
+  background: var(--nf-bg-raise);
+  border-color: transparent;
+  box-shadow: 7px 7px 14px rgba(163, 177, 198, 0.6), -7px -7px 14px rgba(255, 255, 255, 0.95);
+}
+
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .button:active:not([disabled]) {
+  box-shadow: inset 3px 3px 7px rgba(163, 177, 198, 0.55), inset -3px -3px 7px rgba(255, 255, 255, 0.9);
+}
+
+body:not([data-ds-dark-theme]) .panel[data-nf-theme='neumorph'] .buttonPrimary {
+  background: linear-gradient(180deg, #00c563, #00a952);
+  box-shadow: 5px 5px 10px rgba(163, 177, 198, 0.6), -5px -5px 10px rgba(255, 255, 255, 0.85);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .button {
+  border-color: transparent;
+  background: var(--nf-bg-raise);
+  box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.5), -5px -5px 10px rgba(96, 104, 118, 0.24);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .button:hover:not([disabled]) {
+  background: var(--nf-bg-raise);
+  border-color: transparent;
+  box-shadow: 7px 7px 14px rgba(0, 0, 0, 0.55), -7px -7px 14px rgba(96, 104, 118, 0.26);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .button:active:not([disabled]) {
+  box-shadow: inset 3px 3px 7px rgba(0, 0, 0, 0.55), inset -3px -3px 7px rgba(96, 104, 118, 0.24);
+}
+
+body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
+  background: linear-gradient(180deg, #3ddc86, #27b96a);
+  box-shadow: 5px 5px 10px rgba(0, 0, 0, 0.5), -5px -5px 10px rgba(96, 104, 118, 0.24);
 }
 
 /* ------------------------------------------------------------ panel shell */
@@ -132,20 +318,37 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   font-size: 14px;
   line-height: 1.6;
   position: relative;
+  overflow: hidden;
+}
+
+/* Liquid-Glass backdrop: colored orbs + vignette behind the frosted cards. */
+.panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 36% at 18% 12%, var(--nf-glass-orb-a), transparent 70%),
+    radial-gradient(52% 42% at 88% 22%, var(--nf-glass-orb-b), transparent 72%),
+    radial-gradient(120% 95% at 50% 42%, transparent 55%, rgba(2, 2, 3, 0.10) 100%);
 }
 
 .panelHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--nf-border);
+  margin: 10px 12px 0;
+  padding: 10px 16px;
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 18px;
   flex-shrink: 0;
-  background: var(--nf-bg-raise);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  background: var(--nf-glass-face);
+  box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
+  -webkit-backdrop-filter: blur(28px) saturate(175%);
+  backdrop-filter: blur(28px) saturate(175%);
   position: sticky;
-  top: 0;
+  top: 10px;
   z-index: 5;
 }
 
@@ -238,6 +441,8 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   display: flex;
   flex-direction: column;
   gap: 14px;
+  position: relative;
+  z-index: 1;
 }
 
 /* ------------------------------------------- body: left nav + content */
@@ -246,19 +451,25 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
+  z-index: 1;
 }
 
 .panelNav {
   flex: none;
+  align-self: flex-start;
   width: 142px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
+  margin: 10px 0 10px 12px;
   padding: 10px 8px;
-  border-right: 1px solid var(--nf-border);
-  background: var(--nf-bg-raise);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 16px;
+  background: var(--nf-glass-face);
+  box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
+  -webkit-backdrop-filter: blur(28px) saturate(175%);
+  backdrop-filter: blur(28px) saturate(175%);
   overflow-y: auto;
   transition: width 0.18s ease;
 }
@@ -271,7 +482,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 .navGroup {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .navGroupLabel {
@@ -280,7 +491,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   letter-spacing: 0.6px;
   text-transform: uppercase;
   color: var(--nf-text-3);
-  padding: 6px 10px 2px;
+  padding: 8px 10px 3px;
   user-select: none;
 }
 
@@ -293,6 +504,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 .navSpacer {
   flex: 1;
   min-height: 8px;
+  /* 导航卡片不再拉满全高（align-self: flex-start），此占位仅保留最小间距 */
 }
 
 /* 导航底部：关于（版本 + GitHub + 更新） */
@@ -456,7 +668,19 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   text-overflow: ellipsis;
 }
 
-/* 顶栏进度摘要 */
+/* 顶栏副标题行：书名 + 进度摘要（iOS 大标题下方副标题） */
+.panelSubtitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--nf-text-2);
+  padding: 0 4px 2px;
+  min-width: 0;
+  flex-wrap: wrap;
+  white-space: nowrap;
+}
+
 .headerProgress {
   font-size: 12px;
   font-weight: 400;
@@ -464,7 +688,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: 4px;
+  margin-left: 0;
   white-space: nowrap;
 }
 
@@ -484,17 +708,60 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 /* ------------------------------------------------------------ cards */
 
 .card {
-  border: 1px solid var(--nf-border);
-  border-radius: 20px;
+  position: relative;
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 22px;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--nf-bg-raise);
-  box-shadow: var(--nf-shadow);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  backdrop-filter: blur(24px) saturate(180%);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  background: var(--nf-glass-face);
+  box-shadow:
+    var(--nf-card-shadow),
+    inset 0 1.5px 0 var(--nf-glass-sheen),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+/* Liquid-Glass surface: bright core highlight + hairline sheen. */
+.card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    var(--nf-glass-core),
+    linear-gradient(90deg, transparent, var(--nf-glass-sheen), transparent) no-repeat 10% 0 / 80% 1px,
+    linear-gradient(156deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0) 55%);
+  z-index: 0;
+}
+
+/* Subtle grain, barely visible. */
+.card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--nf-glass-noise);
+  opacity: 0.06;
+  z-index: 0;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    var(--nf-card-shadow-hover),
+    inset 0 1.5px 0 var(--nf-glass-sheen),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .cardTitle {
@@ -540,7 +807,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   border-color: transparent;
   background: linear-gradient(180deg, color-mix(in srgb, var(--nf-accent) 88%, #ffffff), var(--nf-accent));
   color: var(--nf-accent-fg);
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--nf-accent) 35%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--nf-accent) 45%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--nf-accent) 30%, transparent);
 }
 
 .buttonPrimary:hover:not([disabled]) {
@@ -973,7 +1240,7 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   white-space: pre-wrap;
   word-break: break-all;
   color: var(--nf-text-2);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--nf-font-mono);
   background: var(--nf-bg-inset);
   line-height: 1.8;
 }
@@ -1070,7 +1337,8 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 }
 
 .diffList {
-  max-height: 70vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   border: 1px solid var(--nf-border);
   border-radius: 8px;
@@ -1193,11 +1461,29 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   color: var(--nf-success);
 }
 
-/* Revision workspace: left original editor + right instruction/preview, 1:1. */
+/* Chapter editor page: full-bleed, flex-fills the content pane (no card box). */
+.wsPage {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+}
+
+.wsPageHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
+}
+
 .wsColumns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
+  flex: 1;
+  min-height: 0;
 }
 
 .wsColumn {
@@ -1205,13 +1491,14 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  min-height: 0;
 }
 
 .wsEditor {
   flex: 1;
-  min-height: 50vh;
+  min-height: 0;
   resize: vertical;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--nf-font);
   font-size: 13px;
   line-height: 1.75;
   white-space: pre-wrap;
@@ -1245,7 +1532,8 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 
 .wsPreviewText {
   margin: 0;
-  max-height: 55vh;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   font-size: 13px;
   line-height: 1.7;
@@ -1261,13 +1549,14 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 }
 
 .assetStat {
-  border: 1px solid var(--nf-border);
-  border-radius: 10px;
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 14px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--nf-bg-inset);
+  background: var(--nf-glass-inset);
+  box-shadow: inset 0 1px 0 var(--nf-glass-sheen);
 }
 
 .assetStatLabel {
@@ -1295,16 +1584,60 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
 /* ------------------------------------------------ dashboard (workflow tab) */
 
 .dashHero {
-  border: 1px solid var(--nf-border);
-  border-radius: 16px;
+  position: relative;
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 22px;
   padding: 18px 20px;
-  background:
-    radial-gradient(1200px 400px at 110% -60%, color-mix(in srgb, var(--nf-accent) 16%, transparent), transparent 60%),
-    linear-gradient(135deg, var(--nf-bg-raise), color-mix(in srgb, var(--nf-accent) 5%, var(--nf-bg-raise)));
-  box-shadow: var(--nf-shadow);
+  background: var(--nf-glass-face);
+  box-shadow:
+    var(--nf-card-shadow),
+    inset 0 1.5px 0 var(--nf-glass-sheen),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
   display: flex;
   flex-direction: column;
   gap: 14px;
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+/* Same Liquid-Glass surface as .card: bright core + hairline + green tint. */
+.dashHero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background:
+    radial-gradient(46% 40% at 92% -10%, color-mix(in srgb, var(--nf-accent) 13%, transparent), transparent 62%),
+    var(--nf-glass-core),
+    linear-gradient(90deg, transparent, var(--nf-glass-sheen), transparent) no-repeat 10% 0 / 80% 1px,
+    linear-gradient(156deg, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0) 55%);
+  z-index: 0;
+}
+
+.dashHero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--nf-glass-noise);
+  opacity: 0.06;
+  z-index: 0;
+}
+
+.dashHero:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    var(--nf-card-shadow-hover),
+    inset 0 1.5px 0 var(--nf-glass-sheen),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.dashHero > * {
+  position: relative;
+  z-index: 1;
 }
 
 .dashHeroEyebrow {
@@ -1338,9 +1671,10 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   display: flex;
   align-items: center;
   gap: 12px;
-  border: 1px solid var(--nf-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--nf-bg-base) 65%, transparent);
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 14px;
+  background: var(--nf-glass-inset);
+  box-shadow: inset 0 1px 0 var(--nf-glass-sheen);
   padding: 10px 14px;
 }
 
@@ -1978,11 +2312,18 @@ html[data-dsh-novelforge-active]:not([data-dsh-taskboard-active]):not([data-dsh-
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 18px;
-  border-bottom: 1px solid var(--nf-border);
-  background: var(--nf-bg-raise);
+  margin: 10px 12px 0;
+  padding: 8px 14px;
+  border: 1px solid var(--nf-glass-border);
+  border-radius: 16px;
+  background: var(--nf-glass-face);
+  box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
+  -webkit-backdrop-filter: blur(26px) saturate(175%);
+  backdrop-filter: blur(26px) saturate(175%);
   flex-shrink: 0;
   flex-wrap: wrap;
+  position: relative;
+  z-index: 1;
 }
 
 .bookshelfLabel {
