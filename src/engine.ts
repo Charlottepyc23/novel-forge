@@ -22,6 +22,7 @@ import type {
   PlotlinePlan,
   ProjectState,
   ReviewReport,
+  RoleRecord,
   RoleStatusCard,
   StoryBible,
   Volume,
@@ -526,6 +527,15 @@ function writeSystemPrompt(project: ProjectState): string {
         }
       }
     }
+    // 角色库注入：定位 + 身份 + 关系（角色互动按定位规格写）。
+    const roleLib = project.roles ?? []
+    if (roleLib.length > 0) {
+      const labelName = { protagonist: '主角', female_lead: '女主', female_support: '女配', support: '配角', antagonist: '反派', extra: '路人' }
+      sections.push('角色库（出场角色按定位规格刻画互动）：')
+      for (const r of roleLib) {
+        sections.push(`- ${r.name}（${labelName[r.roleLabel]}）：${r.identity}${r.relations.length > 0 ? `；关系：${r.relations.join('、')}` : ''}`)
+      }
+    }
     if (bible.redLines.length > 0) sections.push('写作红线（违反即失败）：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
     if (bible.style.length > 0) sections.push('风格要求：\n' + bible.style.map(r => `- ${r}`).join('\n'))
   }
@@ -958,6 +968,73 @@ export async function refreshPlotlineProgress(
     await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 2000) }),
   )
   return typeof raw.progress === 'string' ? raw.progress.trim().slice(0, 300) : ''
+}
+
+/** ✨ AI 从全书提炼角色库：大纲 + 道藏 + 编年录 + 章节摘要 → 结构化角色清单。 */
+export async function extractRoles(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+): Promise<RoleRecord[]> {
+  const system = [
+    '你是一位网文角色库管理员。请根据本书的大纲、设定、编年录与章节摘要，提炼完整的角色库。',
+    '覆盖原则：所有在编年录/章节中实际出场或有名有姓的角色都应收录；无名的功能性人物（如"矮胖姑娘"）用其身份简称收录并标注。',
+    '数量控制：最多输出 10 个角色，宁缺毋滥；路人级一次带过的不要收录。',
+    '每个角色输出：',
+    '1. name：角色名（或身份简称）。',
+    '2. roleLabel：定位——protagonist=主角；female_lead=女主（唯一知己/感情线核心，无后宫前提下只此一位）；female_support=重要女配；support=普通配角；antagonist=反派；extra=路人/背景。',
+    '3. identity：身份一句话（宗门/势力/血脉/职业）。',
+    '4. traits：3-6 个性格标签。',
+    '5. goals：目标与动机一句话。',
+    '6. relations：关系网数组，格式["角色名（关系）", ...]。',
+    '7. arc：成长线数组，格式["阶段：说明", ...]（如"出场：祭品身份"/"转折：祭祀被中断脱身"）。',
+    '8. knowledge：该角色已经知道的关键信息（3-8 条），不知道的信息不要写进去。',
+    '精简要求：identity 控制在 30 字内；traits 3-6 个短标签；goals 60 字内；relations 2-5 条；arc 2-4 条；knowledge 每条 40 字内。整体输出量要紧凑，避免冗长。',
+    '重要：用户消息里列出的「已收录角色」绝不要再次输出——这些角色已经在角色库里，跳过它们，只提炼未收录的。',
+    '输出必须是合法 JSON 数组，不要输出其他文字：[{"name":"...", "roleLabel":"...", "identity":"...", "traits":[...], "goals":"...", "relations":[...], "arc":[...], "knowledge":[...]}]',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '重要：直接输出 JSON 结果本身，不要把思考过程写在输出里。',
+  ].join('\n')
+  const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
+  const existingRoles = project.roles ?? []
+  const user = [
+    `书名：《${project.bookName}》`,
+    existingRoles.length > 0
+      ? `已收录角色（跳过，不要输出）：${existingRoles.map(r => r.name).join('、')}`
+      : '',
+    `大纲（节选前 3000 字）：\n${project.outline.slice(0, 3000)}`,
+    project.bible !== undefined && project.bible.characters.length > 0
+      ? `已有角色卡（补充信息）：\n${project.bible.characters.map(c => `- ${c.name}（${c.role}）：${c.traits.join('、')}${c.goals !== '' ? `；目标：${c.goals}` : ''}`).join('\n')}`
+      : '',
+    (project.facts ?? []).length > 0
+      ? `编年录（最近 60 条）：\n${(project.facts ?? []).slice(-60).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 80)}`).join('\n')}`
+      : '',
+    written.length > 0
+      ? `已写章节标题（${written.length} 章）：\n${written.map(c => `第${c.no}章《${c.title}》`).join('、')}`
+      : '',
+    '只输出 JSON 数组。',
+  ].join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000) })
+  const raw = parseJsonArray<Record<string, unknown>>(text)
+  const labels = new Set(['protagonist', 'female_lead', 'female_support', 'support', 'antagonist', 'extra'])
+  const strArr = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []
+  const roles: RoleRecord[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 30) : ''
+    if (name === '') continue
+    roles.push({
+      name,
+      roleLabel: labels.has(entry.roleLabel as string) ? entry.roleLabel as RoleRecord['roleLabel'] : 'support',
+      identity: typeof entry.identity === 'string' ? entry.identity.slice(0, 100) : '',
+      traits: strArr(entry.traits).map(t => t.slice(0, 20)).slice(0, 8),
+      goals: typeof entry.goals === 'string' ? entry.goals.slice(0, 200) : '',
+      relations: strArr(entry.relations).map(r => r.slice(0, 60)).slice(0, 10),
+      arc: strArr(entry.arc).map(a => a.slice(0, 120)).slice(0, 10),
+      knowledge: strArr(entry.knowledge).map(k => k.slice(0, 120)).slice(0, 12),
+    })
+  }
+  return roles
 }
 
 /** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */

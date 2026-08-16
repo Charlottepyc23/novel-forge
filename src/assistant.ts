@@ -15,7 +15,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createUserMessage, createAssistantMessage, BlockAssembler, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, createAssistantMessage, BlockAssembler, type GenerateOptions, type Message, type StreamChunk, type ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AssistantMessage, NovelConfig, ProjectState } from './protocol.ts'
 import { emptyProjectAssets } from './assets.ts'
@@ -542,11 +542,17 @@ async function chatOnce(
   const messages = historyToMessages(history)
   // 纪律提醒贴在最后一条消息（当前用户输入）末尾：紧邻模型要生成回复的位置，
   // 比放在 system 里更不容易被长上下文稀释（位置效应）。
+  // 注意：dsh-llm 的消息/内容块对象是只读的，必须重建新对象，不能直接改属性。
   const last = messages[messages.length - 1]
   if (last?.role === 'user' && Array.isArray(last.content)) {
-    const text = (last.content as Array<{ type: string; text?: string }>).find(b => b.type === 'text')
-    if (text !== undefined && typeof text.text === 'string') {
-      text.text += '\n\n（回复格式提醒：如果你需要执行任何操作，你的回复必须【只包含】一个 <dsh-action name="工具名">{"参数":值}</dsh-action> 标签，禁止先说话、禁止解释、禁止铺垫；如果你只是在回答或讨论，正常回复即可，不要输出标签。）'
+    const blocks = last.content as ContentBlock[]
+    const idx = blocks.findIndex(b => b.type === 'text')
+    if (idx !== -1) {
+      const textBlock = blocks[idx] as { type: 'text'; text: string }
+      const newBlocks: ContentBlock[] = blocks.map((b, i) => i === idx
+        ? { ...textBlock, text: textBlock.text + '\n\n（回复格式提醒：如果你需要执行任何操作，你的回复必须【只包含】一个 <dsh-action name="工具名">{"参数":值}</dsh-action> 标签，禁止先说话、禁止解释、禁止铺垫；如果你只是在回答或讨论，正常回复即可，不要输出标签。）' }
+        : b)
+      messages[messages.length - 1] = { ...last, content: newBlocks }
     }
   }
   const request: GenerateOptions = {
@@ -608,9 +614,26 @@ export async function* runAssistantTurn(
   /** 已提示模型输出动作标签的次数（0 = 尚未提示；超过上限则按纯文字回复结束，防死循环）。 */
   let nudged = 0
   const MAX_NUDGES = 6
+  /** 连续收到 hex 乱码回复的次数（≥2 次判定 LLM 侧异常，放弃本轮避免死循环）。 */
+  let garbleCount = 0
   for (;;) {
     if (round++ > 20) break
     const reply = await chatOnce(ctx, config, system, history)
+
+    // 异常输出防护：全 hex/二进制乱码（模型偶发把回复编码成十六进制）——丢弃重试一次。
+    const hexLike = reply.length > 120 && /^[0-9a-fA-F\s]+$/.test(reply.slice(0, 2000))
+    if (hexLike) {
+      garbleCount++
+      if (garbleCount >= 2) {
+        const garbleEntry: AssistantMessage = { role: 'assistant', content: '（模型本次返回了异常编码内容，已忽略；请重新描述你的问题。）', ts: new Date().toISOString() }
+        history.push(garbleEntry)
+        appendHistory(outputDir, garbleEntry)
+        yield { frame: 'delta', text: garbleEntry.content }
+        return
+      }
+      continue
+    }
+
     const action = extractAction(reply)
 
     if (action === undefined) {

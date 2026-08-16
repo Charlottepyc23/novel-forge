@@ -56,8 +56,12 @@ export const NOVEL_API = {
   cover: '/api/dsh-novel-forge/blurb/cover',
   /** 剧情线管理：增删改 + 关联章节。 */
   plotlines: '/api/dsh-novel-forge/plotlines',
+  /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+  roles: '/api/dsh-novel-forge/roles',
   /** 作者复盘补跑：对已写章节补齐 authorReview（全书流式 / 单章 JSON）。 */
   reviewBackfill: '/api/dsh-novel-forge/review/backfill',
+  /** 章节复位：generating 卡死 → pending（可重新生成）。 */
+  chapterReset: '/api/dsh-novel-forge/chapter/reset',
   /** 敏感词检查：全书已写章节或指定文本。 */
   sensitiveCheck: '/api/dsh-novel-forge/sensitive-check',
   config: '/api/dsh-novel-forge/config',
@@ -133,6 +137,8 @@ export interface ChapterPlan {
   targetChars: number
   /** Generation/review state. */
   status: ChapterStatus
+  /** 进入 generating 的时间（用于超时自动复位；未在生成时无此字段）。 */
+  generatingAt?: string
   /** Actual character count once generated. */
   chars?: number
   /** Failure message when status is 'error'. */
@@ -393,6 +399,44 @@ export interface RoleStatusCard {
   appearances: number
 }
 
+/** 角色库条目（主表：作者维护 + AI 提炼 + 编年录自动聚合）。 */
+export interface RoleRecord {
+  /** 角色名（唯一键）。 */
+  name: string
+  /** 定位：主角 / 女主 / 女配 / 配角 / 反派 / 路人。 */
+  roleLabel: 'protagonist' | 'female_lead' | 'female_support' | 'support' | 'antagonist' | 'extra'
+  /** 身份一句话（如：祭族后裔、青云宗杂役）。 */
+  identity: string
+  /** 性格标签。 */
+  traits: string[]
+  /** 目标与动机。 */
+  goals: string
+  /** 关系网：[角色名]（关系）。 */
+  relations: string[]
+  /** 成长线：阶段 → 说明（可含章节）。 */
+  arc: string[]
+  /** 知情度：该角色已经知道的信息。 */
+  knowledge: string[]
+  /** 首次出场章节（编年录聚合，可手动修正）。 */
+  firstChapter?: number
+}
+
+/** POST /roles 请求：角色库增删改 + AI 提炼。 */
+export interface RolesRequest {
+  op: 'extract' | 'adopt' | 'update' | 'remove'
+  /** adopt / update 时传入的角色（adopt 可修改后采纳）。 */
+  role?: RoleRecord
+  /** remove 时的角色名。 */
+  name?: string
+}
+
+/** POST /roles 响应。 */
+export interface RolesResponse {
+  roles: RoleRecord[]
+  /** op=extract 时的 AI 候选角色。 */
+  candidates?: RoleRecord[]
+}
+
 /** POST /bible/patch 请求：局部修补设定圣经。 */
 export interface BiblePatchRequest {
   worldRules?: string[]
@@ -514,6 +558,10 @@ export interface ProjectState {
   world?: WorldState
   /** 剧情线（主线/支线/人物线/悬念线）。 */
   plotlines?: Plotline[]
+  /** 角色库（作者维护 + AI 提炼的主表）。 */
+  roles?: RoleRecord[]
+  /** 人物志：角色当前状态聚合结果（从编年录刷新后存档，打开页面直接显示）。 */
+  roleStatus?: RoleStatusCard[]
   /** ISO timestamps. */
   createdAt: string
   updatedAt: string

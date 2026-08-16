@@ -26,6 +26,7 @@ import type {
   PlotlinePlan,
   ProjectState,
   ReviewReport,
+  RoleRecord,
   SensitiveHit,
   StoryBible,
   Volume,
@@ -35,7 +36,7 @@ import css from './panel.module.css'
 /** The panel's tab identifiers. */
 export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
-  | 'characters' | 'facts' | 'plotlines' | 'reviews' | 'progress'
+  | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress'
   | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle'
 
 /** Panel shell props. */
@@ -84,7 +85,8 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
     items: [
       { id: 'bible', label: tt('tab.bible'), icon: '📖' },
       { id: 'world', label: '大世界', icon: '🌍' },
-      { id: 'characters', label: '人物志', icon: '👥' },
+      { id: 'roles', label: '角色库', icon: '👥' },
+      { id: 'characters', label: '人物志', icon: '🧾' },
       { id: 'foreshadow', label: tt('tab.foreshadow'), icon: '🔮' },
       { id: 'facts', label: tt('tab.facts'), icon: '📜' },
       { id: 'reviews', label: '复盘记录', icon: '📋' },
@@ -401,6 +403,29 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   } | null>(null)
   /** 角色知情度编辑草稿（角色名 → 文本，每行一条）。 */
   const [knowledgeDraft, setKnowledgeDraft] = useState<Record<string, string>>({})
+  /** 角色库：AI 提炼候选（null = 未运行；localStorage 持久化，刷新不丢）。 */
+  const [roleCandidates, setRoleCandidates] = useState<RoleRecord[] | null>(() => {
+    try {
+      const raw = window.localStorage.getItem('dsh-novel-forge.role.candidates')
+      if (raw !== null) {
+        const parsed = JSON.parse(raw) as RoleRecord[]
+        return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+      }
+    } catch { /* ignore */ }
+    return null
+  })
+  /** 角色库：编辑草稿（null = 不在编辑）。 */
+  const [roleDraft, setRoleDraft] = useState<RoleRecord | null>(null)
+  /** 角色库候选持久化：提炼/采纳后写回 localStorage。 */
+  useEffect(() => {
+    try {
+      if (roleCandidates !== null && roleCandidates.length > 0) {
+        window.localStorage.setItem('dsh-novel-forge.role.candidates', JSON.stringify(roleCandidates))
+      } else {
+        window.localStorage.removeItem('dsh-novel-forge.role.candidates')
+      }
+    } catch { /* ignore */ }
+  }, [roleCandidates])
   /** 全书敏感词检查结果（null = 未运行）。 */
   const [sensHits, setSensHits] = useState<SensitiveHit[] | null>(null)
   const [sensScanned, setSensScanned] = useState(0)
@@ -566,6 +591,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       setConfig(status.config)
       setConfigDraft(status.config)
       setProject(status.project ?? null)
+      // 人物志存档同步：有 roleStatus 存档直接显示，无需重新刷新计算。
+      if (status.project?.roleStatus !== undefined) {
+        setCharCards(status.project.roleStatus)
+      } else {
+        setCharCards(null)
+      }
       setGeneratedFiles(status.generatedFiles)
       const withDraft = status.project?.chapters.find(c => c.pendingDraft !== undefined && c.pendingDraft !== '')
       setDraftNo(withDraft?.no ?? null)
@@ -743,6 +774,25 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } finally {
       setBusy(false)
       setBusyLabel('')
+    }
+  }
+
+  /** 章节复位：generating 卡死 → pending（可重新生成）。 */
+  const handleChapterReset = async (no: number): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      await api.chapterReset(no)
+      setProject(prev => prev === null ? prev : {
+        ...prev,
+        chapters: prev.chapters.map(c => c.no === no ? { ...c, status: 'pending', error: undefined } : c),
+      })
+      pushProgress(`第 ${no} 章已复位为待生成，可重新生成`, 'info')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`复位失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -1001,6 +1051,83 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } catch (err) {
       setError((err as Error).message)
       pushProgress(`保存知情度失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 角色库：AI 从全书提炼角色候选。 */
+  const handleRolesExtract = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel('✨ 提炼角色库中…')
+    setError('')
+    try {
+      const result = await api.roles({ op: 'extract' })
+      // 双保险：过滤掉已入库的同名角色（服务端已排除，这里兜底）。
+      const inLibrary = new Set((project?.roles ?? []).map(r => r.name))
+      const fresh = (result.candidates ?? []).filter(r => !inLibrary.has(r.name))
+      setRoleCandidates(prev => {
+        const merged = [...(prev ?? []).filter(p => !fresh.some(f => f.name === p.name)), ...fresh]
+        return merged
+      })
+      pushProgress(`AI 提炼出 ${fresh.length} 个新角色（已排除 ${(result.candidates?.length ?? 0) - fresh.length} 个已收录）`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`角色提炼失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 角色库：采纳候选（或修改后采纳）。 */
+  const handleRoleAdopt = async (role: RoleRecord): Promise<void> => {
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.roles({ op: 'adopt', role })
+      setProject(prev => prev === null ? prev : { ...prev, roles: result.roles, updatedAt: new Date().toISOString() })
+      setRoleCandidates(prev => prev === null ? prev : prev.filter(r => r !== role))
+      pushProgress(`已加入角色库：${role.name}`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 角色库：保存编辑草稿。 */
+  const handleRoleSave = async (): Promise<void> => {
+    if (roleDraft === null) return
+    if (roleDraft.name.trim() === '') {
+      setError('角色名不能为空')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.roles({ op: 'update', role: roleDraft })
+      setProject(prev => prev === null ? prev : { ...prev, roles: result.roles, updatedAt: new Date().toISOString() })
+      setRoleDraft(null)
+      pushProgress(`角色已保存：${roleDraft.name}`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 角色库：删除角色。 */
+  const handleRoleRemove = async (name: string): Promise<void> => {
+    if (!window.confirm(`确定从角色库删除「${name}」？`)) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api.roles({ op: 'remove', name })
+      setProject(prev => prev === null ? prev : { ...prev, roles: result.roles, updatedAt: new Date().toISOString() })
+      pushProgress(`已从角色库删除：${name}`, 'info')
+    } catch (err) {
+      setError((err as Error).message)
     } finally {
       setBusy(false)
     }
@@ -2886,6 +3013,17 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                               {tt('plan.write')}
                             </button>
                           )}
+                          {chapter.status === 'generating' && (
+                            <button
+                              type="button"
+                              className={`${css.button} ${css.buttonSmall}`}
+                              disabled={busy}
+                              onClick={() => { void handleChapterReset(chapter.no) }}
+                              title="生成卡死/中断时可复位为待生成，重新生成"
+                            >
+                              🔄 复位
+                            </button>
+                          )}
                           {(chapter.status === 'written' || chapter.status === 'rejected') && (
                             <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void handleReview(chapter.no) }}>
                               {tt('plan.review')}
@@ -3098,7 +3236,140 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           />
         )}
 
-        {/* 人物志：从编年录聚合的当前状态（独立导航页） */}
+        {/* 角色库：全书角色主表（独立导航页） */}
+        {activeTab === 'roles' && (
+          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>👥 角色库（{(project?.roles ?? []).length} 个）</span>
+              <div className={css.row}>
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                  disabled={busy || doneCount === 0}
+                  onClick={() => { void handleRolesExtract() }}
+                  title="AI 扫描大纲/编年录/已写章节，提炼完整角色库（含女主/女配/反派定位）"
+                >
+                  ✨ 从全书提炼角色
+                </button>
+              </div>
+            </div>
+            <span className={css.meta}>角色库是全书角色主表：定位（女主/女配/配角/反派）、身份、关系网、成长线、知情度——生成与审稿都会按定位规格刻画互动。</span>
+
+            {roleCandidates !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-info)', borderRadius: 12, padding: 10 }}>
+                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <b>✨ AI 提炼候选（{roleCandidates.length}）</b>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setRoleCandidates(null) }}>收起</button>
+                </div>
+                {roleCandidates.length === 0 && <span className={css.meta}>未提炼到角色。</span>}
+                {roleCandidates.map((r, i) => {
+                  const label = { protagonist: '主角', female_lead: '女主', female_support: '女配', support: '配角', antagonist: '反派', extra: '路人' }[r.roleLabel]
+                  const color = r.roleLabel === 'protagonist' ? 'var(--nf-success)' : r.roleLabel === 'female_lead' ? 'var(--nf-accent)' : r.roleLabel === 'antagonist' ? 'var(--nf-error)' : 'var(--nf-text-3)'
+                  return (
+                    <div key={i} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <b>{r.name}</b>
+                          <span className={css.badge} style={{ borderColor: color, color }}>{label}</span>
+                          {r.identity !== '' && <span className={css.meta}>{r.identity}</span>}
+                        </span>
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleRoleAdopt(r) }}>
+                            ＋ 采纳
+                          </button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setRoleDraft(r) }} title="修改后再采纳（候选列表保留）">
+                            ✏️ 修改后采纳
+                          </button>
+                        </span>
+                      </div>
+                      {r.goals !== '' && <div className={css.meta}>目标：{r.goals}</div>}
+                      {r.relations.length > 0 && <div className={css.meta}>关系：{r.relations.join('、')}</div>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {roleDraft !== null && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--nf-accent)', borderRadius: 12, padding: 10 }}>
+                <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                  <div className={css.field} style={{ flex: 1, minWidth: 140 }}>
+                    <label className={css.fieldLabel}>角色名</label>
+                    <input className={css.input} value={roleDraft.name} onChange={e => { setRoleDraft({ ...roleDraft, name: e.target.value }) }} />
+                  </div>
+                  <div className={css.field} style={{ flex: 1 }}>
+                    <label className={css.fieldLabel}>定位</label>
+                    <select className={css.input} value={roleDraft.roleLabel} onChange={e => { setRoleDraft({ ...roleDraft, roleLabel: e.target.value as RoleRecord['roleLabel'] }) }}>
+                      <option value="protagonist">主角</option>
+                      <option value="female_lead">女主</option>
+                      <option value="female_support">女配</option>
+                      <option value="support">配角</option>
+                      <option value="antagonist">反派</option>
+                      <option value="extra">路人</option>
+                    </select>
+                  </div>
+                  <div className={css.field} style={{ flex: 2 }}>
+                    <label className={css.fieldLabel}>身份</label>
+                    <input className={css.input} value={roleDraft.identity} onChange={e => { setRoleDraft({ ...roleDraft, identity: e.target.value }) }} />
+                  </div>
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>目标</label>
+                  <textarea className={css.textarea} style={{ minHeight: 44 }} value={roleDraft.goals} onChange={e => { setRoleDraft({ ...roleDraft, goals: e.target.value }) }} />
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>关系网（每行一条：角色名（关系））</label>
+                  <textarea className={css.textarea} style={{ minHeight: 44 }} value={roleDraft.relations.join('\n')} onChange={e => { setRoleDraft({ ...roleDraft, relations: e.target.value.split('\n').map(l => l.trim()).filter(l => l !== '') }) }} />
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>成长线（每行一条：阶段：说明）</label>
+                  <textarea className={css.textarea} style={{ minHeight: 44 }} value={roleDraft.arc.join('\n')} onChange={e => { setRoleDraft({ ...roleDraft, arc: e.target.value.split('\n').map(l => l.trim()).filter(l => l !== '') }) }} />
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>知情度（每行一条该角色知道的信息）</label>
+                  <textarea className={css.textarea} style={{ minHeight: 44 }} value={roleDraft.knowledge.join('\n')} onChange={e => { setRoleDraft({ ...roleDraft, knowledge: e.target.value.split('\n').map(l => l.trim()).filter(l => l !== '') }) }} />
+                </div>
+                <div className={css.row}>
+                  <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleRoleSave() }}>
+                    保存
+                  </button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setRoleDraft(null) }}>取消</button>
+                </div>
+              </div>
+            )}
+
+            {(project?.roles ?? []).length === 0 ? (
+              <span className={css.meta}>角色库为空——点「✨ 从全书提炼角色」自动建立，或手动新增。</span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {(project?.roles ?? []).map(r => {
+                  const label = { protagonist: '主角', female_lead: '女主', female_support: '女配', support: '配角', antagonist: '反派', extra: '路人' }[r.roleLabel]
+                  const color = r.roleLabel === 'protagonist' ? 'var(--nf-success)' : r.roleLabel === 'female_lead' ? 'var(--nf-accent)' : r.roleLabel === 'antagonist' ? 'var(--nf-error)' : 'var(--nf-text-3)'
+                  return (
+                    <div key={r.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <b>{r.name}</b>
+                          <span className={css.badge} style={{ borderColor: color, color }}>{label}</span>
+                          {r.identity !== '' && <span className={css.meta}>{r.identity}</span>}
+                        </span>
+                        <span style={{ display: 'flex', gap: 6 }}>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setRoleDraft(r) }}>编辑</button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleRoleRemove(r.name) }}>删除</button>
+                        </span>
+                      </div>
+                      {r.goals !== '' && <div className={css.meta}>目标：{r.goals}</div>}
+                      {r.relations.length > 0 && <div className={css.meta}>关系：{r.relations.join('、')}</div>}
+                      {r.arc.length > 0 && <div className={css.meta}>成长线：{r.arc.join(' → ')}</div>}
+                      {r.knowledge.length > 0 && <div className={css.meta}>知情度：{r.knowledge.join('；')}</div>}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'characters' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between' }}>
@@ -3132,49 +3403,16 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       </span>
                     </div>
                     {card.status !== '' && <div className={css.meta}>状态：{card.status}</div>}
+                    <div className={css.row} style={{ marginTop: 4 }}>
+                      <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setActiveTab('roles') }} title="在角色库中查看/编辑该角色档案">
+                        📖 查看档案
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
             )}
             <span className={css.meta}>人物志由「道藏」人物名单 + 「编年录」聚合而来，随章节生成自动保持最新。</span>
-          </div>
-        )}
-
-        {/* 角色知情度：信息差管理 */}
-        {activeTab === 'characters' && (
-          <div className={css.card}>
-            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle}>角色知情度（信息差管理）</span>
-              <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || (bible?.characters ?? []).length === 0} onClick={() => { void handleKnowledgeSave() }}>
-                💾 保存知情度
-              </button>
-            </div>
-            <span className={css.meta}>
-              填写每个角色「已经知道」的事实/秘密（每行一条）。生成与审稿会严格遵守：未列出的信息该角色一律不知道——避免"不该知道的人知道了"。
-            </span>
-            {(bible?.characters ?? []).length === 0 ? (
-              <span className={css.meta}>暂无角色卡——先在「道藏」提炼设定。</span>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {bible!.characters.map(card => (
-                  <div key={card.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px', fontSize: 12 }}>
-                    <div className={css.row} style={{ justifyContent: 'space-between' }}>
-                      <b>{card.name}</b>
-                      <span className={css.meta}>
-                        {card.role === 'protagonist' ? '主角' : card.role === 'supporting' ? '配角' : card.role === 'antagonist' ? '反派' : '其他'}
-                      </span>
-                    </div>
-                    <textarea
-                      className={css.textarea}
-                      style={{ minHeight: 52, fontSize: 12 }}
-                      placeholder="每行一条该角色知道的信息，例如：林越的真实身份 / 古玉残片的秘密…"
-                      value={knowledgeDraft[card.name] ?? (card.knowledge ?? []).join('\n')}
-                      onChange={e => { setKnowledgeDraft(prev => ({ ...prev, [card.name]: e.target.value })) }}
-                    />
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
 

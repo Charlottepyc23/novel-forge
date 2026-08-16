@@ -182,6 +182,16 @@ export class NovelApi {
     await this.streamJob(NOVEL_API.reviewBackfill, {}, onFrame)
   }
 
+  /** 章节复位：generating 卡死 → pending。 */
+  async chapterReset(no: number): Promise<{ ok: boolean; no: number }> {
+    return postJson<{ ok: boolean; no: number }>(NOVEL_API.chapterReset, { chapterNo: no })
+  }
+
+  /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+  async roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse> {
+    return postJson<import('../protocol.ts').RolesResponse>(NOVEL_API.roles, req)
+  }
+
   /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
   async blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{ blurb: string }> {
     return postJson<{ blurb: string }>(NOVEL_API.blurb, { action, text, partial })

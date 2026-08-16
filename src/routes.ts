@@ -58,6 +58,8 @@ import {
   type ReviewReport,
   type ReviewRequest,
   type RewriteRequest,
+  type RolesRequest,
+  type RolesResponse,
   type SensitiveCheckRequest,
   type SensitiveCheckResponse,
   type SensitiveHit,
@@ -99,6 +101,7 @@ import {
   saveProject,
   analyzePlotlineHealth,
   designPlotlinePlan,
+  extractRoles,
   checkSensitiveText,
   suggestForeshadows,
   suggestPlotlines,
@@ -214,6 +217,19 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       seedBookshelfFromOutputDir(config.outputDir)
       const project = loadProject(config.outputDir)
       if (project !== undefined) {
+        // 自动兜底：generating 超过 10 分钟（正常一章 2-5 分钟）视为卡死/中断，
+        // 复位为 pending，避免"生成中"状态卡死无法重新生成。
+        const staleMs = 10 * 60 * 1000
+        for (const c of project.chapters) {
+          if (c.status === 'generating' && c.generatingAt !== undefined) {
+            const started = new Date(c.generatingAt).getTime()
+            if (Number.isFinite(started) && Date.now() - started > staleMs) {
+              c.status = 'pending'
+              c.error = undefined
+              c.generatingAt = undefined
+            }
+          }
+        }
         syncProjectWithDisk(project, config.outputDir)
         saveProject(config.outputDir, project)
       }
@@ -424,6 +440,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       })
       chapter.status = 'generating'
       chapter.error = undefined
+      chapter.generatingAt = new Date().toISOString()
       saveProject(config.outputDir, project)
 
       const send = (frame: JobFrame): void => {
@@ -1175,6 +1192,10 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       if (project === undefined) return
       try {
         const cards = await refreshCharacters(ctx, config, project, config.outputDir)
+        // 存档：人物志聚合结果落盘，下次打开直接显示，无需重新计算。
+        project.roleStatus = cards
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
         writeJson(res, 200, { cards })
       } catch (error) {
         writeJson(res, 500, { error: (error as Error).message })
@@ -1562,6 +1583,73 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ---------------------------------------------------------------- roles
+  /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+  const rolesRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.roles,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<RolesRequest>(req)
+      if (project.roles === undefined) project.roles = []
+      const op = body?.op
+      if (op === 'extract') {
+        try {
+          const candidates = await extractRoles(ctx, config, project)
+          writeJson(res, 200, { roles: project.roles, candidates } satisfies RolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `角色提炼失败：${(error as Error).message}` })
+          return
+        }
+      } else if ((op === 'adopt' || op === 'update') && body?.role !== undefined) {
+        const r = body.role
+        const idx = project.roles.findIndex(x => x.name === r.name)
+        if (idx === -1) project.roles.push(r)
+        else project.roles[idx] = r
+      } else if (op === 'remove' && body?.name !== undefined) {
+        project.roles = project.roles.filter(x => x.name !== body.name)
+      }
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      const response: RolesResponse = { roles: project.roles }
+      writeJson(res, 200, response)
+    },
+  }
+
+  // ------------------------------------------------------- chapter reset
+  /** 章节复位：generating 卡死 → pending（可重新生成）。 */
+  const chapterResetRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.chapterReset,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<{ chapterNo?: number }>(req)
+      const no = body?.chapterNo
+      if (!Number.isInteger(no) || no === undefined || no < 1) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      const chapter = project.chapters.find(c => c.no === no)
+      if (chapter === undefined) {
+        writeJson(res, 404, { error: `章节 ${no} 不在计划中` })
+        return
+      }
+      chapter.status = 'pending'
+      chapter.error = undefined
+      chapter.generatingAt = undefined
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { ok: true, no })
+    },
+  }
+
   // ------------------------------------------------------ author review backfill
   /** 作者复盘补跑：对已写章节补齐 authorReview（body.chapterNo=单章 JSON，缺省=全书 NDJSON 流）。 */
   const reviewBackfillRoute: WebRoute = {
@@ -1726,8 +1814,10 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     worldRoute,
     renameRoute,
     plotlinesRoute,
+    rolesRoute,
     sensitiveRoute,
     reviewBackfillRoute,
+    chapterResetRoute,
     configRoute,
     openFolderRoute,
   ]
