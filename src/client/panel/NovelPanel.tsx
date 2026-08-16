@@ -92,6 +92,12 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
 /** Settings tab — pinned to the bottom of the nav rail. */
 const SETTINGS_TAB: { id: NovelTab; label: string; icon: string } = { id: 'settings', label: tt('tab.settings'), icon: '⚙️' }
 
+/** 构建时注入的插件版本（tsdown define 替换为字符串字面量）。 */
+declare const __NOVEL_FORGE_VERSION__: string | undefined
+const PLUGIN_VERSION: string = typeof __NOVEL_FORGE_VERSION__ !== 'undefined' ? __NOVEL_FORGE_VERSION__ : '0.0.0'
+/** GitHub 仓库地址（关于区块点击跳转）。 */
+const REPO_URL = 'https://github.com/watersxya/dsh-novel-forge'
+
 /** Whether any chapter is being generated right now. */
 function anyGenerating(chapters: ChapterPlan[] | undefined): boolean {
   return (chapters ?? []).some(c => c.status === 'generating' || c.status === 'reviewing')
@@ -347,6 +353,20 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const coverFileRef = useRef<HTMLInputElement | null>(null)
   /** 章节列表按卷折叠（存已折叠的卷号）。 */
   const [collapsedVolumes, setCollapsedVolumes] = useState<number[]>([])
+  /** npm 最新版本（更新检测；null = 未检测/检测失败）。 */
+  const [npmLatest, setNpmLatest] = useState<string | null>(null)
+
+  /** 后台检测 npm 最新版本（失败静默，不打扰）。 */
+  useEffect(() => {
+    let cancelled = false
+    void fetch('https://registry.npmjs.org/@waterwx%2Fdsh-novel-forge')
+      .then(response => response.json() as Promise<{ 'dist-tags'?: { latest?: string } }>)
+      .then(data => {
+        if (!cancelled && data['dist-tags']?.latest !== undefined) setNpmLatest(data['dist-tags'].latest)
+      })
+      .catch(() => { /* best-effort */ })
+    return () => { cancelled = true }
+  }, [])
   /** AI 助手悬浮窗：是否打开。 */
   const [assistantOpen, setAssistantOpen] = useState(false)
   /** 悬浮窗位置（相对面板，localStorage 记忆）。 */
@@ -879,14 +899,23 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setError('')
     try {
       const result = await api.plan(outlineText || undefined, planCount)
+      let freshCount = 0
       setProject(prev => {
         const base = prev ?? {
           bookName: '', outline: outlineText, chapters: [] as ChapterPlan[],
           foreshadows: [] as Foreshadow[], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
         }
-        return { ...base, chapters: [...base.chapters, ...result.chapters], updatedAt: new Date().toISOString() }
+        // 追加时按标题去重，避免重复生成计划导致剧情「重头再来」。
+        const existingTitles = new Set(base.chapters.map(c => c.title))
+        const fresh = result.chapters.filter(c => !existingTitles.has(c.title))
+        freshCount = fresh.length
+        if (fresh.length === 0) return base
+        return { ...base, chapters: [...base.chapters, ...fresh], updatedAt: new Date().toISOString() }
       })
-      pushProgress(tt('workflow.planDone', { n: result.chapters.length }), 'done')
+      pushProgress(tt('workflow.planDone', { n: freshCount }), 'done')
+      if (freshCount < result.chapters.length) {
+        pushProgress(`已跳过 ${result.chapters.length - freshCount} 个与已有章节同名的重复章节`, 'error')
+      }
     } catch (err) {
       setError((err as Error).message)
       pushProgress(`生成章节计划失败：${(err as Error).message}`, 'error')
@@ -1575,6 +1604,32 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             <span className={css.navTabIcon}>{SETTINGS_TAB.icon}</span>
             {!navCollapsed && <span className={css.navTabLabel}>{SETTINGS_TAB.label}</span>}
           </button>
+          {/* 关于：版本 + GitHub + 更新检测 */}
+          <div className={css.navAbout}>
+            <button
+              type="button"
+              className={css.navAboutRow}
+              title="打开 GitHub 仓库"
+              onClick={() => { window.open(REPO_URL, '_blank', 'noopener') }}
+            >
+              <span>ℹ️ v{PLUGIN_VERSION}</span>
+              <span className={css.meta}>GitHub ↗</span>
+            </button>
+            {npmLatest !== null && npmLatest !== PLUGIN_VERSION && (
+              <button
+                type="button"
+                className={css.navAboutUpdate}
+                title="查看更新方法"
+                onClick={() => {
+                  window.alert(
+                    `检测到新版本 v${npmLatest}（当前 v${PLUGIN_VERSION}）\n\n更新方式：\n\n【npm 安装】\ncd ~/.dsh/profiles/web && pnpm add @waterwx/dsh-novel-forge@latest\n然后重启 dsh web\n\n【GitHub 安装】\ndsh plugin --profile web add github:watersxya/dsh-novel-forge\n\n【本地开发】\n拉取最新代码 → pnpm install && pnpm build → 重启 dsh web`,
+                  )
+                }}
+              >
+                📦 有新版本 v{npmLatest}
+              </button>
+            )}
+          </div>
         </nav>
         <div className={css.panelContent}>
         {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}

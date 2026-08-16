@@ -255,7 +255,17 @@ function parseJson<T>(text: string, wantArray: boolean): T {
   for (const candidate of candidates) {
     for (const attempt of [candidate, repair(candidate)]) {
       try {
-        return JSON.parse(attempt) as T
+        const value = JSON.parse(attempt) as unknown
+        if (!wantArray || Array.isArray(value)) return value as T
+        // wantArray but the model wrapped the list in an object, e.g.
+        // {"chapters": [...]} — extract the first array-valued key.
+        if (typeof value === 'object' && value !== null) {
+          for (const key of Object.keys(value as Record<string, unknown>)) {
+            const inner = (value as Record<string, unknown>)[key]
+            if (Array.isArray(inner)) return inner as T
+          }
+        }
+        // Not an array — keep trying the remaining candidates.
       } catch {
         // try the next candidate
       }
@@ -475,31 +485,83 @@ export async function planChapters(
   project: ProjectState,
   chapterCount: number,
   volumeNo?: number,
+  outputDir?: string,
 ): Promise<ChapterPlan[]> {
   const volume = project.volumes?.find(v => v.no === volumeNo)
+  const existing = project.chapters
+  const startNo = existing.length === 0 ? 1 : Math.max(...existing.map(c => c.no)) + 1
+  const continuation = existing.length > 0
+  const latestFacts = continuation && Array.isArray(project.facts)
+    ? project.facts.slice(-15).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 150)}`).join('\n')
+    : ''
+  // 上一章（已写章节中章号最大者）结尾原文，作为续写剧情起点。
+  let prevTail = ''
+  if (continuation) {
+    const written = existing.filter(c => c.status !== 'pending')
+    const last = written[written.length - 1]
+    if (last !== undefined && last.file !== undefined && outputDir !== undefined) {
+      try {
+        const raw = readFileSync(join(outputDir, last.file), 'utf8')
+        prevTail = raw.replace(/^#.*$/m, '').trim().slice(-600)
+      } catch { /* 文件缺失时忽略，仅依赖编年录 */ }
+    }
+  }
+  // 续写模式下大纲截断到「关键剧情桥段」之前：只保留设定（人设/金手指/规则/战力），
+  // 去掉分卷主线步骤模板，避免模型照抄已完成的剧情再走一遍。
+  const outlineBlock = continuation
+    ? (() => {
+        const cut = project.outline.indexOf('七、关键剧情桥段')
+        if (cut > 1500) return project.outline.slice(0, cut).trimEnd() + '\n（大纲后续剧情桥段与分卷细节从略；续写请以「上一章结尾原文」与「最新剧情状态」为剧情起点）'
+        return project.outline.slice(0, 3000) + '\n…（大纲过长已节选）'
+      })()
+    : project.outline
   const user = [
     '请为下面这部小说规划章节。',
     volume !== undefined
       ? `本次只规划第 ${volume.no} 卷《${volume.title}》的章节：\n${volume.summary}`
-      : '请规划全书开篇章节。',
-    `大纲如下：\n${project.outline}`,
+      : continuation
+        ? `本书已有 ${existing.length} 章已规划/已写作（见下方「已有章节」）。请规划**后续**章节：从第 ${startNo} 章开始。`
+        : '请规划全书开篇章节。',
+    continuation
+      ? '【续写硬性要求】已有章节的剧情不得重写或重复，章节标题也不得与已有章节重复。以下情节均已在已有章节中发生过，后续章节**绝对不得再次出现**：穿越、暴雨送餐、滴血认主/古玉认主、首次进入墟境、用废铁淬炼首件法器、绝境肉身入鼎洗炼（该机缘已用尽）、杀死白袍弟子与灰衣随从、藏尸水沟。'
+      : '',
+    prevTail !== ''
+      ? `【上一章（第 ${startNo - 1} 章）结尾原文】第 ${startNo} 章必须紧接此状态继续，从新的事件写起，不得回顾重述：\n${prevTail}`
+      : '',
+    latestFacts !== ''
+      ? `【最新剧情状态（本书编年录，第 ${startNo - 1} 章结尾的事实）】规划续写时必须以此为起点，时间线、人物状态与地点衔接一致：\n${latestFacts}`
+      : '',
+    continuation
+      ? '已有章节：\n'
+        + existing.map(c => {
+            const sm = c.summary !== undefined && c.summary !== '' ? `（${c.summary.slice(0, 120)}）` : ''
+            return `第${c.no}章《${c.title}》${sm}`
+          }).join('\n')
+      : '',
+    `全书大纲（设定参考，续写剧情不得与设定冲突）：\n${outlineBlock}`,
     '',
     `请规划 ${chapterCount} 章。输出 JSON 数组（不要输出其他文字）：`,
   ].join('\n')
-  const text = await complete(ctx, config, { system: planSystemPrompt(project.volumes), user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 20000) })
+  const system = planSystemPrompt(project.volumes) + (continuation
+    ? '\n重要：本次是**续写规划**——已有章节的剧情不得重写或重复，新章节标题不得与已有章节标题相同，新章节的剧情必须从上一章结尾自然接续（人物状态、时间线、地点衔接一致）。'
+    : '')
+  const text = await complete(ctx, config, { system, user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 40000) })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const chapters: ChapterPlan[] = []
-  const existing = new Set(project.chapters.map(c => c.no))
-  const startNo = project.chapters.length + 1
-  for (let i = 0; i < Math.min(parsed.length, chapterCount); i++) {
-    const item = parsed[i]
+  const existingNos = new Set(existing.map(c => c.no))
+  const existingTitles = new Set(existing.map(c => c.title))
+  let cursor = startNo
+  for (const item of parsed) {
+    if (chapters.length >= chapterCount) break
     if (typeof item !== 'object' || item === null) continue
     const entry = item as Record<string, unknown>
     const title = typeof entry.title === 'string' ? entry.title.trim().slice(0, 30) : ''
     const beats = typeof entry.beats === 'string' ? entry.beats.trim() : ''
     if (title === '' && beats === '') continue
-    const no = startNo + i
-    if (existing.has(no)) continue
+    // 续写模式下，标题与已有章节重复的一律丢弃（模型可能复述旧章节）。
+    if (title !== '' && existingTitles.has(title)) continue
+    while (existingNos.has(cursor)) cursor++
+    const no = cursor++
     chapters.push({
       no,
       volume: volumeOf(no, project.volumes),

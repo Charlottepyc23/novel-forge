@@ -363,7 +363,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       }
       try {
         const next = project ?? createProject(outline)
-        const chapters: ChapterPlan[] = await planChapters(ctx, config, next, count, body?.volume)
+        const chapters: ChapterPlan[] = await planChapters(ctx, config, next, count, body?.volume, config.outputDir)
         next.chapters.push(...chapters)
         next.updatedAt = new Date().toISOString()
         saveProject(config.outputDir, next)

@@ -10,13 +10,16 @@
  * Mirrors the dsh-web-ui family layout (packages/client/tsdown.client.ts).
  */
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { basename, dirname, resolve as resolvePath, sep } from 'node:path'
 import type { UserConfig } from 'tsdown'
 import { transform } from 'lightningcss'
 
 /** Plugin id (package name) stamped into the module-loader handoff. */
 const PLUGIN_ID = '@waterwx/dsh-novel-forge'
+
+/** Package version stamped into the client bundle (about section + updater). */
+const PKG_VERSION: string = JSON.parse(readFileSync(resolvePath(process.cwd(), 'package.json'), 'utf8')).version ?? '0.0.0'
 
 /** CSS virtual-module wrapping (keeps CSS out of tsdown's own css pipeline). */
 const CSS_VIRTUAL_PREFIX = '\0dsh-css:'
@@ -83,6 +86,8 @@ const clientHalf: UserConfig = {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
     'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),
+    // CJS bundle: import.meta 会被替换为空对象，版本用全局标识符注入。
+    '__NOVEL_FORGE_VERSION__': JSON.stringify(PKG_VERSION),
   },
   plugins: [
     {

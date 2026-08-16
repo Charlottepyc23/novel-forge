@@ -20,6 +20,7 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **开书向导**：书架新建书时直接导入大纲（docx/粘贴），开书即建项目，书名自动识别 | **Book wizard**: create a book with its outline in one step — project is built immediately |
 | **大纲只读化**：开书后大纲页只读展示；「更新大纲」可选仅改文本（保留进度）或重置项目重来 | **Read-only outline**: after opening a book the outline is read-only; update offers keep-progress or full reset |
 | **章节计划结构化**：每章含 本章目标 / 剧情要点 / 爽点·钩子 / 结尾钩子 | **Structured chapter beats**: goal / plot points / payoff-hook / ending hook per chapter |
+| **章节计划续写模式**：已有章节时自动续写规划（上一章结尾原文 + 编年录锚点 + 已发生情节禁令），不再重头生成；追加自动去重 | **Continuation planning**: with existing chapters the planner continues from the last chapter's ending (tail text + fact anchors + banned-repeat list), never restarts; duplicate titles are dropped on append |
 | **事实库 / 时间线**：每章自动抽取已确立事实，注入后续生成，保证长期一致 | **Fact ledger**: auto-extracted per-chapter facts injected into later chapters for consistency |
 | **全书一致性质检**：LLM 扫描全本，输出矛盾清单（定位到章），一键去修订 | **Book audit**: LLM scans all chapters for contradictions, locates them, one-click to revise |
 | **角色卡**：出场统计精确计算 + LLM 聚合当前状态，历史章节可回填事实库 | **Character cards**: precise appearance stats + LLM-aggregated status; backfill for old chapters |
@@ -148,6 +149,11 @@ and mount it any time.
   "Update outline" offers either keep-progress text update or full project reset
 - **Structured chapter beats**: every planned chapter carries goal / plot points /
   payoff-hook / ending hook sections
+- **Continuation planning**: with existing chapters the planner continues from the
+  last chapter's ending — it injects the previous chapter's tail text, fact-ledger
+  anchors and a banned-repeat list (e.g. no re-entering the xu-jing), and trims the
+  outline to settings-only, so regenerating a plan never restarts the story;
+  duplicate titles are dropped on append
 - **Fact ledger**: each chapter auto-extracts established facts (character state,
   resources, relations, foreshadow landings); the latest 20 are injected into
   later chapters to keep the long story consistent
