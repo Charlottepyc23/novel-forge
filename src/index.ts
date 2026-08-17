@@ -54,6 +54,8 @@ export interface Config {
   autoReview?: boolean
   /** Whether generation auto-runs the author review (hook/continuity/trend). */
   autoAuthorReview?: boolean
+  /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
+  autoReviewAfterRevise?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -68,6 +70,7 @@ export const Config: z<Config> = z.object({
   reviewPassScore: z.number().default(70),
   autoReview: z.boolean().default(true),
   autoAuthorReview: z.boolean().default(true),
+  autoReviewAfterRevise: z.boolean().default(true),
 })
 
 /** Schema defaults, re-read for hand-built test contexts. */
@@ -81,6 +84,7 @@ const DEFAULT_MAX_TOKENS = 12000
 const DEFAULT_REVIEW_PASS_SCORE = 70
 const DEFAULT_AUTO_REVIEW = true
 const DEFAULT_AUTO_AUTHOR_REVIEW = true
+const DEFAULT_AUTO_REVIEW_AFTER_REVISE = true
 
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 160
@@ -100,6 +104,7 @@ export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
     reviewPassScore: value?.reviewPassScore ?? DEFAULT_REVIEW_PASS_SCORE,
     autoReview: value?.autoReview ?? DEFAULT_AUTO_REVIEW,
     autoAuthorReview: value?.autoAuthorReview ?? DEFAULT_AUTO_AUTHOR_REVIEW,
+    autoReviewAfterRevise: value?.autoReviewAfterRevise ?? DEFAULT_AUTO_REVIEW_AFTER_REVISE,
   }
 }
 
@@ -133,6 +138,7 @@ export function apply(ctx: Context, config?: Config): void {
     if (patch.reviewPassScore !== undefined) next.reviewPassScore = patch.reviewPassScore
     if (patch.autoReview !== undefined) next.autoReview = patch.autoReview
     if (patch.autoAuthorReview !== undefined) next.autoAuthorReview = patch.autoAuthorReview
+    if (patch.autoReviewAfterRevise !== undefined) next.autoReviewAfterRevise = patch.autoReviewAfterRevise
     // Persist through the settings seam when available; otherwise keep in memory.
     // (ctx.get is the non-strict service access — no inject requirement, same
     // pattern installSettingsSection itself uses.)
@@ -184,6 +190,56 @@ export function apply(ctx: Context, config?: Config): void {
     },
     onChange: sync,
   })
+
+  // 运行时 skill：章节批量生产与值守处理（只在本插件环境可用）。
+  // 通过 ctx.get('skills') 获取注册表（服务存在时注册，缺失则跳过，不影响其他能力）。
+  const skillsService = ctx.get('skills') as { register?: (skill: { name: string; description: string; content: string }) => () => void } | undefined
+  if (skillsService?.register !== undefined) {
+    const disposeSkill = skillsService.register({
+      name: 'novel-forge-chapter-batch',
+      description: '批量生成小说章节并值守处理审稿未过的章节（豁免/按意见修订/验证模式/重新生成），依赖 dsh-novel-forge 的 /api/dsh-novel-forge/* 路由。',
+      content: [
+        '# 小说章节批量生产与值守处理',
+        '',
+        '## 0. 值守纪律（最高优先级，违反即空转）',
+        '1. 启动后台任务后立即停下，不轮询、不连续 wait、不做无意义动作——后台任务完成时运行时自动通知。',
+        '2. 只有收到「任务完成」通知或用户新消息时，才继续下一步（读结果→处理未过→汇报）。',
+        '3. 等待期间可做与当前任务无关的其他有用工作，但不得为等任务而空转。',
+        '4. 任务因 web 重启中断时：待 3080 恢复后，复位卡死章节（generating/error → reset）再续跑，并向用户说明中断原因。',
+        '',
+        '## 1. 前置检查',
+        '1. `GET /api/dsh-novel-forge/status` 确认服务在跑，读项目章节数。',
+        '2. 列出目标区间 pending 章节号，避免重复生成已处理章节。',
+        '3. **串行执行，禁止并行写 project.json**（并发会互相覆盖状态，实测教训）。',
+        '',
+        '## 2. 批量生成',
+        '逐章串行调用 `POST /generate` `{ chapterNo, skipReview: false }`（走完整质量门：生成→摘要+编年录→审稿→复盘）。',
+        '响应为 NDJSON，找 review 帧取 score/passed。每章 2-5 分钟；失败重试 1 次；后台跑并告知预计时长。',
+        '用 Node 脚本（fetch 逐章循环），避免 PowerShell 转义坑，用完删除。',
+        '',
+        '## 3. 未过章节分级处理',
+        '### A. 无 high → 豁免通过：`POST /chapter/approve`（主观项不磨）',
+        '### B. 有 high 且明确 → 按意见修订 + 验证模式：',
+        '1. 拼指令 `按审稿意见修订（优先处理）：\n[severity] item → suggestion`（high 优先，无 high 取前 3 medium）',
+        '2. `POST /rewrite` 产草稿；3. `POST /chapter/check` 带 `previousReport` 走验证模式（只核对原意见解决+只挑新增 high）',
+        '4. 判定 `passed || 无 high` 可接受；5. `POST /draft/apply` 带 passed 报告落盘 approved',
+        '6. 不可接受 → 第二轮修订（指令更精确）→ 再验证；每章最多修 2 轮，仍不过保留草稿待人工',
+        '### C. 结构性 high（修订改不好）→ `POST /draft/discard` 后 `POST /generate` 重写，剩主观项再走 A',
+        '### D. error 状态 → `POST /chapter/reset` 后 `POST /generate`',
+        '注意：approved 但 review 有 high 的保留不动；修订指令越精确越有效（具体数字/行为一次就过）。',
+        '',
+        '## 4. 收尾',
+        '`GET /status` 验证目标区间全 approved；可选刷新剧情线（`POST /plotlines` op=refresh，注意只读最近 8 章摘要）；汇报通过/未过/失败与遗留项。',
+        '',
+        '## 5. 已知陷阱',
+        '- 并发写 project.json 互相覆盖 → 必须串行',
+        '- rewrite 草稿可能偶发不落盘 → 应用前检查 pendingDraft，不存在则重跑',
+        '- PowerShell 调 API 引号/中文转义是坑 → 用 Node 脚本',
+        '- 验证模式 500 偶发 → 重试一次',
+      ].join('\n'),
+    })
+    ctx.effect(() => disposeSkill, 'dsh-novel-forge: skill')
+  }
 
   // Initial registration from the composition entry.
   sync()

@@ -60,6 +60,14 @@ import {
   type RewriteRequest,
   type RolesRequest,
   type RolesResponse,
+  type OutlineSuggestRequest,
+  type OutlineSuggestResponse,
+  type BreakdownRequest,
+  type BreakdownResponse,
+  type StoryboardRequest,
+  type StoryboardResponse,
+  type StoryboardPlanRequest,
+  type StoryboardPlanResponse,
   type SensitiveCheckRequest,
   type SensitiveCheckResponse,
   type SensitiveHit,
@@ -89,6 +97,7 @@ import {
   generateChapterStream,
   listChapterFiles,
   loadProject,
+  markForeshadowPlanted,
   mergeVolatileFromDisk,
   planChapters,
   planVolumes,
@@ -103,6 +112,11 @@ import {
   analyzePlotlineHealth,
   designPlotlinePlan,
   extractRoles,
+  extractRoleVisual,
+  suggestOutlines,
+  breakdownBook,
+  generateStoryboard,
+  planStoryboardEpisodes,
   checkSensitiveText,
   suggestForeshadows,
   suggestPlotlines,
@@ -468,6 +482,15 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         } catch (error) {
           console.warn('[dsh-novel-forge] summary/facts failed:', (error as Error).message)
         }
+        // 伏笔落地标记：正文中命中 planned 伏笔关键词 → 自动标为 planted（暗线管理页与正文同步）。
+        try {
+          const marked = markForeshadowPlanted(project, config.outputDir, no)
+          if (marked > 0) {
+            console.log(`[dsh-novel-forge] 第${no}章已埋伏笔 ${marked} 条`)
+          }
+        } catch (error) {
+          console.warn('[dsh-novel-forge] markForeshadowPlanted failed:', (error as Error).message)
+        }
         if (!(body?.skipReview === true) && (config.autoReview ?? true)) {
           const report = await reviewChapter(ctx, config, project, config.outputDir, no)
           send({ type: 'review', no, report })
@@ -650,14 +673,21 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       }
       writeFileSync(targetPath, `# 第${chapter.no}章 ${chapter.title}\n\n${draft}\n`, 'utf8')
       chapter.pendingDraft = undefined
-      chapter.status = 'written'
       chapter.chars = draft.length
       chapter.file = fileName
-      chapter.review = undefined
+      // 携带审查报告则沿用结论定状态（修订后审查通过 → approved）；否则置 written 待审。
+      const carried = body?.report
+      if (carried !== undefined && typeof carried.score === 'number') {
+        chapter.review = carried
+        chapter.status = carried.passed ? 'approved' : 'rejected'
+      } else {
+        chapter.status = 'written'
+        chapter.review = undefined
+      }
       chapter.error = undefined
       project.updatedAt = new Date().toISOString()
       saveProject(config.outputDir, project)
-      writeJson(res, 200, { ok: true, chars: draft.length, file: fileName })
+      writeJson(res, 200, { ok: true, chars: draft.length, file: fileName, markdown: draft })
     },
   }
 
@@ -837,7 +867,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         return
       }
       try {
-        const report = await reviewChapterText(ctx, config, project, text)
+        // 携带上一轮报告 → 验证模式（逐条核对原意见解决情况 + 只挑新增 high）。
+        const report = await reviewChapterText(ctx, config, project, text, body?.previousReport)
         writeJson(res, 200, { report })
       } catch (error) {
         writeJson(res, 500, { error: (error as Error).message })
@@ -1621,6 +1652,28 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         else project.roles[idx] = r
       } else if (op === 'remove' && body?.name !== undefined) {
         project.roles = project.roles.filter(x => x.name !== body.name)
+      } else if (op === 'visual') {
+        // 动漫形象描述词提炼：扫描正文外貌描写 → LLM 提炼 → 写入角色卡。
+        const name = body?.name?.trim()
+        if (name === undefined || name === '') {
+          writeJson(res, 400, { error: 'name（角色名）必填' })
+          return
+        }
+        try {
+          const visual = await extractRoleVisual(ctx, config, project, config.outputDir, name)
+          const role = project.roles.find(r => r.name === name)
+          if (role !== undefined) role.imagePrompt = visual
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { roles: project.roles, visual } satisfies RolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `形象提炼失败：${(error as Error).message}` })
+          return
+        }
+      } else {
+        writeJson(res, 400, { error: '未知的 roles op' })
+        return
       }
       project.updatedAt = new Date().toISOString()
       saveProject(config.outputDir, project)
@@ -1814,6 +1867,124 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------------- outline suggest
+  /** 开书想法 → AI 大纲：2-3 个可选方案（支持暂留换批：count 只补空槽 + exclude 避开已留方向）。 */
+  const outlineSuggestRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.outlineSuggest,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const body = await readJsonBody<OutlineSuggestRequest>(req)
+      const idea = body?.idea?.trim() ?? ''
+      if (idea.length < 50) {
+        writeJson(res, 400, { error: '想法太短（<50 字），请多写一两句：主角是谁、什么世界、想要什么爽点' })
+        return
+      }
+      const count = body?.count !== undefined ? Math.max(1, Math.min(3, Math.floor(body.count))) : 3
+      const exclude = Array.isArray(body?.exclude) ? body.exclude.filter((e): e is string => typeof e === 'string' && e.trim() !== '').map(e => e.trim().slice(0, 200)) : []
+      try {
+        const candidates = await suggestOutlines(ctx, config, idea, count, exclude)
+        const response: OutlineSuggestResponse = { candidates }
+        writeJson(res, 200, response)
+      } catch (error) {
+        writeJson(res, 500, { error: `大纲方案生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // ----------------------------------------------------------- breakdown
+  /** 拆书分析：对已写章节做结构/人物/文风/卖点体检（两阶段：源笔记→分节分析）。 */
+  const breakdownRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.breakdown,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<BreakdownRequest>(req)
+      try {
+        const result = await breakdownBook(
+          ctx,
+          config,
+          project,
+          config.outputDir,
+          body?.scope ?? 'recent',
+          body?.preset ?? 'quick',
+          body?.budgetTokens ?? 50000,
+        )
+        writeJson(res, 200, result satisfies BreakdownResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `拆书分析失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // ---------------------------------------------------------- storyboard
+  /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表（适配豆包/Seedance/SD）。 */
+  const storyboardRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.storyboard,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<StoryboardRequest>(req)
+      if (!Number.isInteger(body?.chapterNo)) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      try {
+        const result = await generateStoryboard(
+          ctx,
+          config,
+          project,
+          config.outputDir,
+          body!.chapterNo!,
+          body?.genre ?? '',
+          body?.platform ?? '抖音',
+          body?.tool ?? 'doubao',
+        )
+        writeJson(res, 200, result satisfies StoryboardResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `分镜生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // --------------------------------------------------- storyboard plan
+  /** 漫剧分集计划：读一卷 → 按故事弧线分集（高潮拆集/过渡并章）。 */
+  const storyboardPlanRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.storyboardPlan,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<StoryboardPlanRequest>(req)
+      if (!Number.isInteger(body?.volumeNo) || (body?.volumeNo ?? 0) < 1) {
+        writeJson(res, 400, { error: 'volumeNo 须为正整数' })
+        return
+      }
+      try {
+        const result = await planStoryboardEpisodes(
+          ctx,
+          config,
+          project,
+          body!.volumeNo!,
+          body?.platform ?? '抖音',
+          body?.maxEpisodes ?? 25,
+        )
+        writeJson(res, 200, result satisfies StoryboardPlanResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `分集计划生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
   return [
     statusRoute,
     loadOutlineRoute,
@@ -1858,6 +2029,10 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     chapterApproveRoute,
     configRoute,
     openFolderRoute,
+    outlineSuggestRoute,
+    breakdownRoute,
+    storyboardRoute,
+    storyboardPlanRoute,
   ]
 }
 

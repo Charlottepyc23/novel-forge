@@ -66,6 +66,14 @@ export const NOVEL_API = {
   chapterApprove: '/api/dsh-novel-forge/chapter/approve',
   /** 敏感词检查：全书已写章节或指定文本。 */
   sensitiveCheck: '/api/dsh-novel-forge/sensitive-check',
+  /** 开书想法 → AI 补全大纲：输入一句话想法，生成 2-3 个可选大纲方案。 */
+  outlineSuggest: '/api/dsh-novel-forge/outline/suggest',
+  /** 拆书分析：对已写章节做结构/人物/文风/卖点四维体检（两阶段：源笔记→分节分析）。 */
+  breakdown: '/api/dsh-novel-forge/breakdown',
+  /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表（可适配豆包/Seedance/SD）。 */
+  storyboard: '/api/dsh-novel-forge/storyboard',
+  /** 漫剧分集计划：读一卷 → 按故事弧线分集（高潮拆集/过渡并章）。 */
+  storyboardPlan: '/api/dsh-novel-forge/storyboard/plan',
   config: '/api/dsh-novel-forge/config',
   openFolder: '/api/dsh-novel-forge/open-folder',
 } as const
@@ -388,6 +396,169 @@ export interface SensitiveCheckResponse {
   scannedChapters: number
 }
 
+/** 开书想法 → AI 大纲方案（一个候选）。 */
+export interface OutlineCandidate {
+  /** 唯一 id（前端暂留/换批用）。 */
+  id: string
+  /** 推荐书名。 */
+  bookName: string
+  /** 题材（如 仙侠修真 / 都市）。 */
+  genre: string
+  /** 核心卖点一句话。 */
+  sellingPoint: string
+  /** 完整大纲文本（可直接用作项目大纲，≥800 字）。 */
+  outline: string
+}
+
+/** POST /outline/suggest 请求：想法 → 2-3 个可选大纲。 */
+export interface OutlineSuggestRequest {
+  /** 作者想法（一两句话，≥50 字）。 */
+  idea: string
+  /** 本次要生成的候选数（默认 3，最多 3）。 */
+  count?: number
+  /** 已暂留方案的剧情方向摘要（换批时让 LLM 避开，防止与已留方案重复）。 */
+  exclude?: string[]
+}
+
+/** POST /outline/suggest 响应。 */
+export interface OutlineSuggestResponse {
+  candidates: OutlineCandidate[]
+}
+
+/** 拆书分析：一个分析小节。 */
+export interface BreakdownSection {
+  /** 小节键：overview / plot / character / style / market。 */
+  key: string
+  /** 小节标题（如「拆书总览」）。 */
+  title: string
+  /** 可读分析稿（markdown）。 */
+  markdown: string
+  /** 结构化数据（程序可消费）。 */
+  structured: Record<string, unknown>
+}
+
+/** 拆书分析：一条证据（结论→原文回溯）。 */
+export interface BreakdownEvidence {
+  label: string
+  excerpt: string
+  /** 来源章节号（0 = 未定位）。 */
+  chapterNo: number
+  /** 指向的结构化字段。 */
+  fieldKey?: string
+}
+
+/** POST /breakdown 请求：对已写章节做拆书分析。 */
+export interface BreakdownRequest {
+  /** 分析范围：'recent'=最近 20 章 / 'volume:N'=第 N 卷 / 'all'=全书（默认 recent）。 */
+  scope?: string
+  /** 分析档位：'quick'=4 维（总览/剧情/人物/文风）/ 'standard'=5 维（+卖点）。 */
+  preset?: 'quick' | 'standard'
+  /** token 预算上限（默认 50000）。 */
+  budgetTokens?: number
+}
+
+/** POST /breakdown 响应。 */
+export interface BreakdownResponse {
+  sections: BreakdownSection[]
+  evidence: BreakdownEvidence[]
+  /** 参与分析的章节数。 */
+  chaptersScanned: number
+  /** 估算消耗 token。 */
+  usedTokens: number
+}
+
+/** 漫剧分镜：一个角色锚点卡。 */
+export interface StoryboardCharacterCard {
+  name: string
+  /** 视觉锚点：发型/五官/体型/标志物（中文描述）。 */
+  visualAnchor: string
+  /** AI 标签组（英文，全分镜强制复用）。 */
+  tags: string
+  /** 情绪表情库（英文，按需调用）。 */
+  expressions: string[]
+}
+
+/** 漫剧分镜：一个分镜格。 */
+export interface StoryboardPanel {
+  /** 序号。 */
+  index: number
+  /** 时间码（如 0:00-0:03）。 */
+  timecode: string
+  /** 景别（特写/中景/全景…）。 */
+  shot: string
+  /** 画面描述（具象动作，非抽象情感）。 */
+  visual: string
+  /** 台词（情绪标签 + 内容）。 */
+  dialogue: string
+  /** 转场/动效。 */
+  transition: string
+  /** AI 提示词（英文标签，豆包/SD 通用）。 */
+  prompt: string
+}
+
+/** POST /storyboard 请求：章节 → 漫剧分镜。 */
+export interface StoryboardRequest {
+  chapterNo: number
+  /** 赛道类型：爽文/甜宠/悬疑/搞笑（留空由 AI 推断）。 */
+  genre?: string
+  /** 目标平台（抖音/快手/B站…，默认抖音）。 */
+  platform?: string
+  /** AI 工具偏好：doubao / seedance / sd / mj（影响提示词格式，默认 doubao）。 */
+  tool?: string
+}
+
+/** POST /storyboard 响应。 */
+export interface StoryboardResponse {
+  /** 本集标题。 */
+  title: string
+  /** 赛道与节奏说明。 */
+  pacingNote: string
+  /** 本集钩子（结尾悬念）。 */
+  hook: string
+  /** 角色锚点卡。 */
+  characters: StoryboardCharacterCard[]
+  /** 分镜表。 */
+  panels: StoryboardPanel[]
+  /** 结尾钩子台词。 */
+  endingHook: string
+}
+
+/** 漫剧分集计划：一集（含 1-N 章）。 */
+export interface StoryboardEpisode {
+  /** 集号。 */
+  index: number
+  /** 集标题（冲突+悬念句式）。 */
+  title: string
+  /** 涵盖章节号。 */
+  chapters: number[]
+  /** 叙事任务：这集讲什么、为什么这么分。 */
+  narrativeJob: string
+  /** 开头钩子。 */
+  openingHook: string
+  /** 结尾钩子（逼看下集）。 */
+  endingHook: string
+}
+
+/** POST /storyboard/plan 请求：读一卷 → 输出漫剧分集计划。 */
+export interface StoryboardPlanRequest {
+  /** 卷号（1-5）。 */
+  volumeNo: number
+  /** 目标平台（默认抖音）。 */
+  platform?: string
+  /** 每集约 1-2 分钟，最多多少集（默认 25）。 */
+  maxEpisodes?: number
+}
+
+/** POST /storyboard/plan 响应。 */
+export interface StoryboardPlanResponse {
+  /** 本卷漫剧化的叙事策略说明。 */
+  strategy: string
+  /** 分集计划。 */
+  episodes: StoryboardEpisode[]
+  /** 参与规划的章节数。 */
+  chaptersScanned: number
+}
+
 /** 角色卡：角色当前状态（从事实库聚合）。 */
 export interface RoleStatusCard {
   name: string
@@ -421,11 +592,22 @@ export interface RoleRecord {
   knowledge: string[]
   /** 首次出场章节（编年录聚合，可手动修正）。 */
   firstChapter?: number
+  /** 动漫形象描述词（AI 绘图用：中文描述 + 英文标签 + 关键外貌标签）。 */
+  imagePrompt?: {
+    /** 中文外貌描述：连贯一段（发色/瞳色/服装/气质/标志物）。 */
+    zh: string
+    /** 英文绘图标签：booru 风格逗号分隔。 */
+    en: string
+    /** 中文关键标签（发色/瞳色/服装/气质/标志物）。 */
+    tags: string[]
+    /** 依据来源说明（哪几章哪些描写）。 */
+    source?: string
+  }
 }
 
 /** POST /roles 请求：角色库增删改 + AI 提炼。 */
 export interface RolesRequest {
-  op: 'extract' | 'adopt' | 'update' | 'remove'
+  op: 'extract' | 'adopt' | 'update' | 'remove' | 'visual'
   /** adopt / update 时传入的角色（adopt 可修改后采纳）。 */
   role?: RoleRecord
   /** remove 时的角色名。 */
@@ -437,6 +619,8 @@ export interface RolesResponse {
   roles: RoleRecord[]
   /** op=extract 时的 AI 候选角色。 */
   candidates?: RoleRecord[]
+  /** op=visual 时的动漫形象描述词（已写入角色卡）。 */
+  visual?: RoleRecord['imagePrompt']
 }
 
 /** POST /bible/patch 请求：局部修补设定圣经。 */
@@ -464,6 +648,9 @@ export interface ChapterTextRequest {
   text: string
   /** 保存时携带：已在工作区审查过的报告（沿用落盘，不重复审）；缺省则保存后自动正式审稿一次。 */
   report?: ReviewReport
+  /** 审查/验证时携带：上一轮审稿报告。传入后进入「验证模式」——逐条核对原意见是否解决、
+   *  只挑新增 high，不再全新找茬（防止"越修 high 越多"）。 */
+  previousReport?: ReviewReport
 }
 
 /** POST /chapter/save 响应。 */
@@ -589,6 +776,8 @@ export interface NovelConfig {
   autoReview: boolean
   /** Whether generation auto-runs the author review (hook/continuity/trend) after writing. */
   autoAuthorReview: boolean
+  /** 修订/润色产出草稿后是否自动附带一次 AI 审查（工作区显示新稿评分与剩余问题）。 */
+  autoReviewAfterRevise: boolean
 }
 
 /** GET /status response. */
@@ -696,6 +885,8 @@ export interface PolishRequest {
 /** POST /draft/apply | /draft/discard request: 采纳或放弃待确认草稿。 */
 export interface DraftDecisionRequest {
   chapterNo: number
+  /** apply 时可携带审查报告（沿用结论定状态；不携带则置 written）。 */
+  report?: ReviewReport
 }
 
 /** POST /summary request: (re)generate a chapter summary. */
@@ -747,6 +938,7 @@ export interface ConfigPatch {
   reviewPassScore?: number
   autoReview?: boolean
   autoAuthorReview?: boolean
+  autoReviewAfterRevise?: boolean
 }
 
 // ------------------------------------------------------------ assistant

@@ -6,7 +6,7 @@
  * web-server dependencies), so routes stay thin and logic is testable.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, AuthorReview, ChapterPlan, Foreshadow, NovelConfig, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, StoryBible, Volume, WorldState } from './protocol.ts';
+import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, StoryBible, StoryboardPlanResponse, StoryboardResponse, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -52,7 +52,7 @@ export declare function reviewChapter(ctx: Context, config: NovelConfig, project
  * 审查「任意正文文本」（作者手动编辑后的草稿，不落盘）。
  * 复用审稿提示词与红线/道藏/反AI规则；仅返回报告，不改文件不改状态。
  */
-export declare function reviewChapterText(ctx: Context, config: NovelConfig, project: ProjectState, text: string): Promise<ReviewReport>;
+export declare function reviewChapterText(ctx: Context, config: NovelConfig, project: ProjectState, text: string, previousReport?: ReviewReport): Promise<ReviewReport>;
 /** 作者复盘：对一章做叙事结构复盘（钩子兑现/结尾钩子/推进/连续性/趋势）。 */
 export declare function authorReviewChapter(ctx: Context, config: NovelConfig, project: ProjectState, chapterNo: number, body: string, prevTail: string): Promise<AuthorReview>;
 /** 复盘后自动关联：把本章号写入复盘标记推进的剧情线（按名称匹配，去重）。 */
@@ -63,6 +63,44 @@ export declare function suggestPlotlines(ctx: Context, config: NovelConfig, proj
 export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfig, project: ProjectState, line: Plotline): Promise<string>;
 /** ✨ AI 从全书提炼角色库：大纲 + 道藏 + 编年录 + 章节摘要 → 结构化角色清单。 */
 export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
+/** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */
+export interface RoleVisualPrompt {
+    zh: string;
+    en: string;
+    tags: string[];
+    source: string;
+}
+/**
+ * 为单个角色提炼「动漫形象描述词」：扫描该角色出场的已写章节正文，
+ * 截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
+ */
+export declare function extractRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, roleName: string): Promise<RoleVisualPrompt>;
+/**
+ * 开书想法 → AI 大纲：输入一句话想法，生成 2-3 个方向不同、可直接开书的完整大纲方案。
+ * @param count 本次生成几个（默认 3，最多 3）
+ * @param exclude 已暂留方案的剧情方向/卖点摘要（换批时避开，防止重复）
+ */
+export declare function suggestOutlines(ctx: Context, config: NovelConfig, idea: string, count?: number, exclude?: string[]): Promise<OutlineCandidate[]>;
+/** 拆书分析：对已写章节做结构/人物/文风/卖点四维体检。
+ *  两阶段管道（借鉴 AI-Novel-Writing-Assistant）：
+ *  ① 源片段笔记：每章抽取结构化笔记（剧情/人物/设定/写法/卖点/短板信号）
+ *  ② 分节分析：按维度各跑一次 LLM，输出可读分析稿 + 结构化数据 + 证据链。
+ *  @param scope 'recent'(默认最近20章) | 'volume:N' | 'all'
+ *  @param preset 'quick'(总览/剧情/人物/文风) | 'standard'(+卖点)
+ *  @param budgetTokens token 预算上限（超过即截断章节取样）。
+ */
+export declare function breakdownBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<BreakdownResponse>;
+/**
+ * 漫剧分镜生成：把一章正文改编为短视频漫剧分镜（吸收 manga-script-master 方法论）。
+ * 产出：本集标题 + 赛道节奏说明 + 角色视觉锚点卡 + 分镜表（8-12 格）+ 结尾钩子。
+ * 角色锚点优先复用角色库 imagePrompt（无则从正文提炼）。
+ */
+export declare function generateStoryboard(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number, genre: string, platform: string, tool: string): Promise<StoryboardResponse>;
+/**
+ * 漫剧分集计划：AI 通读一卷的章节标题+摘要+beats，按故事弧线把章节分组为漫剧集。
+ * 原则（吸收 manga-script 节奏模型）：高潮章单独成集、过渡章合并、断点选在钩子最强处。
+ */
+export declare function planStoryboardEpisodes(ctx: Context, config: NovelConfig, project: ProjectState, volumeNo: number, platform: string, maxEpisodes: number): Promise<StoryboardPlanResponse>;
 /** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
 export declare function analyzePlotlineHealth(ctx: Context, config: NovelConfig, project: ProjectState): Promise<PlotlineHealthReport>;
 /** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */
@@ -117,6 +155,12 @@ export declare function summarizeAndExtractFacts(ctx: Context, config: NovelConf
     summary: string;
     factCount: number;
 }>;
+/**
+ * 伏笔落地标记：检查刚生成的章节正文是否埋下了 planned 伏笔（关键词匹配），
+ * 命中则将该伏笔标记为 planted 并记录 plantedChapter——保证暗线管理页与正文同步。
+ * 纯关键词粗匹配，宁缺毋滥：仅处理「描述含可辨识关键词」的伏笔，无把握则不标。
+ */
+export declare function markForeshadowPlanted(project: ProjectState, outputDir: string, chapterNo: number): number;
 /**
  * 抽取本章「已确立事实」追加到事实库/时间线（最多 300 条，最新优先）。
  * 事实注入后续章节生成提示词，保证人物状态/境界/资源/关系长期一致。

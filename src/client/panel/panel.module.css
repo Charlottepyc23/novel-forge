@@ -347,9 +347,8 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
   -webkit-backdrop-filter: blur(28px) saturate(175%);
   backdrop-filter: blur(28px) saturate(175%);
-  position: sticky;
-  top: 10px;
-  z-index: 5;
+  /* 固定在面板顶部（panel 为 flex 列布局，header 正常占位），
+     下方内容在 panelBody 内独立滚动，header 永不遮挡内容。 */
 }
 
 .panelTitle {
@@ -605,6 +604,17 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 
 .navTabBadgeDone {
   background: var(--nf-success);
+}
+
+/* 任务进行中：工作进度导航呼吸绿点（不自动弹窗，点击导航查看悬浮窗） */
+.navTabBadgeLive {
+  background: var(--nf-success);
+  animation: navBadgePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes navBadgePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
 }
 
 .navTab {
@@ -948,6 +958,18 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .chapter:hover {
   border-color: var(--nf-border-strong);
   box-shadow: var(--nf-shadow);
+}
+
+/* 待办/主行动卡「定位章节」的目标章：短暂呼吸高亮（3 秒后由 JS 移除）。 */
+.chapterFocus {
+  animation: chapterFocusPulse 0.9s ease-in-out 3;
+  border-color: var(--nf-accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nf-accent) 35%, transparent) !important;
+}
+
+@keyframes chapterFocusPulse {
+  0%, 100% { background: var(--nf-bg); }
+  50% { background: color-mix(in srgb, var(--nf-accent) 18%, var(--nf-bg)); }
 }
 
 .chapterNum {
@@ -1478,6 +1500,21 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   flex-wrap: wrap;
 }
 
+/* 已采纳草稿的结论横幅（工作区顶部）。 */
+.wsAppliedBanner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--nf-success);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nf-success) 8%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .wsColumns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1961,7 +1998,59 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .shelfHeader {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 10px;
+}
+
+.shelfTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shelfToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.shelfSearch {
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.shelfFilters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* 书架空态 / 无结果引导卡 */
+.shelfEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 20px;
+  border: 1px dashed var(--nf-border-strong);
+  border-radius: 16px;
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  text-align: center;
+}
+
+.shelfEmptyIcon {
+  font-size: 42px;
+}
+
+.shelfEmptyTitle {
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .shelfGrid {
@@ -2066,6 +2155,14 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   min-height: 34px;
 }
 
+.bookCardMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .bookCardProgressBar {
   height: 5px;
   border-radius: 999px;
@@ -2148,6 +2245,41 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.3px;
+}
+
+/* 想法 → AI 大纲区块 */
+.ideaCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px dashed var(--nf-border-strong);
+  border-radius: 14px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--nf-accent) 3%, transparent);
+}
+
+.ideaToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: none;
+  color: var(--nf-accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.ideaCandidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--nf-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--nf-bg);
 }
 
 .progressLineDone {
@@ -2444,4 +2576,242 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .dropzoneIcon {
   font-size: 22px;
   line-height: 1;
+}
+
+/* ================= 书架书卡操作行 ================= */
+
+.bookCardActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.bookCardActions .button {
+  flex: 1;
+  justify-content: center;
+}
+
+/* ================= 阅读页（沉浸式） ================= */
+
+.readerView {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+
+.readerHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid;
+  flex-wrap: wrap;
+}
+
+.readerTitle {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.readerSeg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.readerSegBtn {
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.readerSegBtn:hover {
+  opacity: 1;
+}
+
+.readerSegActive {
+  opacity: 1;
+}
+
+.readerBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
+.readerSidebar {
+  flex: none;
+  width: 220px;
+  min-width: 220px;
+  overflow-y: auto;
+  padding: 8px 6px 24px;
+  border-right: 1px solid;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.readerGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.readerGroupTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 8px 4px;
+  opacity: 0.9;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 6px;
+}
+
+.readerGroupTitle:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.readerGroupArrow {
+  flex: none;
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+}
+
+.readerGroupCount {
+  flex: none;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.6;
+  margin-left: auto;
+  padding-right: 2px;
+}
+
+.readerItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  text-align: left;
+  padding: 4px 8px;
+  cursor: pointer;
+  opacity: 0.8;
+  transition: opacity 0.15s ease, background 0.15s ease;
+  min-width: 0;
+}
+
+.readerItem:hover {
+  opacity: 1;
+}
+
+.readerItemActive {
+  opacity: 1;
+  font-weight: 700;
+}
+
+.readerItemNo {
+  flex: none;
+  font-weight: 700;
+  min-width: 26px;
+  text-align: right;
+  opacity: 0.75;
+}
+
+.readerItemTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readerItemBadge {
+  flex: none;
+  font-size: 11px;
+}
+
+.readerMain {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 16px 48px;
+  display: flex;
+  justify-content: center;
+  scrollbar-width: thin;
+}
+
+.readerArticle {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.readerChapterTitle {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.readerChapterMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.readerText {
+  text-align: justify;
+  letter-spacing: 0.02em;
+}
+
+.readerPara {
+  margin: 0 0 0.85em;
+  text-indent: 2em;
+}
+
+.readerFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed;
+}
+
+.readerLoading,
+.readerError {
+  align-self: center;
+  padding: 32px 0;
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.readerError {
+  color: var(--nf-error);
 }

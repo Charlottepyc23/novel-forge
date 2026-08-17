@@ -1,9 +1,11 @@
 /**
  * 开书向导：独立页面视图 —— 书名 + 大纲（选择 docx / 拖拽 / 粘贴），
  * 实时书名识别与题材提示，开书即建项目并进入工作台。
+ * 另含「想法 → AI 大纲」：输入一句话想法生成 2-3 个方案，可暂留换批，选中后回填大纲框。
  */
 import { useRef, useState } from 'react'
 import type { NovelApi } from '../api.ts'
+import type { OutlineCandidate } from '../../protocol.ts'
 import { extractDocxTextFromBuffer } from '../docx.ts'
 import css from './panel.module.css'
 
@@ -51,6 +53,15 @@ export function CreateBookView({
   const [error, setError] = useState('')
   const outlineFileRef = useRef<HTMLInputElement | null>(null)
 
+  // ---- 想法 → AI 大纲状态 ----
+  const [ideaOpen, setIdeaOpen] = useState(false)
+  const [idea, setIdea] = useState('')
+  const [suggesting, setSuggesting] = useState(false)
+  const [candidates, setCandidates] = useState<OutlineCandidate[]>([])
+  const [pinned, setPinned] = useState<string[]>([])
+  /** 回填后提示（如「已填入方案A，可继续修改」）。 */
+  const [fillNotice, setFillNotice] = useState('')
+
   const autoName = inferBookNamePreview(outlineText)
   const effectiveName = name.trim() !== '' ? name.trim() : autoName
   const genre = guessGenre(outlineText)
@@ -71,6 +82,47 @@ export function CreateBookView({
     } catch (err) {
       setError(`读取大纲失败：${(err as Error).message}`)
     }
+  }
+
+  /** 生成/换批：只补未暂留的空槽；exclude 传已暂留方案的卖点方向。 */
+  const handleSuggest = async (): Promise<void> => {
+    if (idea.trim().length < 50) {
+      setError('想法太短（<50 字）：多写一两句——主角是谁、什么世界、想要什么爽点')
+      return
+    }
+    setSuggesting(true)
+    setError('')
+    try {
+      const exclude = candidates
+        .filter(c => pinned.includes(c.id))
+        .map(c => `${c.bookName}：${c.sellingPoint}${c.genre !== '' ? `（${c.genre}）` : ''}`)
+      const count = Math.max(1, 3 - pinned.length)
+      const result = await api.outlineSuggest(idea.trim(), count, exclude)
+      // 换批合并：已暂留的原地保留，新生成的补充进空槽。
+      setCandidates(prev => {
+        const kept = prev.filter(c => pinned.includes(c.id))
+        return [...kept, ...result.candidates].slice(0, 3)
+      })
+      setFillNotice('')
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setSuggesting(false)
+    }
+  }
+
+  /** 暂留/取消暂留。 */
+  const togglePin = (id: string): void => {
+    setPinned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  /** 选中方案：回填大纲框 + 书名，滚动到上方。 */
+  const handlePick = (candidate: OutlineCandidate): void => {
+    setOutlineText(candidate.outline)
+    setName(candidate.bookName)
+    setFillNotice(`已填入方案《${candidate.bookName}》（${candidate.genre}），可继续修改后开书`)
+    setIdeaOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleCreate = async (): Promise<void> => {
@@ -111,6 +163,12 @@ export function CreateBookView({
         {error !== '' && (
           <div className={css.card} style={{ borderColor: 'var(--nf-error)', padding: '8px 12px' }}>
             <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>{error}</span>
+          </div>
+        )}
+
+        {fillNotice !== '' && (
+          <div className={css.card} style={{ borderColor: 'var(--nf-success)', padding: '8px 12px' }}>
+            <span style={{ color: 'var(--nf-success)', fontSize: 12 }}>✅ {fillNotice}</span>
           </div>
         )}
 
@@ -170,6 +228,107 @@ export function CreateBookView({
             {genre !== null && <span className={css.meta}>题材：{genre}</span>}
           </div>
         )}
+
+        {/* 想法 → AI 大纲（可折叠） */}
+        <div className={css.ideaCard}>
+          <button
+            type="button"
+            className={css.ideaToggle}
+            onClick={() => { setIdeaOpen(v => !v) }}
+            aria-expanded={ideaOpen}
+          >
+            ✨ {ideaOpen ? '▾' : '▸'} 没有大纲？用一句话想法让 AI 生成
+          </button>
+          {ideaOpen && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <textarea
+                className={css.textarea}
+                style={{ minHeight: 60 }}
+                placeholder="例如：现代外卖员被雷劈穿越到修仙世界，靠祖传古玉捡漏发育，苟着苟着成了大佬…（≥50 字）"
+                value={idea}
+                onChange={e => { setIdea(e.target.value) }}
+                spellCheck={false}
+              />
+              <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                  disabled={suggesting || idea.trim().length < 50}
+                  onClick={() => { void handleSuggest() }}
+                  title="生成 3 个方向不同的大纲方案供选择（约消耗 6-8k token）"
+                >
+                  {suggesting ? '⏳ 生成中…' : candidates.length === 0 ? '✨ 生成大纲方案' : `↻ 换一批（${Math.max(1, 3 - pinned.length)} 个）`}
+                </button>
+                {candidates.length > 0 && (
+                  <span className={css.meta}>
+                    已暂留 {pinned.length}/3 · 换批保留已暂留，只补新方案
+                  </span>
+                )}
+              </div>
+
+              {/* 方案卡 */}
+              {candidates.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {candidates.map(candidate => {
+                    const isPinned = pinned.includes(candidate.id)
+                    return (
+                      <div
+                        key={candidate.id}
+                        className={css.ideaCandidate}
+                        style={isPinned ? { borderColor: 'var(--nf-accent)', boxShadow: '0 0 0 2px var(--nf-accent-soft)' } : undefined}
+                      >
+                        <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <b>《{candidate.bookName}》</b>
+                            {candidate.genre !== '' && <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{candidate.genre}</span>}
+                            {isPinned && <span className={css.badge} style={{ borderColor: 'var(--nf-warn)', color: 'var(--nf-warn)' }}>★ 已暂留</span>}
+                          </span>
+                          <span style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className={`${css.button} ${css.buttonSmall} ${isPinned ? '' : css.buttonPrimary}`}
+                              onClick={() => { togglePin(candidate.id) }}
+                              title={isPinned ? '取消暂留：下次换批会覆盖此槽位' : '暂留此方案：换批时保留，继续对比新方案'}
+                            >
+                              {isPinned ? '★ 取消暂留' : '☆ 暂留'}
+                            </button>
+                            <button
+                              type="button"
+                              className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                              onClick={() => { handlePick(candidate) }}
+                              title="将这份大纲填入上方大纲框（可继续修改后开书）"
+                            >
+                              选这个
+                            </button>
+                          </span>
+                        </div>
+                        {candidate.sellingPoint !== '' && (
+                          <div className={css.meta}><b>卖点：</b>{candidate.sellingPoint}</div>
+                        )}
+                        <div
+                          className={css.meta}
+                          style={{
+                            display: '-webkit-box',
+                            WebkitLineClamp: 4,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                            whiteSpace: 'pre-wrap',
+                          }}
+                          title={candidate.outline}
+                        >
+                          {candidate.outline}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {pinned.length >= 3 && (
+                    <span className={css.meta}>已暂留全部方案——直接挑一个「选这个」即可；换批需先取消某个暂留。</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           type="button"

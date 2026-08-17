@@ -43,6 +43,8 @@ export interface Config {
     autoReview?: boolean;
     /** Whether generation auto-runs the author review (hook/continuity/trend). */
     autoAuthorReview?: boolean;
+    /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
+    autoReviewAfterRevise?: boolean;
 }
 export declare const Config: z<Config>;
 /** Model-facing announcement: plugin presence, capabilities, and limits. */

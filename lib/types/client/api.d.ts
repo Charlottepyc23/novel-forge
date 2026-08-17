@@ -16,6 +16,14 @@ export declare class NovelApi {
         ok: boolean;
         bookName: string;
     }>;
+    /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
+    outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse>;
+    /** 拆书分析：对已写章节做结构/人物/文风/卖点体检。 */
+    breakdown(scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<import('../protocol.ts').BreakdownResponse>;
+    /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表。 */
+    storyboard(chapterNo: number, genre?: string, platform?: string, tool?: string): Promise<import('../protocol.ts').StoryboardResponse>;
+    /** 漫剧分集计划：读一卷 → 按故事弧线分集。 */
+    storyboardPlan(volumeNo: number, platform?: string, maxEpisodes?: number): Promise<import('../protocol.ts').StoryboardPlanResponse>;
     plan(outline?: string, chapterCount?: number, volume?: number): Promise<PlanResponse>;
     volumes(outline?: string): Promise<VolumesResponse>;
     bible(outline?: string): Promise<BibleResponse>;
@@ -28,8 +36,8 @@ export declare class NovelApi {
     foreshadow(req: ForeshadowRequest): Promise<ForeshadowResponse>;
     exportBook(format: 'txt' | 'md'): Promise<ExportResponse>;
     chapter(no: number): Promise<ChapterResponse>;
-    /** 审查手动编辑的正文（不落盘）。 */
-    chapterCheck(no: number, text: string): Promise<{
+    /** 审查手动编辑的正文（不落盘）。previousReport 传入时走「验证模式」（核对原意见解决 + 只挑新增 high）。 */
+    chapterCheck(no: number, text: string, previousReport?: ReviewReport): Promise<{
         report: ReviewReport;
     }>;
     /** 保存手动编辑的正文（自动备份 .bak；带报告则沿用落盘，否则保存后自动审稿）。 */
@@ -129,11 +137,13 @@ export declare class NovelApi {
     rewrite(chapterNo: number, instructions: string, target: string, onFrame: (frame: JobFrame) => void): Promise<void>;
     /** Polish (de-AI-ify) one chapter. */
     polish(chapterNo: number, onFrame: (frame: JobFrame) => void): Promise<void>;
-    /** 采纳待确认草稿（润色/重写产物），覆盖正文文件。 */
-    draftApply(chapterNo: number): Promise<{
+    /** 采纳待确认草稿（润色/重写产物），覆盖正文文件。返回采纳后的新正文（markdown）。
+     *  可携带审查报告（沿用结论定状态：通过 → approved）。 */
+    draftApply(chapterNo: number, report?: import('../protocol.ts').ReviewReport): Promise<{
         ok: boolean;
         chars: number;
         file: string;
+        markdown: string;
     }>;
     /** 放弃待确认草稿，保留原稿。 */
     draftDiscard(chapterNo: number): Promise<{

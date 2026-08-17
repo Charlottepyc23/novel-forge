@@ -75,6 +75,26 @@ export class NovelApi {
     return postJson<{ ok: boolean; bookName: string }>(NOVEL_API.saveOutline, { text })
   }
 
+  /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
+  async outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse> {
+    return postJson<import('../protocol.ts').OutlineSuggestResponse>(NOVEL_API.outlineSuggest, { idea, count, exclude })
+  }
+
+  /** 拆书分析：对已写章节做结构/人物/文风/卖点体检。 */
+  async breakdown(scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<import('../protocol.ts').BreakdownResponse> {
+    return postJson<import('../protocol.ts').BreakdownResponse>(NOVEL_API.breakdown, { scope, preset, budgetTokens })
+  }
+
+  /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表。 */
+  async storyboard(chapterNo: number, genre?: string, platform?: string, tool?: string): Promise<import('../protocol.ts').StoryboardResponse> {
+    return postJson<import('../protocol.ts').StoryboardResponse>(NOVEL_API.storyboard, { chapterNo, genre, platform, tool })
+  }
+
+  /** 漫剧分集计划：读一卷 → 按故事弧线分集。 */
+  async storyboardPlan(volumeNo: number, platform?: string, maxEpisodes?: number): Promise<import('../protocol.ts').StoryboardPlanResponse> {
+    return postJson<import('../protocol.ts').StoryboardPlanResponse>(NOVEL_API.storyboardPlan, { volumeNo, platform, maxEpisodes })
+  }
+
   async plan(outline?: string, chapterCount?: number, volume?: number): Promise<PlanResponse> {
     return postJson<PlanResponse>(NOVEL_API.plan, { outline, chapterCount, volume })
   }
@@ -108,9 +128,9 @@ export class NovelApi {
     return readJson<ChapterResponse>(response)
   }
 
-  /** 审查手动编辑的正文（不落盘）。 */
-  async chapterCheck(no: number, text: string): Promise<{ report: ReviewReport }> {
-    return postJson<{ report: ReviewReport }>(NOVEL_API.chapterCheck, { chapterNo: no, text })
+  /** 审查手动编辑的正文（不落盘）。previousReport 传入时走「验证模式」（核对原意见解决 + 只挑新增 high）。 */
+  async chapterCheck(no: number, text: string, previousReport?: ReviewReport): Promise<{ report: ReviewReport }> {
+    return postJson<{ report: ReviewReport }>(NOVEL_API.chapterCheck, { chapterNo: no, text, previousReport })
   }
 
   /** 保存手动编辑的正文（自动备份 .bak；带报告则沿用落盘，否则保存后自动审稿）。 */
@@ -307,9 +327,10 @@ export class NovelApi {
     await this.streamJob(NOVEL_API.polish, { chapterNo }, onFrame)
   }
 
-  /** 采纳待确认草稿（润色/重写产物），覆盖正文文件。 */
-  async draftApply(chapterNo: number): Promise<{ ok: boolean; chars: number; file: string }> {
-    return postJson<{ ok: boolean; chars: number; file: string }>(NOVEL_API.draftApply, { chapterNo })
+  /** 采纳待确认草稿（润色/重写产物），覆盖正文文件。返回采纳后的新正文（markdown）。
+   *  可携带审查报告（沿用结论定状态：通过 → approved）。 */
+  async draftApply(chapterNo: number, report?: import('../protocol.ts').ReviewReport): Promise<{ ok: boolean; chars: number; file: string; markdown: string }> {
+    return postJson<{ ok: boolean; chars: number; file: string; markdown: string }>(NOVEL_API.draftApply, { chapterNo, report })
   }
 
   /** 放弃待确认草稿，保留原稿。 */

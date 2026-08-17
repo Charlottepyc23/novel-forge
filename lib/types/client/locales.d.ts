@@ -154,6 +154,8 @@ export declare const zh: {
     readonly 'settings.autoReview': "生成后自动审稿";
     readonly 'settings.autoAuthorReview': "生成后自动作者复盘";
     readonly 'settings.autoAuthorReviewHint': "复盘钩子兑现/结尾钩子/剧情线推进/连续性/节奏趋势，每章约 2000 token";
+    readonly 'settings.autoReviewAfterRevise': "修订后自动审查";
+    readonly 'settings.autoReviewAfterReviseHint': "按意见修订/润色产出草稿后自动附带一次 AI 审查，直接显示新稿评分与剩余问题（每章约 2-3k token，可关）";
     readonly 'settings.save': "保存设置";
     readonly 'settings.saved': "设置已保存";
     readonly 'settings.openFolder': "打开输出文件夹";

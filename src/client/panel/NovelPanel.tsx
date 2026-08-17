@@ -12,6 +12,7 @@ import { tt } from './helpers.ts'
 import { AssistantTab } from './AssistantTab.tsx'
 import { AssetsTab } from './AssetsTab.tsx'
 import { ShelfView } from './ShelfView.tsx'
+import { ReaderView } from './ReaderView.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
 import { WorldTab } from './WorldTab.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
@@ -37,7 +38,7 @@ import css from './panel.module.css'
 /** The panel's tab identifiers. */
 export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
-  | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress'
+  | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'storyboard'
   | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle'
 
 /** Panel shell props. */
@@ -78,6 +79,8 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
     items: [
       { id: 'assistant', label: tt('tab.assistant'), icon: '💬' },
       { id: 'progress', label: '工作进度', icon: '📊' },
+      { id: 'breakdown', label: '拆书分析', icon: '🔍' },
+      { id: 'storyboard', label: '漫剧工坊', icon: '🎬' },
     ],
   },
   {
@@ -336,6 +339,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     original: string
     instruction: string
     draft: string | null
+    /** 已采纳草稿（原地结论态）：显示已采纳横幅 + 自动审稿结果，返回时才关闭工作区。 */
+    applied?: boolean
   } | null>(null)
   /** 工作区左栏当前选中的文字（局部修订目标）。 */
   const [wsSelected, setWsSelected] = useState('')
@@ -347,6 +352,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [wsCheckReport, setWsCheckReport] = useState<ReviewReport | null>(null)
   /** 手动审查结果中作者勾选要修复的问题（issue 下标）。 */
   const [wsChecked, setWsChecked] = useState<number[]>([])
+  /** 工作区「一键修订结果」模式：顶部显示「✅ 修订完成」横幅，不展示旧意见选择。 */
+  const [wsResultMode, setWsResultMode] = useState(false)
   /** 编辑页字号（localStorage 记忆，仅影响显示）。 */
   const [editorFontSize, setEditorFontSize] = useState<number>(() => {
     try {
@@ -392,6 +399,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [collapsedVolumes, setCollapsedVolumes] = useState<number[]>([])
   /** 章节页当前选中的卷（'all' = 全部卷显示在一起）。 */
   const [selectedVolume, setSelectedVolume] = useState<number | 'all'>('all')
+  /** 待办/主行动卡「定位章节」的目标章号（用于展开+滚动+高亮，消费后清空）。 */
+  const [focusNo, setFocusNo] = useState<number | null>(null)
   /** 剧情线编辑草稿（null = 未在编辑）。 */
   const [plotlineDraft, setPlotlineDraft] = useState<{
     id: string
@@ -429,6 +438,20 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   /** 全书敏感词检查结果（null = 未运行）。 */
   const [sensHits, setSensHits] = useState<SensitiveHit[] | null>(null)
   const [sensScanned, setSensScanned] = useState(0)
+  /** 拆书分析结果（null = 未运行）。 */
+  const [breakdownResult, setBreakdownResult] = useState<import('../../protocol.ts').BreakdownResponse | null>(null)
+  const [breakdownScope, setBreakdownScope] = useState<'recent' | 'volume:2' | 'volume:3' | 'all'>('recent')
+  const [breakdownPreset, setBreakdownPreset] = useState<'quick' | 'standard'>('quick')
+  /** 漫剧分镜结果（null = 未生成）。 */
+  const [storyboardResult, setStoryboardResult] = useState<import('../../protocol.ts').StoryboardResponse | null>(null)
+  const [storyboardTool, setStoryboardTool] = useState<'doubao' | 'seedance' | 'sd' | 'mj'>('doubao')
+  /** 漫剧工坊当前选中的章节号。 */
+  const [storyboardChapterNo, setStoryboardChapterNo] = useState<number>(0)
+  /** 漫剧分集计划结果（null = 未生成）。 */
+  const [storyboardPlanResult, setStoryboardPlanResult] = useState<import('../../protocol.ts').StoryboardPlanResponse | null>(null)
+  const [storyboardPlanVolume, setStoryboardPlanVolume] = useState<number>(1)
+  /** 漫剧工坊子视图：single=单集分镜 / plan=按卷规划。 */
+  const [storyboardView, setStoryboardView] = useState<'single' | 'plan'>('single')
   /** AI 建议的剧情线候选（null = 未运行）。 */
   const [plotlineSuggestions, setPlotlineSuggestions] = useState<Plotline[] | null>(null)
   /** 剧情健康检查报告（null = 未运行）。 */
@@ -549,7 +572,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     try { return window.localStorage.getItem('dsh-novel-forge.nav.collapsed') === 'true' } catch { return false }
   })
   /** 视图：shelf = 书架首页；create = 开书向导；workspace = 当前书工作台。 */
-  const [viewMode, setViewMode] = useState<'shelf' | 'create' | 'workspace'>('shelf')
+  const [viewMode, setViewMode] = useState<'shelf' | 'create' | 'workspace' | 'reader'>('shelf')
 
   /** Refresh bookshelf. */
   const refreshShelf = useCallback(async () => {
@@ -611,6 +634,31 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       if (showError) setError((err as Error).message)
     }
   }, [api, outlineText])
+
+  /** 激活一本书（书架入口共用）：重置本地编辑状态 → 拉取目标书 → 进入工作台或阅读页。 */
+  const activateBook = useCallback(async (id: string, mode: 'workspace' | 'reader') => {
+    setBusy(true)
+    setError('')
+    try {
+      await api.bookActivate(id)
+      // 切换书后重置本地编辑状态，重新拉取目标书。
+      setOutlineText('')
+      setProject(null)
+      setGeneratedFiles([])
+      setChapterText('')
+      setExpandedChapter(null)
+      setProgress([])
+      setAuditIssues(null)
+      setCharCards(null)
+      await refresh(false, true)
+      await refreshShelf()
+      setViewMode(mode)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }, [api, refresh, refreshShelf])
 
   /** Handle a docx file (pick or drag): parse locally, save outline. */
   const handleDocxFile = useCallback(async (file: File) => {
@@ -1014,6 +1062,60 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
+  /** 拆书分析：对已写章节做结构/人物/文风/卖点体检（两阶段 LLM 管道，约 1-3 分钟）。 */
+  const handleBreakdown = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel('拆书分析中…')
+    setError('')
+    try {
+      const result = await api.breakdown(breakdownScope, breakdownPreset)
+      setBreakdownResult(result)
+      pushProgress(`拆书分析完成：${result.chaptersScanned} 章 · ${result.sections.length} 个小节 · 约 ${result.usedTokens} token`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`拆书分析失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 漫剧分镜：对某章生成角色锚点 + 分镜表（约 1-2 分钟）。 */
+  const handleStoryboard = async (no: number): Promise<void> => {
+    setBusy(true)
+    setBusyLabel(`生成第${no}章漫剧分镜…`)
+    setError('')
+    try {
+      const result = await api.storyboard(no, undefined, '抖音', storyboardTool)
+      setStoryboardResult(result)
+      pushProgress(`第${no}章分镜完成：${result.panels.length} 格 · 角色卡 ${result.characters.length} 张`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`分镜生成失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 漫剧分集计划：AI 读一卷 → 按故事弧线分集。 */
+  const handleStoryboardPlan = async (): Promise<void> => {
+    setBusy(true)
+    setBusyLabel(`规划第${storyboardPlanVolume}卷漫剧分集…`)
+    setError('')
+    try {
+      const result = await api.storyboardPlan(storyboardPlanVolume, '抖音', 25)
+      setStoryboardPlanResult(result)
+      pushProgress(`第${storyboardPlanVolume}卷分集计划完成：${result.episodes.length} 集（覆盖 ${result.chaptersScanned} 章）`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`分集计划失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
   /** 作者复盘补跑：全书缺失章节（流式）。 */
   const handleAuthorBackfillAll = async (): Promise<void> => {
     const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined).length
@@ -1291,7 +1393,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
-  /** 工作区：保存手动编辑的正文（备份 .bak；沿用审查报告或自动审稿，保存即出结论）。 */
+  /** 工作区「应用并保存」：有草稿（修订/润色产物）→ 应用草稿落盘；无草稿（手动编辑）→ 保存原文。
+   *  沿用已有审查报告（wsCheckReport）或后端自动审稿；成功后原地进入「已采纳」结论态，返回定位到该章。 */
   const handleWsSave = async (): Promise<void> => {
     if (workspace === null) return
     if (workspace.original.trim().length < 50) {
@@ -1300,17 +1403,34 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
     setBusy(true)
     setError('')
+    const no = workspace.no
     try {
-      const result = await api.chapterSave(workspace.no, workspace.original, wsCheckReport ?? undefined)
-      const report = result.report
-      setWorkspace(null)
+      let report: ReviewReport | undefined = undefined
+      let chars = workspace.original.length
+      if (workspace.draft !== null) {
+        // 有草稿：应用草稿（draftApply 已返回新正文 markdown；携带审查报告沿用结论定状态）。
+        setBusyLabel(`应用草稿 第${no}章`)
+        const result = await api.draftApply(no, wsCheckReport ?? undefined)
+        report = wsCheckReport ?? undefined
+        chars = result.chars
+        setWorkspace(prev => prev === null ? prev : {
+          ...prev,
+          original: result.markdown ?? prev.original,
+          draft: null,
+          applied: true,
+        })
+      } else {
+        // 无草稿：保存当前原文（沿用报告或后端自动审稿，1-2 分钟）。
+        setBusyLabel(`AI 审查 第${no}章`)
+        const result = await api.chapterSave(no, workspace.original, wsCheckReport ?? undefined)
+        report = result.report
+        setWorkspace(prev => prev === null ? prev : { ...prev, applied: true })
+      }
       setDraftNo(null)
-      setWsCheckReport(null)
-      setWsChecked([])
       if (report !== undefined) {
         pushProgress(`已保存并审稿：${report.score} 分 — ${report.verdict}（${report.passed ? '通过' : '未通过'}）`, report.passed ? 'done' : 'error')
       } else {
-        pushProgress(`已保存第 ${workspace.no} 章编辑（${result.chars} 字，原稿已备份 .bak）`, 'done')
+        pushProgress(`已保存第 ${no} 章（${chars} 字，原稿已备份 .bak）`, 'done')
       }
     } catch (err) {
       setError((err as Error).message)
@@ -1432,19 +1552,14 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   }
 
   /** 打开某章的工作区（读取服务器原文；有遗留草稿时预载草稿；可预填修订指令）。 */
-  const openWorkspace = useCallback(async (no: number, instruction?: string): Promise<void> => {
+  const openWorkspace = useCallback(async (no: number, instruction?: string, mode?: 'pick' | 'result'): Promise<void> => {
     try {
       const [chapterRes, statusRes] = await Promise.all([api.chapter(no), api.status()])
       const chapter = statusRes.project?.chapters.find(c => c.no === no)
       if (chapter === undefined) return
-      // 未显式给指令时：若本章审稿未通过，自动预填「按审稿意见修订」，
-      // 把高优先级问题带进修订指令（作者点「修订」即可直接改）。
-      let autoInstruction = instruction ?? ''
-      if (autoInstruction === '' && chapter.review !== undefined && !chapter.review.passed) {
-        const high = chapter.review.issues.filter(i => i.severity === 'high')
-        const picked = high.length > 0 ? high.slice(0, 3) : chapter.review.issues.slice(0, 3)
-        autoInstruction = '按审稿意见修订（优先处理）：\n' + picked.map(i => `[${i.severity}] ${i.item} → ${i.suggestion}`).join('\n')
-      }
+      // 指令框只承载「显式传入的指令」（如按质检/敏感词意见修订）；
+      // 审稿意见统一由下方可勾选列表承载，不再自动预填文字，避免重复。
+      const autoInstruction = instruction ?? ''
       setWorkspace({
         no,
         title: chapter.title,
@@ -1454,8 +1569,26 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       })
       setWsSelected('')
       setWsShowDiff(true)
-      setWsCheckReport(null)
-      setWsChecked([])
+      if (mode === 'result') {
+        // 一键修订结果模式：不再加载旧审稿意见（修订已按意见执行完），
+        // 直接展示草稿；wsResultMode 标记用于顶部「✅ 修订完成」横幅。
+        setWsCheckReport(null)
+        setWsChecked([])
+        setWsResultMode(true)
+      } else {
+        // 意见统一为「当前意见」：进工作区即加载已有审稿意见为可勾选列表，
+        // 默认勾选 high（无 high 则勾选全部 medium），作者可自行增删。
+        setWsResultMode(false)
+        const carried = chapter.review
+        setWsCheckReport(carried ?? null)
+        if (carried !== undefined && carried.issues.length > 0) {
+          const highIdx = carried.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'high').map(x => x.i)
+          const mediumIdx = carried.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'medium').map(x => x.i)
+          setWsChecked(highIdx.length > 0 ? highIdx : mediumIdx)
+        } else {
+          setWsChecked([])
+        }
+      }
     } catch { /* best-effort */ }
   }, [api])
 
@@ -1488,26 +1621,72 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   }
 
   /** 工作区：按指令修订（whole=true 整章，false 仅修订选中片段）。 */
+  /** 工作区：对草稿自动跑一次 AI 审查（不落盘），刷新「当前意见」为草稿版本。 */
+  /**
+   * 主观项豁免判定（方案 B）：修订后审查中，剩余问题若没有 high（逻辑/设定/事实矛盾），
+   * 即使分数未达阈值也视为可接受——主观项（文笔/节奏/套话）不再无限循环卡修订。
+   */
+  const reviseAcceptable = (report: ReviewReport): boolean =>
+    report.passed || report.issues.every(i => i.severity !== 'high')
+
+  const autoCheckDraft = async (no: number, previousReport?: ReviewReport | null): Promise<void> => {
+    const draft = project?.chapters.find(c => c.no === no)?.pendingDraft
+    if (draft === undefined || draft === '') return
+    setBusyLabel(`AI 审查草稿 第${no}章`)
+    try {
+      // 携带上一轮审稿报告 → 后端走「验证模式」：核对原意见是否解决 + 只挑新增 high，防止越修越多。
+      const result = await api.chapterCheck(no, draft, previousReport ?? undefined)
+      // 主观项豁免：无 high 即视为通过（passed 置 true，供保存沿用与横幅展示）。
+      const acceptable = reviseAcceptable(result.report)
+      const report: ReviewReport = acceptable ? { ...result.report, passed: true } : result.report
+      setWsCheckReport(report)
+      const highIdx = report.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'high').map(x => x.i)
+      const mediumIdx = report.issues.map((it, i) => ({ it, i })).filter(x => x.it.severity === 'medium').map(x => x.i)
+      setWsChecked(highIdx.length > 0 ? highIdx : mediumIdx)
+      if (acceptable && !result.report.passed) {
+        pushProgress(`草稿审查：${report.score} 分 — 可接受（剩余均为主观项，无逻辑/设定矛盾）`, 'done')
+      } else {
+        pushProgress(`草稿审查：${report.score} 分 — ${report.verdict}`, report.passed ? 'done' : 'error')
+      }
+    } catch (err) {
+      pushProgress(`草稿审查失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusyLabel('')
+    }
+  }
+
   const handleWsRewrite = async (whole: boolean, overrideInstruction?: string): Promise<void> => {
     if (workspace === null) return
     const target = whole ? '' : wsSelected
     const instruction = overrideInstruction ?? workspace.instruction
+    // 新一轮修订开始：清掉「已采纳」结论态（横幅只在采纳后短暂停留）。
+    if (workspace.applied === true) {
+      setWorkspace({ ...workspace, applied: false })
+    }
     setBusy(true)
     setBusyLabel(`${tt('plan.rewrite')} 第${workspace.no}章`)
     setError('')
+    const no = workspace.no
     try {
-      await api.rewrite(workspace.no, instruction, target, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
+      await api.rewrite(no, instruction, target, frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
     } catch (err) {
       setError((err as Error).message)
-      pushProgress(`第 ${workspace.no} 章修订失败：${(err as Error).message}`, 'error')
+      pushProgress(`第 ${no} 章修订失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
       setBusyLabel('')
       await refresh(false)
+      // 修订后自动审查（设置开关，默认开）：草稿 → 验证模式审查（携带本次修订所依据的报告），
+      // 核对原意见解决情况 + 只挑新增 high，防止"越修 high 越多"。
+      if (config?.autoReviewAfterRevise !== false) {
+        setBusy(true)
+        await autoCheckDraft(no, wsCheckReport)
+        setBusy(false)
+      }
     }
   }
 
-  /** 工作区：按审查报告中勾选的问题一键修订（预填指令 + 立即整章修订到草稿）。 */
+  /** 工作区：按审查报告中勾选的问题一键修订（按勾选意见整章修订到草稿，不污染指令框）。 */
   const handleWsReviseByReport = async (): Promise<void> => {
     if (workspace === null || wsCheckReport === null) return
     const picked = wsChecked
@@ -1516,26 +1695,42 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       .slice(0, 5)
     if (picked.length === 0) return
     const instruction = '按审稿意见修订（优先处理）：\n' + picked.map(i => `[${i.severity}] ${i.item} → ${i.suggestion}`).join('\n')
-    setWorkspace({ ...workspace, instruction })
     await handleWsRewrite(true, instruction)
   }
 
-  /** 采纳草稿：覆盖正文文件并刷新。 */
-  const handleDraftApply = async (no: number): Promise<void> => {
+  /** 列表页「按意见修订」一键直达：不进工作区，直接按该章审稿意见全部修订（high 优先，
+   *  无 high 用 medium，不足取前 3 条），修订完自动打开工作区展示草稿 + 自动审查结果。 */
+  const handleReviseNow = async (no: number): Promise<void> => {
+    const chapter = chapters.find(c => c.no === no)
+    if (chapter?.review === undefined || chapter.review.issues.length === 0) {
+      openWorkspace(no)
+      return
+    }
+    const issues = chapter.review.issues
+    const high = issues.filter(i => i.severity === 'high')
+    const medium = issues.filter(i => i.severity === 'medium')
+    const picked = high.length > 0 ? high : medium.length > 0 ? medium : issues
+    const top = picked.slice(0, 5)
+    const instruction = '按审稿意见修订（优先处理）：\n' + top.map(i => `[${i.severity}] ${i.item} → ${i.suggestion}`).join('\n')
     setBusy(true)
+    setBusyLabel(`${tt('plan.rewrite')} 第${no}章`)
     setError('')
     try {
-      const result = await api.draftApply(no)
-      setWorkspace(null)
-      setDraftNo(null)
-      pushProgress(`已采纳第 ${no} 章新稿（${result.chars} 字）→ ${result.file}`, 'done')
+      await api.rewrite(no, instruction, '', frame => { applyJobFrame(frame, n => tt('progress.rewriting', { no: n })) })
+      await refresh(false)
+      // 结果模式打开工作区：不展示旧意见，直接看草稿；开启自动审查时以「验证模式」跑一次
+      // （携带本章原审稿报告：核对原意见解决情况 + 只挑新增 high，防止越修越多）。
+      await openWorkspace(no, undefined, 'result')
+      if (config?.autoReviewAfterRevise !== false) {
+        setBusy(true)
+        await autoCheckDraft(no, chapter.review)
+      }
     } catch (err) {
       setError((err as Error).message)
-      pushProgress(`采纳第 ${no} 章草稿失败：${(err as Error).message}`, 'error')
+      pushProgress(`第 ${no} 章修订失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
       setBusyLabel('')
-      await refresh(false)
     }
   }
 
@@ -1546,6 +1741,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     try {
       await api.draftDiscard(no)
       setWorkspace(null)
+      setWsResultMode(false)
       setDraftNo(null)
       pushProgress(`已放弃第 ${no} 章草稿，保留原稿`, 'info')
     } catch (err) {
@@ -1566,8 +1762,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       lastDeltaChars.current = 0
       liveChars.current = 0
       currentJobNo.current = frame.no
-      // 任务开始时自动弹出工作进度悬浮窗（顶部进度条已移除，进度只在这里可见）。
-      setProgressOpen(true)
+      // 任务开始：不自动弹出进度悬浮窗（导航「工作进度」显示呼吸绿点提示，
+      // 想看进度时手动点导航打开；liveBar 数据照常累积）。
       setProject(prev => prev === null ? prev : {
         ...prev,
         chapters: prev.chapters.map(c => c.no === frame.no ? { ...c, status: 'generating', error: undefined } : c),
@@ -1772,6 +1968,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         maxTokens: configDraft.maxTokens,
         reviewPassScore: configDraft.reviewPassScore,
         autoReview: configDraft.autoReview,
+        autoAuthorReview: configDraft.autoAuthorReview,
+        autoReviewAfterRevise: configDraft.autoReviewAfterRevise,
       })
       setConfig(result.config)
       setConfigDraft(result.config)
@@ -1807,6 +2005,37 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const bible: StoryBible | undefined = project?.bible
   const volumes: Volume[] | undefined = project?.volumes
   const foreshadows: Foreshadow[] = project?.foreshadows ?? []
+
+  /**
+   * 定位章节：从待办/主行动卡跳到章节页的目标章——切 tab、解除卷筛选、
+   * 展开所在卷，并滚动高亮（focusNo 驱动 useEffect 执行）。
+   * 不强行展开章节详情：保持章节原有收起/展开状态，避免页面被撑开。
+   */
+  const gotoChapter = useCallback((no: number): void => {
+    setActiveTab('plan')
+    setSelectedVolume('all')
+    // 展开目标章所在卷（从折叠列表移除该卷号）。
+    const chapter = chapters.find(c => c.no === no)
+    if (chapter !== undefined && chapter.volume > 0) {
+      setCollapsedVolumes(prev => prev.filter(v => v !== chapter.volume))
+    }
+    setFocusNo(no)
+  }, [chapters])
+
+  /** focusNo 驱动：等 DOM 渲染后滚动到目标章并短暂高亮（3 秒后清除）。 */
+  useEffect(() => {
+    if (focusNo === null) return
+    const timer = window.setTimeout(() => {
+      const el = document.querySelector(`[data-chapter-no="${focusNo}"]`)
+      if (el !== null) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        el.classList.add(css.chapterFocus)
+        window.setTimeout(() => { el.classList.remove(css.chapterFocus) }, 3000)
+      }
+      setFocusNo(null)
+    }, 350)
+    return () => { window.clearTimeout(timer) }
+  }, [focusNo])
 
   /** 章节按卷分组（未分卷章节单独一组；章节多时可按卷折叠浏览）。 */
   const chapterGroups = useMemo(() => {
@@ -1908,12 +2137,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       }
     }
     if (reviewPendingCount > 0) {
+      const firstPending = chapters.find(c => c.status === 'written' || c.status === 'rejected')
       return {
         eyebrow: '推荐下一步',
         title: `${reviewPendingCount} 章待审稿`,
         reason: '审稿通过后章节才算完成；不通过的可按意见在工作区修订。',
         actionLabel: '去审稿',
-        onClick: () => { setActiveTab('plan') },
+        onClick: () => { if (firstPending !== undefined) gotoChapter(firstPending.no) },
       }
     }
     return {
@@ -1923,7 +2153,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       actionLabel: '导出全本',
       onClick: () => { void handleExport('txt') },
     }
-  }, [project, bible, volumes, chapters, pendingCount, reviewPendingCount, openWorkspace])
+  }, [project, bible, volumes, chapters, pendingCount, reviewPendingCount, openWorkspace, gotoChapter])
 
   /** 待办队列（失败/草稿/待审稿，点击直达）。 */
   const todos = useMemo(() => {
@@ -1935,7 +2165,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           title: `第 ${chapter.no} 章《${chapter.title}》生成失败`,
           description: chapter.error ?? '',
           actionLabel: '去处理',
-          onClick: () => { setActiveTab('plan') },
+          onClick: () => { gotoChapter(chapter.no) },
         })
       }
       if (items.length >= 3) return items
@@ -1957,12 +2187,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           title: `第 ${chapter.no} 章《${chapter.title}》待审稿`,
           description: chapter.status === 'rejected' ? '审稿未通过，可按意见修订' : '等待 AI 审稿确认',
           actionLabel: '去审稿',
-          onClick: () => { setActiveTab('plan') },
+          onClick: () => { gotoChapter(chapter.no) },
         })
       }
     }
     return items
-  }, [chapters, openWorkspace])
+  }, [chapters, openWorkspace, gotoChapter])
 
   /** 资产健康（设定/卷/写作资产/伏笔）。 */
   const assetSummary = (() => {
@@ -1987,31 +2217,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   return (
     <div className={css.panel} data-nf-theme={panelTheme}>
       {viewMode === 'shelf' ? (
-        /* 书架首页：默认视图，选择一本书进入工作台 */
+        /* 书架首页：默认视图，选择一本书进入工作台或阅读页 */
         <ShelfView
           api={api}
           shelf={shelf ?? { books: [], activeBookId: null }}
           onOpenBook={async (id) => {
-            setBusy(true)
-            try {
-              await api.bookActivate(id)
-              // 切换书后重置本地编辑状态，重新拉取目标书。
-              setOutlineText('')
-              setProject(null)
-              setGeneratedFiles([])
-              setChapterText('')
-              setExpandedChapter(null)
-              setProgress([])
-              setAuditIssues(null)
-              setCharCards(null)
-              await refresh(false, true)
-              await refreshShelf()
-              setViewMode('workspace')
-            } catch (err) {
-              setError((err as Error).message)
-            } finally {
-              setBusy(false)
-            }
+            await activateBook(id, 'workspace')
+          }}
+          onReadBook={async (id) => {
+            await activateBook(id, 'reader')
           }}
           onAddBook={() => { setViewMode('create') }}
         />
@@ -2040,6 +2254,14 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               setBusy(false)
             }
           }}
+        />
+      ) : viewMode === 'reader' ? (
+        /* 沉浸式阅读页：只读已写章节 */
+        <ReaderView
+          api={api}
+          project={project ?? { bookName: '', outline: '', chapters: [], foreshadows: [], createdAt: '', updatedAt: '' }}
+          onBack={() => { setViewMode('shelf') }}
+          onOpenWorkspace={() => { setViewMode('workspace') }}
         />
       ) : (
         <>
@@ -2122,6 +2344,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   {tab.id === 'workflow' && chapters.length > 0 && (
                     <span className={`${css.navTabBadge} ${css.navTabBadgeDone}`}>{journeyPercent}%</span>
                   )}
+                  {/* 任务进行中：工作进度导航显示呼吸绿点（悬停看任务名），不自动弹窗 */}
+                  {tab.id === 'progress' && busy && (
+                    <span
+                      className={`${css.navTabBadge} ${css.navTabBadgeLive}`}
+                      title={busyLabel !== '' ? `任务中：${busyLabel}` : '任务进行中'}
+                    >
+                      ●
+                    </span>
+                  )}
                 </button>
               ))}
               {!navCollapsed && <div className={css.navGroupSep} />}
@@ -2193,18 +2424,47 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {workspace !== null && (
           <div className={css.wsPage}>
             <div className={css.wsPageHeader}>
-              <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorkspace(null) }} title="返回章节列表（草稿不丢失）">
-                ← 返回
-              </button>
+              {workspace.applied === true ? (
+                <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} onClick={() => { setWorkspace(null); setWsResultMode(false); gotoChapter(workspace.no) }} title="关闭工作区，返回章节页并定位到本章（滚动 + 高亮）">
+                  ← 返回章节页
+                </button>
+              ) : (
+                <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorkspace(null); setWsResultMode(false) }} title="返回章节列表（草稿不丢失）">
+                  ← 返回
+                </button>
+              )}
               <span className={css.cardTitle}>第 {workspace.no} 章《{workspace.title}》</span>
               <span className={css.meta}>{workspace.original.length} 字</span>
               <span style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
                 <button type="button" className={css.iconButton} title="减小字号" aria-label="减小字号" onClick={() => { changeEditorFontSize(editorFontSize - 1) }}>A−</button>
                 <span className={css.meta}>{editorFontSize}px</span>
                 <button type="button" className={css.iconButton} title="增大字号" aria-label="增大字号" onClick={() => { changeEditorFontSize(editorFontSize + 1) }}>A＋</button>
-                <button type="button" className={css.iconButton} title="关闭工作区" aria-label="关闭工作区" onClick={() => { setWorkspace(null) }}>×</button>
+                <button type="button" className={css.iconButton} title="关闭工作区" aria-label="关闭工作区" onClick={() => { setWorkspace(null); setWsResultMode(false) }}>×</button>
               </span>
             </div>
+            {workspace.applied === true && (
+              <div className={css.wsAppliedBanner}>
+                ✅ 已采纳第 {workspace.no} 章新稿（{workspace.original.length} 字）· 原稿已自动备份 .bak
+                {wsCheckReport !== null ? (
+                  <span style={{ color: wsCheckReport.passed ? 'var(--nf-success)' : 'var(--nf-error)' }}>
+                    {' · '}修订时审查：{wsCheckReport.score} 分 — {wsCheckReport.passed ? '通过 ✓' : '未通过，可继续勾选意见修订'}
+                  </span>
+                ) : (
+                  <span className={css.meta}>{' · '}需要结论？点「🔍 AI 审查」查看</span>
+                )}
+              </div>
+            )}
+            {workspace.applied !== true && wsResultMode && (
+              <div className={css.wsAppliedBanner} style={{ borderColor: 'var(--nf-accent)', background: 'color-mix(in srgb, var(--nf-accent) 8%, transparent)' }}>
+                ✅ 修订完成，请查看草稿对比
+                {wsCheckReport !== null && (
+                  <span style={{ color: wsCheckReport.passed ? 'var(--nf-success)' : 'var(--nf-error)' }}>
+                    {' · '}草稿审查：{wsCheckReport.score} 分 — {wsCheckReport.passed ? '通过 ✓' : '未通过，可勾选意见继续修订'}
+                  </span>
+                )}
+                <span className={css.meta}>{' · '}满意后点「✅ 应用并保存」落盘</span>
+              </div>
+            )}
             <div className={css.wsColumns}>
               <div className={css.wsColumn}>
                 <div className={css.meta}>
@@ -2240,26 +2500,44 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <div className={css.meta}>未选中内容时仅支持整章润色/修订。</div>
                 )}
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
-                  {workspace.instruction.includes('按审稿意见修订') && (
-                    <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleWsRewrite(true) }} title="AI 按已预填的审稿意见自动修订整章（无需自己找问题）">
-                      🔧 按意见修订
+                  {(wsCheckReport !== null && wsCheckReport.issues.length > 0) ? (
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                      disabled={busy || wsChecked.length === 0}
+                      onClick={() => { void handleWsReviseByReport() }}
+                      title="按下方勾选的意见自动修订整章；产出草稿后自动附带一次 AI 审查"
+                    >
+                      🔧 按意见修订（{wsChecked.length}）
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                      disabled={busy || workspace.instruction.trim() === ''}
+                      onClick={() => { void handleWsRewrite(true) }}
+                      title="按指令框内容整章修订"
+                    >
+                      🔧 整章修订
                     </button>
                   )}
                   <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleWsPolish() }}>
                     ✨ 去AI味润色
                   </button>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || workspace.instruction.trim() === ''} onClick={() => { void handleWsRewrite(true) }}>
-                    整章修订
+                  <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || workspace.original.trim().length < 50} onClick={() => { void handleWsSave() }} title="有草稿则应用草稿，无草稿则保存当前编辑；沿用审查结论或自动审稿，落盘后原地显示结果">
+                    ✅ 应用并保存
                   </button>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || wsSelected === ''} onClick={() => { void handleWsRewrite(false) }}>
-                    修订选中
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || wsSelected === ''} onClick={() => { void handleWsRewrite(false) }} title="只修订在左栏选中的文字片段">
+                    📝 修订选中
                   </button>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || workspace.original.trim().length < 50} onClick={() => { void handleWsCheck() }}>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || workspace.original.trim().length < 50} onClick={() => { void handleWsCheck() }} title="对当前正文跑一次 AI 审查（不落盘）">
                     🔍 AI 审查
                   </button>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || workspace.original.trim().length < 50} onClick={() => { void handleWsSave() }}>
-                    💾 保存并审稿
-                  </button>
+                  {workspace.draft !== null && (
+                    <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleDraftDiscard(workspace.no) }} title="放弃草稿，保留原稿">
+                      ↩️ 放弃草稿
+                    </button>
+                  )}
                 </div>
                 {/* 手动编辑后的 AI 审查结果 */}
                 {wsCheckReport !== null && (
@@ -2282,7 +2560,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                               onChange={e => {
                                 setWsChecked(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i))
                               }}
-                              title="勾选后可由「修复所选问题」一起修订"
+                              title="勾选后由「按意见修订」一起修订"
                             />
                             <span>
                               [{issue.severity}] {issue.item}
@@ -2292,20 +2570,11 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                         ))}
                       </ul>
                     )}
-                    <span className={css.meta}>审查只读不落盘；勾选要修的问题，点下方按钮一键修订；改完点「💾 保存为正文」才写入文件（原稿自动备份 .bak）。</span>
-                    {wsCheckReport.issues.length > 0 && wsChecked.length > 0 && (
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
-                          disabled={busy}
-                          onClick={() => { void handleWsReviseByReport() }}
-                          title="自动按勾选的问题修订整章，产出草稿预览（不落盘），对比后应用或放弃"
-                        >
-                          🔧 修复所选问题（{wsChecked.length}）
-                        </button>
-                      </div>
-                    )}
+                    <span className={css.meta}>
+                      {wsCheckReport.passed
+                        ? '当前意见：已通过。勾选想微调的问题点「按意见修订」，或直接「✅ 应用并保存」。'
+                        : '意见只读不落盘；勾选要修的问题点「🔧 按意见修订」一键修订（默认已勾 high），满意后点「✅ 应用并保存」写入文件（原稿自动备份 .bak）。'}
+                    </span>
                   </div>
                 )}
                 {workspace.draft !== null && (
@@ -2316,17 +2585,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                         <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWsShowDiff(v => !v) }}>
                           {wsShowDiff ? '显示文本' : '查看对比'}
                         </button>
-                        <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleDraftApply(workspace.no) }}>
-                          ✅ 应用预览
-                        </button>
-                        <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleDraftDiscard(workspace.no) }}>
-                          ↩️ 放弃
-                        </button>
                       </span>
                     </div>
                     {wsShowDiff
                       ? <DiffList original={workspace.original} draft={workspace.draft} fontSize={editorFontSize} />
                       : <pre className={css.wsPreviewText} style={{ fontSize: editorFontSize }}>{workspace.draft}</pre>}
+                    <span className={css.meta}>满意后点上方「✅ 应用并保存」落盘（原稿自动备份 .bak）；不满意可继续修订。</span>
                   </div>
                 )}
               </div>
@@ -2875,7 +3139,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                     const expanded = expandedChapter === chapter.no
                     const review: ReviewReport | undefined = chapter.review
                     return (
-                      <div key={chapter.no} className={css.chapter}>
+                      <div key={chapter.no} className={css.chapter} data-chapter-no={chapter.no}>
                         <span className={css.chapterNum}>{chapter.no}</span>
                         <div className={css.chapterMain}>
                           <div className={css.chapterTitle}>
@@ -3011,7 +3275,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                             </button>
                           )}
                           {chapter.status === 'rejected' && (
-                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void openWorkspace(chapter.no) }} title="按审稿意见修订（自动带入意见）">
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void handleReviseNow(chapter.no) }} title="一键按该章审稿意见全部修订（high 优先，无需进工作区选择）；修订完自动打开工作区看草稿与审查">
                               按意见修订
                             </button>
                           )}
@@ -3447,6 +3711,18 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </select>
                 <span className={css.meta}>{tt('settings.autoAuthorReviewHint')}</span>
               </div>
+              <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>{tt('settings.autoReviewAfterRevise')}</label>
+                <select
+                  className={css.input}
+                  value={configDraft.autoReviewAfterRevise ? '1' : '0'}
+                  onChange={e => { setConfigDraft({ ...configDraft, autoReviewAfterRevise: e.target.value === '1' }) }}
+                >
+                  <option value="1">✓ 是</option>
+                  <option value="0">✗ 否</option>
+                </select>
+                <span className={css.meta}>{tt('settings.autoReviewAfterReviseHint')}</span>
+              </div>
             </div>
             <div className={css.row}>
               <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
@@ -3666,6 +3942,239 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   />
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'breakdown' && (
+          <div className={css.card}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>🔍 拆书分析</span>
+              <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                <select
+                  className={css.input}
+                  style={{ width: 130 }}
+                  value={breakdownScope}
+                  onChange={e => { setBreakdownScope(e.target.value as typeof breakdownScope) }}
+                  title="分析范围"
+                >
+                  <option value="recent">最近 20 章</option>
+                  {volumes !== undefined && volumes.map(v => (
+                    <option key={v.no} value={`volume:${v.no}`}>第{v.no}卷</option>
+                  ))}
+                  <option value="all">全书</option>
+                </select>
+                <select
+                  className={css.input}
+                  style={{ width: 100 }}
+                  value={breakdownPreset}
+                  onChange={e => { setBreakdownPreset(e.target.value as 'quick' | 'standard') }}
+                  title="分析档位"
+                >
+                  <option value="quick">快速（4 维）</option>
+                  <option value="standard">标准（+卖点）</option>
+                </select>
+                <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleBreakdown() }} title="对已写章节做结构/人物/文风/卖点体检（约 1-3 分钟，消耗 LLM 额度）">
+                  {busy ? '⏳ 分析中…' : '✨ 开始拆书'}
+                </button>
+              </div>
+            </div>
+            <span className={css.meta}>拆书分析 = 整卷复盘工具：定位、剧情结构、人物系统、文风技法（标准档加商业化卖点）。每条结论基于实际章节归纳，帮你发现「写偏了/人物变形/文风漂移」——与单章审稿互补。</span>
+
+            {breakdownResult === null ? (
+              <div className={css.shelfEmpty} style={{ minHeight: 140 }}>
+                <span className={css.shelfEmptyIcon}>📖</span>
+                <span className={css.shelfEmptyTitle}>尚未运行拆书分析</span>
+                <span className={css.meta}>选择范围与档位，点「开始拆书」对已写章节做整卷体检</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <span className={css.meta}>
+                  分析 {breakdownResult.chaptersScanned} 章 · {breakdownResult.sections.length} 个小节 · 约 {breakdownResult.usedTokens} token
+                </span>
+                {breakdownResult.sections.map(sec => (
+                  <div key={sec.key} className={css.wsPreview} style={{ borderColor: 'var(--nf-info)' }}>
+                    <div className={css.busyRow}>
+                      <b>{sec.title}</b>
+                    </div>
+                    {Object.keys(sec.structured).length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, marginBottom: 6 }}>
+                        {Object.entries(sec.structured).map(([k, v]) => {
+                          const label = (typeof v === 'string') ? v : Array.isArray(v) ? (v as string[]).join('、') : JSON.stringify(v)
+                          return <div key={k} className={css.meta}><b>{k}：</b>{label}</div>
+                        })}
+                      </div>
+                    )}
+                    <div className={css.meta} style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{sec.markdown}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'storyboard' && (
+          <div className={css.card}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>🎬 漫剧工坊</span>
+              <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonSmall} ${storyboardView === 'single' ? css.buttonPrimary : ''}`}
+                  onClick={() => { setStoryboardView('single') }}
+                >
+                  🎞️ 单集分镜
+                </button>
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonSmall} ${storyboardView === 'plan' ? css.buttonPrimary : ''}`}
+                  onClick={() => { setStoryboardView('plan') }}
+                >
+                  📺 按卷规划
+                </button>
+              </div>
+            </div>
+
+            {storyboardView === 'plan' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                  <select
+                    className={css.input}
+                    style={{ width: 170 }}
+                    value={storyboardPlanVolume}
+                    onChange={e => { setStoryboardPlanVolume(Number(e.target.value)) }}
+                    title="选择要规划的卷"
+                  >
+                    {volumes !== undefined && volumes.map(v => (
+                      <option key={v.no} value={v.no}>第{v.no}卷《{v.title}》</option>
+                    ))}
+                  </select>
+                  <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleStoryboardPlan() }} title="AI 通读整卷章节摘要，按故事弧线把章节分组成漫剧集（高潮章单独成集、过渡章合并），约 1-3 分钟">
+                    {busy ? '⏳ 规划中…' : '✨ 生成分集计划'}
+                  </button>
+                  <span className={css.meta}>AI 读卷 → 按弧线分集（不再是固定一章一集）</span>
+                </div>
+                <span className={css.meta}>分集原则：高潮章单独成集或两章一集；过渡章 2-3 章合并；断点选在钩子最强处；每集 60-120 秒。生成后逐集确认，满意再用「单集分镜」为某集生成分镜。</span>
+
+                {storyboardPlanResult === null ? (
+                  <div className={css.shelfEmpty} style={{ minHeight: 140 }}>
+                    <span className={css.shelfEmptyIcon}>📺</span>
+                    <span className={css.shelfEmptyTitle}>尚未生成分集计划</span>
+                    <span className={css.meta}>选卷后点「生成分集计划」，AI 把整卷按故事弧线分成漫剧集</span>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div className={css.meta}><b>策略：</b>{storyboardPlanResult.strategy}</div>
+                    <div className={css.meta}>共 {storyboardPlanResult.episodes.length} 集 · 覆盖 {storyboardPlanResult.chaptersScanned} 章</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 380, overflowY: 'auto' }}>
+                      {storyboardPlanResult.episodes.map(ep => (
+                        <div key={ep.index} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                          <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                            <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', flex: 'none' }}>第{ep.index}集</span>
+                            <b>{ep.title}</b>
+                            <span className={css.meta}>涵盖：第{ep.chapters[0]}-{ep.chapters[ep.chapters.length - 1]}章（{ep.chapters.length}章）</span>
+                          </div>
+                          <div className={css.meta}>{ep.narrativeJob}</div>
+                          <div className={css.meta} style={{ color: 'var(--nf-info)' }}>开头钩子：{ep.openingHook}</div>
+                          <div className={css.meta} style={{ color: 'var(--nf-warn)' }}>结尾钩子：{ep.endingHook}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {storyboardView === 'single' && (
+              <>
+                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                  <span className={css.meta}>把一章网文改编为高完播率的漫剧分镜：角色视觉锚点（复用角色库形象词）+ 8-12 格分镜表（画面/台词/转场/AI 提示词），可直接用于豆包/即梦/SD 出图或视频。黄金开局 3 秒 + 每 10 秒小高潮 + 结尾钩子。</span>
+                  <div className={css.row} style={{ flexWrap: 'wrap' }}>
+                    <select
+                      className={css.input}
+                      style={{ width: 150 }}
+                      value={storyboardChapterNo}
+                      onChange={e => { setStoryboardChapterNo(Number(e.target.value)) }}
+                      title="选择要改编的章节"
+                    >
+                      {chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').map(c => (
+                        <option key={c.no} value={c.no}>第{c.no}章 {c.title}</option>
+                      ))}
+                    </select>
+                    <select
+                      className={css.input}
+                      style={{ width: 100 }}
+                      value={storyboardTool}
+                      onChange={e => { setStoryboardTool(e.target.value as typeof storyboardTool) }}
+                      title="AI 工具（影响提示词格式）"
+                    >
+                      <option value="doubao">豆包</option>
+                      <option value="seedance">Seedance</option>
+                      <option value="sd">SD/ComfyUI</option>
+                      <option value="mj">Midjourney</option>
+                    </select>
+                    <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleStoryboard(storyboardChapterNo) }} title="把所选章节改编为抖音漫剧分镜（约 1-2 分钟，消耗 LLM 额度）">
+                      {busy ? '⏳ 生成中…' : '✨ 生成分镜'}
+                    </button>
+                  </div>
+                </div>
+
+            {storyboardResult === null ? (
+              <div className={css.shelfEmpty} style={{ minHeight: 140 }}>
+                <span className={css.shelfEmptyIcon}>🎬</span>
+                <span className={css.shelfEmptyTitle}>尚未生成分镜</span>
+                <span className={css.meta}>选择章节与 AI 工具，点「生成分镜」开始</span>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className={css.meta}><b>本集：</b>{storyboardResult.title}</div>
+                <div className={css.meta}><b>赛道节奏：</b>{storyboardResult.pacingNote}</div>
+                <div className={css.meta}><b>本集钩子：</b>{storyboardResult.hook}</div>
+
+                {storyboardResult.characters.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <b>角色视觉锚点（全分镜强制复用）</b>
+                    {storyboardResult.characters.map(c => (
+                      <div key={c.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                        <div><b>{c.name}</b></div>
+                        <div className={css.meta}>{c.visualAnchor}</div>
+                        <div className={css.meta} style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.tags}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                    <b>分镜表（{storyboardResult.panels.length} 格）</b>
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall}`}
+                      onClick={() => {
+                        const text = storyboardResult.panels.map(p => `[${p.timecode}] ${p.shot}\n画面：${p.visual}\n台词：${p.dialogue}\n转场：${p.transition}\n提示词：${p.prompt}`).join('\n\n')
+                        void navigator.clipboard?.writeText(text).then(() => { pushProgress('分镜表已复制到剪贴板', 'done') }).catch(() => { /* ignore */ })
+                      }}
+                      title="复制全部分镜提示词"
+                    >
+                      📋 复制全部
+                    </button>
+                  </div>
+                  {storyboardResult.panels.map(p => (
+                    <div key={p.index} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
+                      <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                        <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', flex: 'none' }}>{p.timecode}</span>
+                        <b>{p.shot}</b>
+                        <span className={css.meta}>转场：{p.transition}</span>
+                      </div>
+                      <div className={css.meta}>{p.visual}</div>
+                      {p.dialogue !== '' && <div className={css.meta} style={{ color: 'var(--nf-info)' }}>💬 {p.dialogue}</div>}
+                      <div className={css.meta} style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--nf-text-2)' }}>{p.prompt}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+              </>
             )}
           </div>
         )}
