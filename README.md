@@ -36,6 +36,9 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **作者复盘**：每章自动复盘（钩子兑现/结尾钩子强度/剧情线推进/连续性/节奏趋势），按卷分组的复盘记录页，复盘自动关联推进的剧情线 | **Author review**: per-chapter structural review (hook payoff / ending hook / arc progress / continuity / pacing), volume-grouped records page, auto-links advanced arcs |
 | **工作进度悬浮窗**：工具组入口，可拖拽/缩放/位置记忆；当前任务大进度条 + 全量活动记录，任务开始自动弹出 | **Floating progress console**: draggable/resizable window from the tools nav with live task progress bar + full activity log, auto-opens on task start |
 | **角色知情度**：每个角色"已知信息"清单，生成与审稿严格维护信息差（未列出的信息角色一律不知道） | **Character knowledge**: per-character known-info lists; writing & review enforce information asymmetry strictly |
+| **助手写操作守卫**：AI 助手只在作者明确指令下执行写操作（生成/修订/删除），随口提问不会误触发生成章节 | **Assistant write guard**: the AI assistant only performs write actions (generate/revise/delete) on explicit author instruction — casual questions can never trigger chapter generation |
+| **相关事实全量检索**：生成时按本章剧情要点对全量编年录检索（角色名加权 + 近因加权 + 去重），长篇连载旧设定不因窗口滑出而丢失 | **Full-ledger fact retrieval**: chapter generation retrieves relevant facts across the entire chronicle (character-name + recency weighting, dedup) — old settings survive in long serials |
+| **并发安全保存**：计划/生成/审稿落盘前自动合并磁盘最新设定（道藏/角色库/剧情线/知情度），多窗口操作互不覆盖 | **Concurrency-safe saves**: plan/generate/review merge the latest on-disk settings (bible/roles/plotlines/knowledge) before saving — parallel windows never clobber each other |
 | **敏感词检查**：内置违禁词库（政治/擦边/暴力/辱骂/广告）全书一键扫描，命中定位到章并一键去修订 | **Sensitive-word check**: built-in banned-word library scans all chapters, hits located per chapter with one-click fix |
 | **编年录独立页**：事实库从设置页移入数据库导航，支持一键回填历史章节 | **Chronicle tab**: the fact ledger moved into the database nav with one-click backfill |
 | **三套主题**：iOS 液态玻璃（绿）/ 经典毛玻璃（蓝）/ 新拟物双阴影，设置页即时切换（localStorage） | **Three themes**: iOS Liquid Glass (green) / classic frosted (blue) / neumorphism, instant switching in settings |

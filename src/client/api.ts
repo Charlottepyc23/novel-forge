@@ -187,6 +187,11 @@ export class NovelApi {
     return postJson<{ ok: boolean; no: number }>(NOVEL_API.chapterReset, { chapterNo: no })
   }
 
+  /** 章节直接通过（作者行使最终决定权）。 */
+  async chapterApprove(no: number): Promise<{ ok: boolean; no: number }> {
+    return postJson<{ ok: boolean; no: number }>(NOVEL_API.chapterApprove, { chapterNo: no })
+  }
+
   /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
   async roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse> {
     return postJson<import('../protocol.ts').RolesResponse>(NOVEL_API.roles, req)

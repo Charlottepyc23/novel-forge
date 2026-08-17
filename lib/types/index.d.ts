@@ -41,6 +41,8 @@ export interface Config {
     reviewPassScore?: number;
     /** Whether generation auto-runs review after writing. */
     autoReview?: boolean;
+    /** Whether generation auto-runs the author review (hook/continuity/trend). */
+    autoAuthorReview?: boolean;
 }
 export declare const Config: z<Config>;
 /** Model-facing announcement: plugin presence, capabilities, and limits. */

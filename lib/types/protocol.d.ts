@@ -53,6 +53,18 @@ export declare const NOVEL_API: {
     readonly world: "/api/dsh-novel-forge/world";
     /** 封面：GET 读取（dataUrl）/ POST 上传或移除。 */
     readonly cover: "/api/dsh-novel-forge/blurb/cover";
+    /** 剧情线管理：增删改 + 关联章节。 */
+    readonly plotlines: "/api/dsh-novel-forge/plotlines";
+    /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+    readonly roles: "/api/dsh-novel-forge/roles";
+    /** 作者复盘补跑：对已写章节补齐 authorReview（全书流式 / 单章 JSON）。 */
+    readonly reviewBackfill: "/api/dsh-novel-forge/review/backfill";
+    /** 章节复位：generating 卡死 → pending（可重新生成）。 */
+    readonly chapterReset: "/api/dsh-novel-forge/chapter/reset";
+    /** 章节直接通过：作者对 rejected/written 章节行使最终决定权。 */
+    readonly chapterApprove: "/api/dsh-novel-forge/chapter/approve";
+    /** 敏感词检查：全书已写章节或指定文本。 */
+    readonly sensitiveCheck: "/api/dsh-novel-forge/sensitive-check";
     readonly config: "/api/dsh-novel-forge/config";
     readonly openFolder: "/api/dsh-novel-forge/open-folder";
 };
@@ -117,6 +129,8 @@ export interface ChapterPlan {
     targetChars: number;
     /** Generation/review state. */
     status: ChapterStatus;
+    /** 进入 generating 的时间（用于超时自动复位；未在生成时无此字段）。 */
+    generatingAt?: string;
     /** Actual character count once generated. */
     chars?: number;
     /** Failure message when status is 'error'. */
@@ -127,11 +141,32 @@ export interface ChapterPlan {
     summary?: string;
     /** Latest review report (present once reviewed). */
     review?: ReviewReport;
+    /** 作者复盘：钩子兑现/结尾钩子/剧情线推进/连续性/节奏趋势（生成后自动）。 */
+    authorReview?: AuthorReview;
     /**
      * 待确认草稿：润色（去AI味）或整章重写的产物正文。生成时先存这里，
      * 用户看过对比后点「采纳」才覆盖正文文件；点「放弃」则丢弃。刷新页面不丢失。
      */
     pendingDraft?: string;
+}
+/** 作者复盘：叙事结构层面的逐章检查（钩子/推进/连续性/趋势）。 */
+export interface AuthorReview {
+    /** 上一章结尾钩子是否在本章兑现。 */
+    hookHonored: boolean;
+    /** 钩子兑现说明（未兑现时给出建议）。 */
+    hookNote: string;
+    /** 本章结尾钩子强度 0-10。 */
+    endingHook: number;
+    /** 剧情线推进情况（推进了哪条线/或未推进）。 */
+    plotlineProgress: string;
+    /** 结构化：本章推进的剧情线名称列表（与项目剧情线 name 精确匹配，复盘后自动关联章节）。 */
+    advancedLines?: string[];
+    /** 连续性检查（人物位置/时间/伤势/资源是否与上章衔接）。 */
+    continuity: string;
+    /** 近期节奏趋势提示（拖沓/爽点密度等）。 */
+    trend: string;
+    /** 复盘时间。 */
+    reviewedAt: string;
 }
 /** One review finding. */
 export interface ReviewIssue {
@@ -178,6 +213,8 @@ export interface CharacterCard {
     goals: string;
     /** Key relations to other characters. */
     relations: string;
+    /** 知情度：该角色已经知道的事实/秘密（未列出的信息该角色不知道）。 */
+    knowledge?: string[];
 }
 /** The structured story bible (worldbuilding extracted from the outline). */
 export interface StoryBible {
@@ -234,6 +271,94 @@ export interface AuditResponse {
     /** 质检时间。 */
     auditedAt: string;
 }
+/** 一条剧情线（主线/支线/人物线/悬念线）。 */
+export interface Plotline {
+    /** 稳定 id。 */
+    id: string;
+    /** 线名。 */
+    name: string;
+    /** 类型：主线 / 支线 / 人物线 / 悬念线。 */
+    kind: 'main' | 'branch' | 'character' | 'mystery';
+    /** 目标/终点（这条线最终要完成什么）。 */
+    goal: string;
+    /** 当前进度说明（最近推进到哪）。 */
+    progress: string;
+    /** 生命周期状态。 */
+    status: 'active' | 'paused' | 'resolved' | 'abandoned';
+    /** 关联章节号（推进/落地的章节）。 */
+    chapters: number[];
+    /** 创建时间。 */
+    createdAt: string;
+}
+/** POST /plotlines 请求：剧情线增删改 + 关联章节 + AI 辅助。 */
+export interface PlotlinesRequest {
+    op: 'add' | 'update' | 'remove' | 'link' | 'suggest' | 'refresh' | 'health' | 'plan';
+    /** add / update 时传入的完整剧情线。 */
+    line?: Plotline;
+    /** remove / link / refresh 时的目标线 id。 */
+    id?: string;
+    /** link 时关联的章节号。 */
+    chapterNo?: number;
+}
+/** 剧情线健康检查报告。 */
+export interface PlotlineHealthReport {
+    /** 是否需要新线（需要 / 暂不需要 / 再写 X 章后需要）。 */
+    verdict: string;
+    /** 建议添加新线的时机说明。 */
+    timing: string;
+    /** 依据（基于数据的理由，每条一句）。 */
+    reasons: string[];
+    /** 各线健康度。 */
+    lines: Array<{
+        name: string;
+        /** ok=健康 / warning=预警 / stale=搁置过久。 */
+        health: 'ok' | 'warning' | 'stale';
+        note: string;
+    }>;
+}
+/** AI 剧情方案：下一阶段目标 + 建议新线。 */
+export interface PlotlinePlan {
+    /** 下一阶段（未来 5-10 章）剧情方向。 */
+    direction: string;
+    /** 建议的新线（可逐条采纳）。 */
+    suggestions: Plotline[];
+}
+/** POST /plotlines 响应。 */
+export interface PlotlinesResponse {
+    plotlines: Plotline[];
+    /** op=suggest 时的 AI 建议候选线。 */
+    suggestions?: Plotline[];
+    /** op=health 时的健康检查报告。 */
+    health?: PlotlineHealthReport;
+    /** op=plan 时的剧情方案。 */
+    plan?: PlotlinePlan;
+}
+/** 一条敏感词命中。 */
+export interface SensitiveHit {
+    /** 命中章节号（文本检测时为 0）。 */
+    chapterNo: number;
+    /** 命中的违禁词。 */
+    word: string;
+    /** 类别：政治 / 擦边 / 暴力 / 辱骂 / 广告 / 其他。 */
+    category: string;
+    /** 出现次数。 */
+    count: number;
+}
+/** POST /sensitive-check 请求：检测指定章节/任意文本/全书。 */
+export interface SensitiveCheckRequest {
+    /** 检测该章正文。 */
+    chapterNo?: number;
+    /** 检测任意文本（优先于 chapterNo）。 */
+    text?: string;
+    /** 扫描全部已写章节。 */
+    all?: boolean;
+}
+/** POST /sensitive-check 响应。 */
+export interface SensitiveCheckResponse {
+    hits: SensitiveHit[];
+    /** 参与扫描的章节数。 */
+    scannedChapters: number;
+}
 /** 角色卡：角色当前状态（从事实库聚合）。 */
 export interface RoleStatusCard {
     name: string;
@@ -246,11 +371,48 @@ export interface RoleStatusCard {
     /** 出场次数。 */
     appearances: number;
 }
+/** 角色库条目（主表：作者维护 + AI 提炼 + 编年录自动聚合）。 */
+export interface RoleRecord {
+    /** 角色名（唯一键）。 */
+    name: string;
+    /** 定位：主角 / 女主 / 女配 / 配角 / 反派 / 路人。 */
+    roleLabel: 'protagonist' | 'female_lead' | 'female_support' | 'support' | 'antagonist' | 'extra';
+    /** 身份一句话（如：祭族后裔、青云宗杂役）。 */
+    identity: string;
+    /** 性格标签。 */
+    traits: string[];
+    /** 目标与动机。 */
+    goals: string;
+    /** 关系网：[角色名]（关系）。 */
+    relations: string[];
+    /** 成长线：阶段 → 说明（可含章节）。 */
+    arc: string[];
+    /** 知情度：该角色已经知道的信息。 */
+    knowledge: string[];
+    /** 首次出场章节（编年录聚合，可手动修正）。 */
+    firstChapter?: number;
+}
+/** POST /roles 请求：角色库增删改 + AI 提炼。 */
+export interface RolesRequest {
+    op: 'extract' | 'adopt' | 'update' | 'remove';
+    /** adopt / update 时传入的角色（adopt 可修改后采纳）。 */
+    role?: RoleRecord;
+    /** remove 时的角色名。 */
+    name?: string;
+}
+/** POST /roles 响应。 */
+export interface RolesResponse {
+    roles: RoleRecord[];
+    /** op=extract 时的 AI 候选角色。 */
+    candidates?: RoleRecord[];
+}
 /** POST /bible/patch 请求：局部修补设定圣经。 */
 export interface BiblePatchRequest {
     worldRules?: string[];
     redLines?: string[];
     style?: string[];
+    /** 角色卡整体替换（人物志编辑知情度等）。 */
+    characters?: CharacterCard[];
 }
 /** POST /blurb 请求：AI 生成/补全或手动保存小说简介。 */
 export interface BlurbRequest {
@@ -351,6 +513,12 @@ export interface ProjectState {
     coverPath?: string;
     /** 大世界结构化数据（境界体系/区域/势力）。 */
     world?: WorldState;
+    /** 剧情线（主线/支线/人物线/悬念线）。 */
+    plotlines?: Plotline[];
+    /** 角色库（作者维护 + AI 提炼的主表）。 */
+    roles?: RoleRecord[];
+    /** 人物志：角色当前状态聚合结果（从编年录刷新后存档，打开页面直接显示）。 */
+    roleStatus?: RoleStatusCard[];
     /** ISO timestamps. */
     createdAt: string;
     updatedAt: string;
@@ -373,6 +541,8 @@ export interface NovelConfig {
     reviewPassScore: number;
     /** Whether generation auto-runs review after writing. */
     autoReview: boolean;
+    /** Whether generation auto-runs the author review (hook/continuity/trend) after writing. */
+    autoAuthorReview: boolean;
 }
 /** GET /status response. */
 export interface StatusResponse {
@@ -453,6 +623,13 @@ export type JobFrame = {
     type: 'review';
     no: number;
     report: ReviewReport;
+} | {
+    type: 'author-review';
+    no: number;
+    review: AuthorReview;
+} | {
+    type: 'author-backfill-done';
+    count: number;
 } | {
     type: 'rewritten';
     no: number;
@@ -537,6 +714,7 @@ export interface ConfigPatch {
     maxTokens?: number;
     reviewPassScore?: number;
     autoReview?: boolean;
+    autoAuthorReview?: boolean;
 }
 /** One assistant conversation message (persisted per project). */
 export interface AssistantMessage {

@@ -62,6 +62,29 @@ export declare class NovelApi {
     biblePatch(patch: import('../protocol.ts').BiblePatchRequest): Promise<{
         bible: import('../protocol.ts').StoryBible;
     }>;
+    /** 剧情线管理：增删改 + 关联章节。 */
+    plotlines(req: import('../protocol.ts').PlotlinesRequest): Promise<import('../protocol.ts').PlotlinesResponse>;
+    /** 敏感词检查：指定章节 / 任意文本 / 全书。 */
+    sensitiveCheck(req: import('../protocol.ts').SensitiveCheckRequest): Promise<import('../protocol.ts').SensitiveCheckResponse>;
+    /** 作者复盘补跑：单章（JSON）。 */
+    reviewBackfillChapter(no: number): Promise<{
+        no: number;
+        review: import('../protocol.ts').AuthorReview;
+    }>;
+    /** 作者复盘补跑：全书缺失章节（NDJSON 流）。 */
+    reviewBackfillAll(onFrame: (frame: JobFrame) => void): Promise<void>;
+    /** 章节复位：generating 卡死 → pending。 */
+    chapterReset(no: number): Promise<{
+        ok: boolean;
+        no: number;
+    }>;
+    /** 章节直接通过（作者行使最终决定权）。 */
+    chapterApprove(no: number): Promise<{
+        ok: boolean;
+        no: number;
+    }>;
+    /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+    roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse>;
     /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
     blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{
         blurb: string;

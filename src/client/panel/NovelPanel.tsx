@@ -14,6 +14,7 @@ import { AssetsTab } from './AssetsTab.tsx'
 import { ShelfView } from './ShelfView.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
 import { WorldTab } from './WorldTab.tsx'
+import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
 import { extractDocxTextFromBuffer } from '../docx.ts'
 import type {
   BookshelfSnapshot,
@@ -86,7 +87,6 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'bible', label: tt('tab.bible'), icon: '📖' },
       { id: 'world', label: '大世界', icon: '🌍' },
       { id: 'roles', label: '角色库', icon: '👥' },
-      { id: 'characters', label: '人物志', icon: '🧾' },
       { id: 'foreshadow', label: tt('tab.foreshadow'), icon: '🔮' },
       { id: 'facts', label: tt('tab.facts'), icon: '📜' },
       { id: 'reviews', label: '复盘记录', icon: '📋' },
@@ -742,15 +742,17 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   /** 角色卡刷新。 */
   const handleCharactersRefresh = async (): Promise<void> => {
     setBusy(true)
-    setBusyLabel('聚合角色卡中…')
+    setBusyLabel('聚合角色状态中…')
     setError('')
     try {
       const result = await api.charactersRefresh()
       setCharCards(result.cards)
-      pushProgress(`角色卡已刷新：${result.cards.length} 个角色`, 'done')
+      // 同步到项目存档（角色库卡片显示当前状态）。
+      setProject(prev => prev === null ? prev : { ...prev, roleStatus: result.cards, updatedAt: new Date().toISOString() })
+      pushProgress(`角色状态已刷新：${result.cards.length} 个角色`, 'done')
     } catch (err) {
       setError((err as Error).message)
-      pushProgress(`角色卡刷新失败：${(err as Error).message}`, 'error')
+      pushProgress(`角色状态刷新失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
       setBusyLabel('')
@@ -791,6 +793,26 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } catch (err) {
       setError((err as Error).message)
       pushProgress(`复位失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** 章节直接通过（作者行使最终决定权）。 */
+  const handleChapterApprove = async (no: number): Promise<void> => {
+    if (!window.confirm(`确定直接通过第 ${no} 章？（跳过审稿判定，保留审稿记录）`)) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.chapterApprove(no)
+      setProject(prev => prev === null ? prev : {
+        ...prev,
+        chapters: prev.chapters.map(c => c.no === no ? { ...c, status: 'approved' } : c),
+      })
+      pushProgress(`第 ${no} 章已直接通过`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`操作失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
     }
@@ -1700,15 +1722,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
-  /** Approve a chapter manually. */
-  const handleApprove = (no: number): void => {
-    setProject(prev => prev === null ? prev : {
-      ...prev,
-      chapters: prev.chapters.map(c => c.no === no ? { ...c, status: 'approved' } : c),
-      updatedAt: new Date().toISOString(),
-    })
-  }
-
   /** Toggle chapter preview. */
   const handleToggleChapter = async (no: number): Promise<void> => {
     if (expandedChapter === no) {
@@ -2374,41 +2387,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
 
             {/* 状态摘要条：全书进度 + 六个统计格，同样式并排一行 */}
             <div className={css.assetGrid}>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>全书进度</span>
-                <span className={css.assetStatValue} style={{ color: 'var(--nf-accent)' }}>{doneCount}/{chapters.length} 章</span>
-                <span className={css.assetStatDetail}>{chapters.length > 0 ? Math.round((doneCount / chapters.length) * 100) : 0}%</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>已通过审稿</span>
-                <span className={css.assetStatValue} style={{ color: approvedCount > 0 ? 'var(--nf-success)' : undefined }}>{approvedCount}</span>
-                <span className={css.assetStatDetail}>章节已 approved</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>待生成</span>
-                <span className={css.assetStatValue} style={{ color: pendingCount > 0 ? 'var(--nf-warn)' : undefined }}>{pendingCount}</span>
-                <span className={css.assetStatDetail}>pending + error</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>待审稿</span>
-                <span className={css.assetStatValue} style={{ color: reviewPendingCount > 0 ? 'var(--nf-info)' : undefined }}>{reviewPendingCount}</span>
-                <span className={css.assetStatDetail}>written + rejected</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>总字数</span>
-                <span className={css.assetStatValue}>{totalChars}</span>
-                <span className={css.assetStatDetail}>已生成正文累计</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>当前卷</span>
-                <span className={css.assetStatValue} style={{ fontSize: 13 }}>{currentVolumeName}</span>
-                <span className={css.assetStatDetail}>正在推进的卷</span>
-              </div>
-              <div className={css.assetStat}>
-                <span className={css.assetStatLabel}>最近创作</span>
-                <span className={css.assetStatValue} style={{ fontSize: 13 }}>{lastUpdated}</span>
-                <span className={css.assetStatDetail}>最近生成/编辑时间</span>
-              </div>
+              <StatCell label="全书进度" value={`${doneCount}/${chapters.length} 章`} valueColor="var(--nf-accent)" detail={`${chapters.length > 0 ? Math.round((doneCount / chapters.length) * 100) : 0}%`} />
+              <StatCell label="已通过审稿" value={String(approvedCount)} valueColor={approvedCount > 0 ? 'var(--nf-success)' : undefined} detail="章节已 approved" />
+              <StatCell label="待生成" value={String(pendingCount)} valueColor={pendingCount > 0 ? 'var(--nf-warn)' : undefined} detail="pending + error" />
+              <StatCell label="待审稿" value={String(reviewPendingCount)} valueColor={reviewPendingCount > 0 ? 'var(--nf-info)' : undefined} detail="written + rejected" />
+              <StatCell label="总字数" value={String(totalChars)} detail="已生成正文累计" />
+              <StatCell label="当前卷" value={currentVolumeName} valueFontSize={13} detail="正在推进的卷" />
+              <StatCell label="最近创作" value={lastUpdated} valueFontSize={13} detail="最近生成/编辑时间" />
             </div>
 
             {/* 资产健康：独占一行（道藏/卷计划/写作资产/伏笔 + 全书质检） */}
@@ -2420,38 +2405,31 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </button>
               </div>
               <div className={css.assetGrid}>
-                <div className={css.assetStat}>
-                  <span className={css.assetStatLabel}>道藏</span>
-                  <span className={css.assetStatValue} style={{ color: bible !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
-                    {bible !== undefined ? `✓ ${bible.worldRules.length} 条规则` : '未生成'}
-                  </span>
-                  <span className={css.assetStatDetail}>
-                    {bible !== undefined ? `${bible.characters.length} 人物 · ${bible.redLines.length} 红线` : '提炼人设 / 世界观 / 金手指'}
-                  </span>
-                </div>
-                <div className={css.assetStat}>
-                  <span className={css.assetStatLabel}>卷计划</span>
-                  <span className={css.assetStatValue} style={{ color: volumes !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
-                    {volumes !== undefined ? `${volumes.length} 卷` : '未生成'}
-                  </span>
-                  <span className={css.assetStatDetail} title={volumes?.map(v => v.title).join(' / ')}>
-                    {volumes !== undefined ? volumes.map(v => v.title).join(' / ') : '按剧情弧线划分全书'}
-                  </span>
-                </div>
-                <div className={css.assetStat}>
-                  <span className={css.assetStatLabel}>写作资产</span>
-                  <span className={css.assetStatValue} style={{ color: assetCount > 0 ? 'var(--nf-success)' : 'var(--nf-text-3)' }}>
-                    {assetCount} 项
-                  </span>
-                  <span className={css.assetStatDetail} title={assetSummary}>{assetSummary}</span>
-                </div>
-                <div className={css.assetStat}>
-                  <span className={css.assetStatLabel}>伏笔</span>
-                  <span className={css.assetStatValue}>{foreshadows.length} 条</span>
-                  <span className={css.assetStatDetail}>
-                    {foreshadows.filter(f => f.status === 'planned').length} 待埋 · {foreshadows.filter(f => f.status === 'resolved').length} 已回收
-                  </span>
-                </div>
+                <StatCell
+                  label="道藏"
+                  value={bible !== undefined ? `✓ ${bible.worldRules.length} 条规则` : '未生成'}
+                  valueColor={bible !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)'}
+                  detail={bible !== undefined ? `${bible.characters.length} 人物 · ${bible.redLines.length} 红线` : '提炼人设 / 世界观 / 金手指'}
+                />
+                <StatCell
+                  label="卷计划"
+                  value={volumes !== undefined ? `${volumes.length} 卷` : '未生成'}
+                  valueColor={volumes !== undefined ? 'var(--nf-success)' : 'var(--nf-text-3)'}
+                  detail={volumes !== undefined ? volumes.map(v => v.title).join(' / ') : '按剧情弧线划分全书'}
+                  detailTitle={volumes?.map(v => v.title).join(' / ')}
+                />
+                <StatCell
+                  label="写作资产"
+                  value={`${assetCount} 项`}
+                  valueColor={assetCount > 0 ? 'var(--nf-success)' : 'var(--nf-text-3)'}
+                  detail={assetSummary}
+                  detailTitle={assetSummary}
+                />
+                <StatCell
+                  label="伏笔"
+                  value={`${foreshadows.length} 条`}
+                  detail={`${foreshadows.filter(f => f.status === 'planned').length} 待埋 · ${foreshadows.filter(f => f.status === 'resolved').length} 已回收`}
+                />
               </div>
             </div>
 
@@ -2537,24 +2515,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 {auditIssues.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {auditIssues.map((issue, i) => (
-                      <div key={i} className={`${css.todoItem} ${issue.severity === 'high' ? css.todoDanger : issue.severity === 'medium' ? css.todoWarning : css.todoInfo}`}>
-                        <span className={css.todoText}>
-                          <span>
-                            {issue.chapterNo > 0 ? `第 ${issue.chapterNo} 章` : '未定位章节'} · [{issue.severity}] {issue.item}
-                          </span>
-                          {issue.suggestion !== '' && <span className={css.meta}>建议：{issue.suggestion}</span>}
-                        </span>
-                        {issue.chapterNo > 0 && (
-                          <button
-                            type="button"
-                            className={`${css.button} ${css.buttonSmall}`}
-                            disabled={busy}
-                            onClick={() => { void openWorkspace(issue.chapterNo, `按质检意见修订：${issue.item}（建议：${issue.suggestion}）`) }}
-                          >
-                            去修订
-                          </button>
-                        )}
-                      </div>
+                      <AuditIssueRow
+                        key={i}
+                        issue={issue}
+                        disabled={busy}
+                        onFix={() => { void openWorkspace(issue.chapterNo, `按质检意见修订：${issue.item}（建议：${issue.suggestion}）`) }}
+                      />
                     ))}
                   </div>
                 )}
@@ -2568,15 +2534,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <span className={css.meta}>🎉 暂无待办，一切顺畅</span>
               ) : (
                 todos.map((todo, i) => (
-                  <div key={i} className={`${css.todoItem} ${todo.tone === 'danger' ? css.todoDanger : todo.tone === 'warning' ? css.todoWarning : css.todoInfo}`}>
-                    <span className={css.todoText}>
-                      {todo.title}
-                      {todo.description !== '' && <span className={css.meta}> — {todo.description}</span>}
-                    </span>
-                    <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { todo.onClick() }}>
-                      {todo.actionLabel}
-                    </button>
-                  </div>
+                  <TodoRow
+                    key={i}
+                    tone={todo.tone}
+                    title={todo.title}
+                    description={todo.description}
+                    actionLabel={todo.actionLabel}
+                    disabled={busy}
+                    onAction={todo.onClick}
+                  />
                 ))
               )}
             </div>
@@ -3029,9 +2995,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                               {tt('plan.review')}
                             </button>
                           )}
-                          {chapter.status === 'written' && (
-                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { handleApprove(chapter.no) }}>
-                              {tt('plan.approve')}
+                          {(chapter.status === 'written' || chapter.status === 'rejected') && (
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || busyAny} onClick={() => { void handleChapterApprove(chapter.no) }} title="作者行使最终决定权：直接通过（不重审，保留审稿记录，落盘保存）">
+                              ✔ 直接通过
                             </button>
                           )}
                           {(chapter.status === 'written' || chapter.status === 'rejected' || chapter.status === 'approved') && (
@@ -3244,6 +3210,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <div className={css.row}>
                 <button
                   type="button"
+                  className={`${css.button} ${css.buttonSmall}`}
+                  disabled={busy || (project?.facts ?? []).length === 0}
+                  onClick={() => { void handleCharactersRefresh() }}
+                  title="从编年录聚合各角色当前状态（境界/伤势/心境/出场统计），显示在每张卡上"
+                >
+                  ↻ 从编年录刷新状态
+                </button>
+                <button
+                  type="button"
                   className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
                   disabled={busy || doneCount === 0}
                   onClick={() => { void handleRolesExtract() }}
@@ -3253,7 +3228,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </button>
               </div>
             </div>
-            <span className={css.meta}>角色库是全书角色主表：定位（女主/女配/配角/反派）、身份、关系网、成长线、知情度——生成与审稿都会按定位规格刻画互动。</span>
+            <span className={css.meta}>角色库是全书角色主表：定位（女主/女配/配角/反派）、身份、关系网、成长线、知情度——生成与审稿都会按定位规格刻画互动。点「从编年录刷新状态」可在每张卡上显示角色当前状态。</span>
 
             {roleCandidates !== null && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-info)', borderRadius: 12, padding: 10 }}>
@@ -3262,31 +3237,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setRoleCandidates(null) }}>收起</button>
                 </div>
                 {roleCandidates.length === 0 && <span className={css.meta}>未提炼到角色。</span>}
-                {roleCandidates.map((r, i) => {
-                  const label = { protagonist: '主角', female_lead: '女主', female_support: '女配', support: '配角', antagonist: '反派', extra: '路人' }[r.roleLabel]
-                  const color = r.roleLabel === 'protagonist' ? 'var(--nf-success)' : r.roleLabel === 'female_lead' ? 'var(--nf-accent)' : r.roleLabel === 'antagonist' ? 'var(--nf-error)' : 'var(--nf-text-3)'
-                  return (
-                    <div key={i} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <b>{r.name}</b>
-                          <span className={css.badge} style={{ borderColor: color, color }}>{label}</span>
-                          {r.identity !== '' && <span className={css.meta}>{r.identity}</span>}
-                        </span>
-                        <span style={{ display: 'flex', gap: 6 }}>
-                          <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleRoleAdopt(r) }}>
-                            ＋ 采纳
-                          </button>
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setRoleDraft(r) }} title="修改后再采纳（候选列表保留）">
-                            ✏️ 修改后采纳
-                          </button>
-                        </span>
-                      </div>
-                      {r.goals !== '' && <div className={css.meta}>目标：{r.goals}</div>}
-                      {r.relations.length > 0 && <div className={css.meta}>关系：{r.relations.join('、')}</div>}
-                    </div>
-                  )
-                })}
+                {roleCandidates.map((r, i) => (
+                  <RoleCandidateRow
+                    key={i}
+                    candidate={r}
+                    disabled={busy}
+                    onAdopt={() => { void handleRoleAdopt(r) }}
+                    onEdit={() => { setRoleDraft(r) }}
+                  />
+                ))}
               </div>
             )}
 
@@ -3342,77 +3301,18 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <span className={css.meta}>角色库为空——点「✨ 从全书提炼角色」自动建立，或手动新增。</span>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {(project?.roles ?? []).map(r => {
-                  const label = { protagonist: '主角', female_lead: '女主', female_support: '女配', support: '配角', antagonist: '反派', extra: '路人' }[r.roleLabel]
-                  const color = r.roleLabel === 'protagonist' ? 'var(--nf-success)' : r.roleLabel === 'female_lead' ? 'var(--nf-accent)' : r.roleLabel === 'antagonist' ? 'var(--nf-error)' : 'var(--nf-text-3)'
-                  return (
-                    <div key={r.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <b>{r.name}</b>
-                          <span className={css.badge} style={{ borderColor: color, color }}>{label}</span>
-                          {r.identity !== '' && <span className={css.meta}>{r.identity}</span>}
-                        </span>
-                        <span style={{ display: 'flex', gap: 6 }}>
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setRoleDraft(r) }}>编辑</button>
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleRoleRemove(r.name) }}>删除</button>
-                        </span>
-                      </div>
-                      {r.goals !== '' && <div className={css.meta}>目标：{r.goals}</div>}
-                      {r.relations.length > 0 && <div className={css.meta}>关系：{r.relations.join('、')}</div>}
-                      {r.arc.length > 0 && <div className={css.meta}>成长线：{r.arc.join(' → ')}</div>}
-                      {r.knowledge.length > 0 && <div className={css.meta}>知情度：{r.knowledge.join('；')}</div>}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'characters' && (
-          <div className={css.card}>
-            <div className={css.row} style={{ justifyContent: 'space-between' }}>
-              <span className={css.cardTitle}>人物志（当前状态）</span>
-              <div className={css.row}>
-                <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || doneCount === 0} onClick={() => { void handleFactsBackfill() }} title="历史章节（编年录功能上线前生成的）批量抽取事实">
-                  📥 回填编年录
-                </button>
-                <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || (project?.facts ?? []).length === 0} onClick={() => { void handleCharactersRefresh() }}>
-                  ↻ 从编年录刷新
-                </button>
-              </div>
-            </div>
-            {charCards === null ? (
-              <span className={css.meta}>
-                {(project?.facts ?? []).length === 0
-                  ? '暂无编年录（生成章节后自动积累人物状态/境界/资源/关系等事实），刷新按钮将在有事实后可用。'
-                  : '点击「从编年录刷新」聚合各人物当前状态（境界/资源/伤势/心境）。'}
-              </span>
-            ) : charCards.length === 0 ? (
-              <span className={css.meta}>未识别到人物信息。</span>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {charCards.map(card => (
-                  <div key={card.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                    <div className={css.row} style={{ justifyContent: 'space-between' }}>
-                      <b>{card.name}</b>
-                      <span className={css.meta}>
-                        {card.role === 'protagonist' ? '主角' : card.role === 'supporting' ? '配角' : card.role === 'antagonist' ? '反派' : '其他'}
-                        {' · 出场 '}{card.appearances} 次 · 最近 第 {card.lastChapter} 章
-                      </span>
-                    </div>
-                    {card.status !== '' && <div className={css.meta}>状态：{card.status}</div>}
-                    <div className={css.row} style={{ marginTop: 4 }}>
-                      <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setActiveTab('roles') }} title="在角色库中查看/编辑该角色档案">
-                        📖 查看档案
-                      </button>
-                    </div>
-                  </div>
+                {(project?.roles ?? []).map(r => (
+                  <RoleCard
+                    key={r.name}
+                    role={r}
+                    status={(project?.roleStatus ?? []).find(s => s.name === r.name)}
+                    disabled={busy}
+                    onEdit={() => { setRoleDraft(r) }}
+                    onRemove={() => { void handleRoleRemove(r.name) }}
+                  />
                 ))}
               </div>
             )}
-            <span className={css.meta}>人物志由「道藏」人物名单 + 「编年录」聚合而来，随章节生成自动保持最新。</span>
           </div>
         )}
 
@@ -3680,105 +3580,30 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             <span className={css.meta}>{tt('plotlines.hint')}</span>
 
             {plotlineHealth !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-info)', borderRadius: 12, padding: 10 }}>
-                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <b>🩺 剧情健康检查</b>
-                  <span style={{ display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      className={`${css.button} ${css.buttonSmall}`}
-                      disabled={busy}
-                      onClick={() => { void handlePlotlinePlan() }}
-                      title="基于本次诊断生成下一阶段剧情方案"
-                    >
-                      ✨ 基于此设计方案
-                    </button>
-                    <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setPlotlineHealth(null) }}>收起</button>
-                  </span>
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--nf-accent)' }}>判定：{plotlineHealth.verdict}</div>
-                {plotlineHealth.timing !== '' && <div className={css.meta}><b>建议时机：</b>{plotlineHealth.timing}</div>}
-                {plotlineHealth.reasons.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
-                    {plotlineHealth.reasons.map((r, i) => <div key={i} className={css.meta}>· {r}</div>)}
-                  </div>
-                )}
-                {plotlineHealth.lines.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-                    {plotlineHealth.lines.map((l, i) => {
-                      const color = l.health === 'ok' ? 'var(--nf-success)' : l.health === 'warning' ? 'var(--nf-warn)' : 'var(--nf-error)'
-                      const label = l.health === 'ok' ? '健康' : l.health === 'warning' ? '预警' : '搁置过久'
-                      return (
-                        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                          <span className={css.badge} style={{ borderColor: color, color, flex: 'none', marginTop: 1 }}>{label}</span>
-                          <span className={css.meta}><b>{l.name}</b>：{l.note}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+              <PlotlineHealthPanel
+                report={plotlineHealth}
+                disabled={busy}
+                onPlan={() => { void handlePlotlinePlan() }}
+                onClose={() => { setPlotlineHealth(null) }}
+              />
             )}
 
             {plotlinePlan !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-accent)', borderRadius: 12, padding: 10 }}>
-                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <b>✨ AI 剧情方案</b>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setPlotlinePlan(null) }}>收起</button>
-                </div>
-                {plotlinePlan.direction !== '' && (
-                  <div className={css.meta} style={{ fontSize: 12 }}><b>下一阶段方向：</b>{plotlinePlan.direction}</div>
-                )}
-                {plotlinePlan.suggestions.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-                    {plotlinePlan.suggestions.map((s, i) => {
-                      const kindLabel = { main: tt('plotlines.kindMain'), branch: tt('plotlines.kindBranch'), character: tt('plotlines.kindCharacter'), mystery: tt('plotlines.kindMystery') }[s.kind]
-                      return (
-                        <div key={i} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px' }}>
-                          <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <b>{s.name}</b>
-                              <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{kindLabel}</span>
-                            </span>
-                            <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handlePlanAdopt(s) }}>
-                              ＋ 采纳
-                            </button>
-                          </div>
-                          {s.goal !== '' && <div className={css.meta}>{s.goal}</div>}
-                          {s.progress !== '' && <div className={css.meta}>初始进度：{s.progress}</div>}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
+              <PlotlinePlanPanel
+                plan={plotlinePlan}
+                disabled={busy}
+                onAdopt={(s) => { void handlePlanAdopt(s) }}
+                onClose={() => { setPlotlinePlan(null) }}
+              />
             )}
 
             {plotlineSuggestions !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-info)', borderRadius: 12, padding: 10 }}>
-                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <b>✨ AI 建议（{plotlineSuggestions.length} 条）</b>
-                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setPlotlineSuggestions(null) }}>收起</button>
-                </div>
-                {plotlineSuggestions.length === 0 && <span className={css.meta}>没有候选线。</span>}
-                {plotlineSuggestions.map((s, i) => {
-                  const kindLabel = { main: tt('plotlines.kindMain'), branch: tt('plotlines.kindBranch'), character: tt('plotlines.kindCharacter'), mystery: tt('plotlines.kindMystery') }[s.kind]
-                  return (
-                    <div key={i} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <b>{s.name}</b>
-                          <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{kindLabel}</span>
-                        </span>
-                        <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handlePlotlineAdopt(s) }}>
-                          ＋ 采纳
-                        </button>
-                      </div>
-                      {s.goal !== '' && <div className={css.meta}>{s.goal}</div>}
-                    </div>
-                  )
-                })}
-              </div>
+              <PlotlineSuggestionPanel
+                suggestions={plotlineSuggestions}
+                disabled={busy}
+                onAdopt={(s) => { void handlePlotlineAdopt(s) }}
+                onClose={() => { setPlotlineSuggestions(null) }}
+              />
             )}
 
             {plotlineDraft !== null && (
@@ -3830,44 +3655,16 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <span className={css.meta}>{tt('plotlines.empty')}</span>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1, minHeight: 0 }}>
-                {(project?.plotlines ?? []).map(line => {
-                  const kindLabel = { main: tt('plotlines.kindMain'), branch: tt('plotlines.kindBranch'), character: tt('plotlines.kindCharacter'), mystery: tt('plotlines.kindMystery') }[line.kind]
-                  const statusLabel = { active: tt('plotlines.statusActive'), paused: tt('plotlines.statusPaused'), resolved: tt('plotlines.statusResolved'), abandoned: tt('plotlines.statusAbandoned') }[line.status]
-                  const statusColor = line.status === 'resolved' ? 'var(--nf-success)' : line.status === 'abandoned' ? 'var(--nf-text-3)' : line.status === 'paused' ? 'var(--nf-warn)' : 'var(--nf-accent)'
-                  return (
-                    <div key={line.id} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 12px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <b>{line.name}</b>
-                          <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{kindLabel}</span>
-                          <span className={css.badge} style={{ borderColor: statusColor, color: statusColor }}>{statusLabel}</span>
-                        </span>
-                        <span style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            type="button"
-                            className={`${css.button} ${css.buttonSmall}`}
-                            disabled={busy}
-                            onClick={() => { void handlePlotlineRefresh(line.id) }}
-                            title="AI 结合编年录与章节摘要，自动更新这条线的当前进度"
-                          >
-                            ↻ AI 刷新进度
-                          </button>
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setPlotlineDraft({ id: line.id, name: line.name, kind: line.kind, goal: line.goal, progress: line.progress, status: line.status }) }}>
-                            {tt('plotlines.edit')}
-                          </button>
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handlePlotlineRemove(line.id) }}>
-                            {tt('plotlines.remove')}
-                          </button>
-                        </span>
-                      </div>
-                      {line.goal !== '' && <div className={css.meta}><b>{tt('plotlines.goal')}：</b>{line.goal}</div>}
-                      {line.progress !== '' && <div className={css.meta}><b>{tt('plotlines.progress')}：</b>{line.progress}</div>}
-                      <div className={css.meta}>
-                        {tt('plotlines.chapters')}：{line.chapters.length > 0 ? line.chapters.map(n => `第${n}章`).join('、') : '—'}
-                      </div>
-                    </div>
-                  )
-                })}
+                {(project?.plotlines ?? []).map(line => (
+                  <PlotlineCard
+                    key={line.id}
+                    line={line}
+                    disabled={busy}
+                    onRefresh={() => { void handlePlotlineRefresh(line.id) }}
+                    onEdit={() => { setPlotlineDraft({ id: line.id, name: line.name, kind: line.kind, goal: line.goal, progress: line.progress, status: line.status }) }}
+                    onRemove={() => { void handlePlotlineRemove(line.id) }}
+                  />
+                ))}
               </div>
             )}
           </div>

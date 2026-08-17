@@ -6,7 +6,7 @@
  * web-server dependencies), so routes stay thin and logic is testable.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, ChapterPlan, Foreshadow, NovelConfig, ProjectState, ReviewReport, RoleStatusCard, StoryBible, Volume, WorldState } from './protocol.ts';
+import type { AuditIssue, AuthorReview, ChapterPlan, Foreshadow, NovelConfig, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, StoryBible, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -17,6 +17,19 @@ export declare function inferBookName(outline: string): string;
 export declare function loadProject(outputDir: string): ProjectState | undefined;
 /** Persist the project state next to the chapters. */
 export declare function saveProject(outputDir: string, project: ProjectState): void;
+/**
+ * 并发保护：长任务（章节计划生成/正文生成）在内存中持有旧快照，
+ * 期间其他请求可能修改了「易变字段」（道藏/角色库/剧情线/人物志存档/简介/封面）。
+ * 保存前用磁盘最新版本合并这些字段，避免旧快照覆盖新修改（曾导致角色卡丢失）。
+ * 注意：调用方若自己修改了这些字段，不要使用本函数。
+ */
+export declare function mergeVolatileFromDisk(outputDir: string, project: ProjectState): void;
+/** 对一段文本做违禁词硬匹配，返回命中（词/类别/次数）。 */
+export declare function checkSensitiveText(text: string): Array<{
+    word: string;
+    category: string;
+    count: number;
+}>;
 /** List generated chapter files in the output dir (sorted). */
 export declare function listChapterFiles(outputDir: string): string[];
 /** Re-sync chapter status against files on disk (a file may exist without state). */
@@ -32,7 +45,7 @@ export declare function planVolumes(ctx: Context, config: NovelConfig, outline: 
 /**
  * Plan chapters from an outline (optionally for one volume).
  */
-export declare function planChapters(ctx: Context, config: NovelConfig, project: ProjectState, chapterCount: number, volumeNo?: number): Promise<ChapterPlan[]>;
+export declare function planChapters(ctx: Context, config: NovelConfig, project: ProjectState, chapterCount: number, volumeNo?: number, outputDir?: string): Promise<ChapterPlan[]>;
 /** Run the AI review on one chapter. */
 export declare function reviewChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<ReviewReport>;
 /**
@@ -40,6 +53,20 @@ export declare function reviewChapter(ctx: Context, config: NovelConfig, project
  * 复用审稿提示词与红线/道藏/反AI规则；仅返回报告，不改文件不改状态。
  */
 export declare function reviewChapterText(ctx: Context, config: NovelConfig, project: ProjectState, text: string): Promise<ReviewReport>;
+/** 作者复盘：对一章做叙事结构复盘（钩子兑现/结尾钩子/推进/连续性/趋势）。 */
+export declare function authorReviewChapter(ctx: Context, config: NovelConfig, project: ProjectState, chapterNo: number, body: string, prevTail: string): Promise<AuthorReview>;
+/** 复盘后自动关联：把本章号写入复盘标记推进的剧情线（按名称匹配，去重）。 */
+export declare function autoLinkPlotlines(project: ProjectState, chapterNo: number, advancedLines: string[]): void;
+/** AI 建议剧情线：基于大纲/卷计划/已写章节/编年录，提炼候选线。 */
+export declare function suggestPlotlines(ctx: Context, config: NovelConfig, project: ProjectState): Promise<Plotline[]>;
+/** AI 刷新单条剧情线的进度：结合编年录与各章摘要分析该线推进到哪。 */
+export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfig, project: ProjectState, line: Plotline): Promise<string>;
+/** ✨ AI 从全书提炼角色库：大纲 + 道藏 + 编年录 + 章节摘要 → 结构化角色清单。 */
+export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
+/** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
+export declare function analyzePlotlineHealth(ctx: Context, config: NovelConfig, project: ProjectState): Promise<PlotlineHealthReport>;
+/** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */
+export declare function designPlotlinePlan(ctx: Context, config: NovelConfig, project: ProjectState, health?: PlotlineHealthReport): Promise<PlotlinePlan>;
 /**
  * Stream a chapter rewrite. With `target` (a passage of the body), only that
  * passage's paragraph is rewritten and spliced back — everything else stays

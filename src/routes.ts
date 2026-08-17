@@ -89,6 +89,7 @@ import {
   generateChapterStream,
   listChapterFiles,
   loadProject,
+  mergeVolatileFromDisk,
   planChapters,
   planVolumes,
   polishChapterStream,
@@ -394,6 +395,9 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       try {
         const next = project ?? createProject(outline)
         const chapters: ChapterPlan[] = await planChapters(ctx, config, next, count, body?.volume, config.outputDir)
+        // 并发保护：长 LLM 调用期间磁盘可能已被其他请求更新（角色库/剧情线等），
+        // 保存前合并磁盘最新易变字段，避免旧快照覆盖新修改。
+        mergeVolatileFromDisk(config.outputDir, next)
         next.chapters.push(...chapters)
         next.updatedAt = new Date().toISOString()
         saveProject(config.outputDir, next)
@@ -441,6 +445,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       chapter.status = 'generating'
       chapter.error = undefined
       chapter.generatingAt = new Date().toISOString()
+      // 并发保护：合并磁盘最新易变字段后保存，避免本请求覆盖并发修改（角色库/剧情线等）。
+      mergeVolatileFromDisk(config.outputDir, project)
       saveProject(config.outputDir, project)
 
       const send = (frame: JobFrame): void => {
@@ -467,6 +473,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           send({ type: 'review', no, report })
         } else {
           chapter.status = 'approved'
+          mergeVolatileFromDisk(config.outputDir, project)
           saveProject(config.outputDir, project)
         }
         // 作者复盘：叙事结构检查（钩子兑现/结尾钩子/推进/连续性/趋势；不改变章节状态）。
@@ -487,6 +494,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
               if (review.advancedLines !== undefined) {
                 autoLinkPlotlines(project, no, review.advancedLines)
               }
+              mergeVolatileFromDisk(config.outputDir, project)
               saveProject(config.outputDir, project)
               send({ type: 'author-review', no, review })
             }
@@ -498,6 +506,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       } catch (error) {
         chapter.status = 'error'
         chapter.error = (error as Error).message
+        mergeVolatileFromDisk(config.outputDir, project)
         saveProject(config.outputDir, project)
         if (!res.writableEnded) {
           send({ type: 'error', no, message: (error as Error).message })
@@ -1650,6 +1659,34 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------------ chapter approve
+  /** 章节直接通过：作者行使最终决定权（不重审，保留审稿记录）。 */
+  const chapterApproveRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.chapterApprove,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<{ chapterNo?: number }>(req)
+      const no = body?.chapterNo
+      if (!Number.isInteger(no) || no === undefined || no < 1) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      const chapter = project.chapters.find(c => c.no === no)
+      if (chapter === undefined) {
+        writeJson(res, 404, { error: `章节 ${no} 不在计划中` })
+        return
+      }
+      chapter.status = 'approved'
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { ok: true, no })
+    },
+  }
+
   // ------------------------------------------------------ author review backfill
   /** 作者复盘补跑：对已写章节补齐 authorReview（body.chapterNo=单章 JSON，缺省=全书 NDJSON 流）。 */
   const reviewBackfillRoute: WebRoute = {
@@ -1818,6 +1855,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     sensitiveRoute,
     reviewBackfillRoute,
     chapterResetRoute,
+    chapterApproveRoute,
     configRoute,
     openFolderRoute,
   ]

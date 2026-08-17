@@ -87,6 +87,29 @@ export function saveProject(outputDir: string, project: ProjectState): void {
   writeFileSync(join(outputDir, PROJECT_FILE), JSON.stringify(project, null, 2), 'utf8')
 }
 
+/**
+ * 并发保护：长任务（章节计划生成/正文生成）在内存中持有旧快照，
+ * 期间其他请求可能修改了「易变字段」（道藏/角色库/剧情线/人物志存档/简介/封面）。
+ * 保存前用磁盘最新版本合并这些字段，避免旧快照覆盖新修改（曾导致角色卡丢失）。
+ * 注意：调用方若自己修改了这些字段，不要使用本函数。
+ */
+export function mergeVolatileFromDisk(outputDir: string, project: ProjectState): void {
+  try {
+    const disk = loadProject(outputDir)
+    if (disk === undefined) return
+    project.bible = disk.bible
+    project.roles = disk.roles
+    project.plotlines = disk.plotlines
+    project.roleStatus = disk.roleStatus
+    project.blurb = disk.blurb
+    project.coverPath = disk.coverPath
+    project.facts = disk.facts
+    project.assets = disk.assets
+    project.world = disk.world
+    project.volumes = disk.volumes
+  } catch { /* 磁盘读取失败时保持原状 */ }
+}
+
 // ------------------------------------------------------------ sensitive words
 
 /**
@@ -1385,23 +1408,43 @@ export async function* generateChapterStream(
     }
   }
   const prevSummary = prev?.summary
-  // 事实注入：最近 20 条 + 按本章剧情要点低成本检索的「相关旧事实」。
-  // 长篇后旧设定可能被挤出最近 20 条，相关检索保证关键状态不写飞。
+  // 事实注入：最近 20 条（近因记忆）+ 按本章剧情要点检索的「相关旧事实」。
+  // 长篇后旧设定可能被挤出近期窗口，故检索覆盖全部事实库：trigram 重合度 +
+  // 角色名命中加权 + 近因加权，取 top 15，与近期事实去重，保证关键状态不写飞。
   const allFacts = project.facts ?? []
   const recentFacts = allFacts.slice(-20).map(f => f.text)
+  const recentSet = new Set(recentFacts)
   const beatsText = chapter.beats
+  const roleNames = (project.roles ?? [])
+    .map(r => r.name)
+    .filter((n): n is string => typeof n === 'string' && n !== '')
+  const trigrams = (s: string): Set<string> => {
+    const out = new Set<string>()
+    for (let i = 0; i + 3 <= s.length; i++) {
+      const tri = s.slice(i, i + 3)
+      if (tri.trim() !== '') out.add(tri)
+    }
+    return out
+  }
+  const beatsTri = trigrams(beatsText)
+  const beatRoles = roleNames.filter(n => beatsText.includes(n))
   const relatedFacts = allFacts
-    .slice(-120)
-    .filter(f => {
-      const head = f.text.slice(0, 24)
-      for (let i = 0; i + 3 <= head.length; i++) {
-        const tri = head.slice(i, i + 3)
-        if (tri.trim() !== '' && beatsText.includes(tri)) return true
+    .map((f, idx) => {
+      const head = f.text.slice(0, 80)
+      let score = 0
+      for (const tri of trigrams(head)) if (beatsTri.has(tri)) score += 1
+      if (beatRoles.length > 0) {
+        for (const n of beatRoles) if (head.includes(n)) score += 8
       }
-      return false
+      // 近因加权：越新越优先（封顶 40 章）
+      score += Math.min(idx, 40) / 10
+      return { f, score }
     })
-    .slice(-15)
-    .map(f => `[第${f.chapterNo}章] ${f.text}`)
+    .filter(x => x.score >= 3)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 15)
+    .map(x => `[第${x.f.chapterNo}章] ${x.f.text}`)
+    .filter(t => !recentSet.has(t.slice(t.indexOf(']') + 2)))
 
   const user = [
     `现在写第 ${chapter.no} 章，标题《${chapter.title}》。`,
@@ -1948,7 +1991,13 @@ export async function refreshCharacters(
   project: ProjectState,
   outputDir: string,
 ): Promise<RoleStatusCard[]> {
-  const roster = project.bible?.characters ?? []
+  // 名单优先用角色库（主表）；无角色库时退回道藏角色卡。
+  const rawRoster = (((project.roles ?? []).length > 0 ? project.roles : project.bible?.characters) ?? []) as Array<{ name: string; traits?: string[]; role?: string; roleLabel?: string }>
+  const roster = rawRoster.map(r => ({
+    name: r.name,
+    traits: r.traits ?? [],
+    role: r.roleLabel !== undefined ? r.roleLabel : (r.role ?? 'other'),
+  }))
   const facts = project.facts ?? []
   if (roster.length === 0 && facts.length === 0) return []
 

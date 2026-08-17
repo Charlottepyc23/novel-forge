@@ -62,6 +62,8 @@ export const NOVEL_API = {
   reviewBackfill: '/api/dsh-novel-forge/review/backfill',
   /** 章节复位：generating 卡死 → pending（可重新生成）。 */
   chapterReset: '/api/dsh-novel-forge/chapter/reset',
+  /** 章节直接通过：作者对 rejected/written 章节行使最终决定权。 */
+  chapterApprove: '/api/dsh-novel-forge/chapter/approve',
   /** 敏感词检查：全书已写章节或指定文本。 */
   sensitiveCheck: '/api/dsh-novel-forge/sensitive-check',
   config: '/api/dsh-novel-forge/config',

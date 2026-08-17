@@ -208,6 +208,7 @@ function assistantSystemPrompt(project: ProjectState): string {
     '- 中文回复；文字量适中，别啰嗦。',
     '',
     '使用规则（非常重要）：',
+    '- 写操作（chapter_generate / chapter_rewrite / chapter_review / outline_replace / bible_set_* / foreshadow_* / assets_set_* / export_txt）只有在作者明确要求时才能调用——例如作者说"生成第 120 章""把第 105 章结尾改一下""帮我审一下第 88 章"。作者只是提问、闲聊、查信息时，一律用文字回答，禁止调用任何写操作，也不要先斩后奏（如"为了回答你，我先把第 X 章生成了"）。',
     '- 当你想执行任何工具时，你的【整个回复】必须只包含动作指令标签，格式如下（不要有任何解释文字、不要用自然语言说"我要去改"，直接输出标签）：',
     '  正确示例：<dsh-action name="outline_replace">{"old":"要替换的原文","new":"新文本"}</dsh-action>',
     '  正确示例：<dsh-action name="chapter_text">{"no":1}</dsh-action>',
@@ -616,6 +617,43 @@ export async function* runAssistantTurn(
   const MAX_NUDGES = 6
   /** 连续收到 hex 乱码回复的次数（≥2 次判定 LLM 侧异常，放弃本轮避免死循环）。 */
   let garbleCount = 0
+
+  // ---- 写操作意图守卫 ------------------------------------------------
+  // 写类工具会改动项目数据/正文文件：仅当用户消息（含最近一轮上下文）里
+  // 出现与该工具对应的明确修改动词时才放行；否则拒绝执行，防止"随口一问"
+  // 被模型误判成创作指令（如问角色是否登场 → 自主生成整章）。
+  const WRITE_TOOL_KEYS: Record<string, RegExp> = {
+    chapter_generate: /(生成|写第\s*\d+\s*章|写一[章篇]|新写|续写|接着写|继续写|开始写|写正文|写书|创作)/,
+    chapter_rewrite: /(重写|改写|修订|修改|改一下|调整|替换|润色|优化|修正|完善|回炉|换一种|从头)/,
+    chapter_review: /(审|检查|校验|点评|评估|把关|质量|怎么样|如何)/,
+    outline_replace: /(大纲|总纲|简介)/,
+    bible_set_rule: /(道藏|设定|规则|红线|世界|金手指)/,
+    bible_set_redline: /(道藏|设定|红线)/,
+    foreshadow_add: /(暗线|伏笔|埋)/,
+    foreshadow_update: /(暗线|伏笔)/,
+    export_txt: /(导出|打包|下载|txt)/,
+    assets_set_genre: /(题材)/,
+    assets_set_progression: /(推进)/,
+    assets_add_rule: /(规则|文戒|反AI)/,
+  }
+  /** 本轮已放行过写操作：后续写操作（生成→审稿→修订闭环）不再逐个拦截。 */
+  let writeUnlocked = false
+  const guardWrite = (name: string, userMessage: string): boolean => {
+    if (writeUnlocked) return true
+    const key = WRITE_TOOL_KEYS[name]
+    if (key === undefined) return true // 只读工具 / 未登记工具一律放行
+    // 近两轮用户消息合并判断（支持"继续"类延续指令）。
+    const recentUsers = history
+      .filter(m => m.role === 'user')
+      .slice(-2)
+      .map(m => m.content)
+      .join('\n')
+    if (key.test(recentUsers)) {
+      writeUnlocked = true
+      return true
+    }
+    return false
+  }
   for (;;) {
     if (round++ > 20) break
     const reply = await chatOnce(ctx, config, system, history)
@@ -646,9 +684,15 @@ export async function* runAssistantTurn(
       const mentionsTarget = /(编年录|道藏|暗线|总纲|卷首语|章节|正文|规则|红线|伏笔|简介|大纲|事实|设定|世界|角色|人物|第\s*\d+\s*章)/.test(reply)
       const strayTag = /<[a-z_-]*action[^>]*>/.test(reply)
       if ((intendsAction || mentionsTarget || strayTag) && nudged < MAX_NUDGES) {
+        // 用户消息本身没有写意图时，引导模型直接文字回答（不要被逼出写操作标签）。
+        const userWriteIntent = Object.values(WRITE_TOOL_KEYS).some(re => re.test(userMessage))
         const nudge = nudged === 0
-          ? '你的上一条回复表达了想操作项目的意图（或动作标签格式有误），因此没有执行任何操作。请直接输出动作标签来执行，格式必须为 <dsh-action name="工具名">{"参数":值}</dsh-action>（注意拼写是 dsh-action，不是 dash-action；标签成对出现，参数为合法 JSON）。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
-          : `你第 ${nudged + 1} 次表达了操作意图但没有输出动作标签，因此仍未执行任何操作。铁律：你的【整个回复】现在必须只包含一个 <dsh-action> 标签（例如 <dsh-action name="chapter_text">{"no":1}</dsh-action>），禁止任何解释、铺垫或"我这就去"之类的文字。若你其实不打算执行任何操作，请明确回复「不执行」。`
+          ? (userWriteIntent
+              ? '你的上一条回复表达了想操作项目的意图（或动作标签格式有误），因此没有执行任何操作。请直接输出动作标签来执行，格式必须为 <dsh-action name="工具名">{"参数":值}</dsh-action>（注意拼写是 dsh-action，不是 dash-action；标签成对出现，参数为合法 JSON）。如果需要先看内容，先输出 outline_text 或 chapter_text 标签。'
+              : '你刚才的回复看起来在讨论项目内容，但没有必要执行任何操作。如果用户只是在提问或闲聊，请直接以文字回答即可，不要输出动作标签，也不要自行调用任何写操作（生成/修订/删除等只有用户明确要求时才允许）。若确实需要先查看数据，最多使用只读工具（outline_text / chapter_text / book_overview / facts_query）。')
+          : (userWriteIntent
+              ? `你第 ${nudged + 1} 次表达了操作意图但没有输出动作标签，因此仍未执行任何操作。铁律：你的【整个回复】现在必须只包含一个 <dsh-action> 标签（例如 <dsh-action name="chapter_text">{"no":1}</dsh-action>），禁止任何解释、铺垫或"我这就去"之类的文字。若你其实不打算执行任何操作，请明确回复「不执行」。`
+              : `你第 ${nudged + 1} 次回复仍不需要执行操作。再次强调：用户没有要求修改，请直接给出文字回答（可以简短引用项目数据），不要输出动作标签。写操作只会在用户明确要求时被允许。`)
         nudged++
         history.push({ role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
         appendHistory(outputDir, { role: 'tool', content: nudge, tool: 'format-hint', ts: new Date().toISOString() })
@@ -666,6 +710,19 @@ export async function* runAssistantTurn(
     // Execute the action, then feed the result back and continue.
     const { name, args, index } = action
     const prose = reply.slice(0, index).trim()
+    // 写操作意图守卫：用户没明确要求修改时，拒绝执行并提示（不写盘、不消耗生成额度）。
+    if (!guardWrite(name, userMessage)) {
+      const denied = `【操作被拒绝】${name} 是写操作（会修改正文/项目数据），但你当前的消息里没有明确要求执行该修改。如果需要，请明确说明（如「生成第 120 章」「把第 105 章结尾改一下」）。我不会擅自修改你的作品。`
+      history.push({ role: 'tool', content: denied, tool: name, ts: new Date().toISOString() })
+      appendHistory(outputDir, { role: 'tool', content: denied, tool: name, ts: new Date().toISOString() })
+      yield { frame: 'tool', name, status: 'error', detail: denied }
+      // 拒绝后结束本轮：等作者重新明确指令。
+      const assistantEntry: AssistantMessage = { role: 'assistant', content: denied, ts: new Date().toISOString() }
+      history.push(assistantEntry)
+      appendHistory(outputDir, assistantEntry)
+      yield { frame: 'delta', text: denied }
+      return
+    }
     yield { frame: 'tool', name, status: 'start' }
     let result: string
     try {

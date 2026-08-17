@@ -52,6 +52,8 @@ export interface Config {
   reviewPassScore?: number
   /** Whether generation auto-runs review after writing. */
   autoReview?: boolean
+  /** Whether generation auto-runs the author review (hook/continuity/trend). */
+  autoAuthorReview?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -65,6 +67,7 @@ export const Config: z<Config> = z.object({
   maxTokens: z.number().default(12000),
   reviewPassScore: z.number().default(70),
   autoReview: z.boolean().default(true),
+  autoAuthorReview: z.boolean().default(true),
 })
 
 /** Schema defaults, re-read for hand-built test contexts. */
@@ -77,6 +80,7 @@ const DEFAULT_CHAPTER_CHARS = 3500
 const DEFAULT_MAX_TOKENS = 12000
 const DEFAULT_REVIEW_PASS_SCORE = 70
 const DEFAULT_AUTO_REVIEW = true
+const DEFAULT_AUTO_AUTHOR_REVIEW = true
 
 /** Order of the announcement section within the tool-guidance band. */
 const SECTION_ORDER = 160
@@ -95,6 +99,7 @@ export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
     maxTokens: value?.maxTokens ?? DEFAULT_MAX_TOKENS,
     reviewPassScore: value?.reviewPassScore ?? DEFAULT_REVIEW_PASS_SCORE,
     autoReview: value?.autoReview ?? DEFAULT_AUTO_REVIEW,
+    autoAuthorReview: value?.autoAuthorReview ?? DEFAULT_AUTO_AUTHOR_REVIEW,
   }
 }
 
@@ -127,6 +132,7 @@ export function apply(ctx: Context, config?: Config): void {
     if (patch.maxTokens !== undefined) next.maxTokens = patch.maxTokens
     if (patch.reviewPassScore !== undefined) next.reviewPassScore = patch.reviewPassScore
     if (patch.autoReview !== undefined) next.autoReview = patch.autoReview
+    if (patch.autoAuthorReview !== undefined) next.autoAuthorReview = patch.autoAuthorReview
     // Persist through the settings seam when available; otherwise keep in memory.
     // (ctx.get is the non-strict service access — no inject requirement, same
     // pattern installSettingsSection itself uses.)
