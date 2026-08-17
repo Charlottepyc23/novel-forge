@@ -107,14 +107,31 @@ pnpm install && pnpm build
 dsh plugin --profile web add link:"<本目录绝对路径>"
 ```
 
-## 写作流程 / Writing Pipeline
+## 工作流程 / Workflow
+
+一条主线：**开书 → 立设定 → 排章节 → 逐章编译 → 质检定稿 → 导出**。所有步骤都在侧边栏「小说工坊」面板内完成。
 
 ```
-开书（导入大纲） → 设定圣经 → 卷计划 → 章节计划（结构化 beats）
-→ 逐章生成（自动摘要 + 事实抽取 + AI 审稿）
-→ 修订/润色（工作区对比 → 应用草稿）→ 全书质检 → 角色卡 → 导出
-（旁路：伏笔管理 / 写作资产 / AI 助手悬浮窗 / 书架多书）
+① 开书（书架 → 开书向导：粘贴大纲文本 / 导入 docx，书名自动识别）
+   ↓
+② 立设定（总纲只读 → ✨ 提炼道藏【人设/世界观/金手指规则/写作红线】→ 大世界【境界/区域/势力】→ 写作资产【题材/推进/笔法帖/文戒/心法】）
+   ↓
+③ 排章节（卷计划 → 章节计划：AI 按大纲生成每章 目标/剧情要点/爽点钩子/结尾钩子；
+            已有章节时自动进入「续写模式」——读取上一章结尾原文 + 编年录锚点，不会重头生成）
+   ↓
+④ 逐章编译（生成正文 3000-4000 字 → 自动抽取摘要 + 编年录事实 → 自动 AI 审稿打分）
+   ↓
+⑤ 修订循环（审稿未过 → 按意见一键修订 / 工作区选中局部修改 / 润色去 AI 味 → 重审；
+            不满意可「✔ 直接通过」行使作者终审权）
+   ↓
+⑥ 全书定稿（全书质检【矛盾清单】→ 敏感词扫描 → 编年录/剧情线/角色库/复盘定期维护）
+   ↓
+⑦ 导出（全本 TXT / MD，含卷首语与封面）
 ```
+
+**辅助旁路（任意阶段可用）**：💬 AI 助手悬浮窗（问设定/改文/影响分析）、🧵 剧情线管理（健康检查/设计剧情方案）、👥 角色库（AI 提炼/知情度维护）、📊 工作进度悬浮窗（任务实时进度与活动记录）、书架多书切换。
+
+**推荐节奏**：先让 ②③ 完整落地（设定越全，章节质量越高）；④ 建议逐章或小批生成，便于在 ⑤ 及时修正；长篇小说每写 20-30 章跑一次 ⑥ 全书质检，防止设定漂移。
 
 ## 目录结构 / Directory Layout
 
@@ -132,6 +149,17 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 - 书架 / Bookshelf：`~/.dsh/dsh-novel-forge-bookshelf.json`
 - 每本书一个输出目录（含 `novel-project.json` + 各章 Markdown + 润色备份 `.bak.md`）/ each book owns an output directory
 - AI 助手对话记录 / assistant log：`<输出目录>/novel-assistant.jsonl`
+
+## 相关影响 / Impact & Notes
+
+使用本插件会对你的账号、磁盘与 LLM 额度产生以下影响，请知悉：
+
+- **LLM 额度消耗**：生成/审稿/润色/质检/提炼/复盘等所有 AI 操作都调用 LLM（默认 `deepseek-official / deepseek-v4-flash`）。量级参考：一章 3000-4000 字正文 ≈ 1-2 万 token（含推理）；审稿约 2000-3000 token；全书质检与角色提炼更贵（数万 token）。批量操作（如一次生成多章、全书质检、复盘补齐）会连续消耗额度，建议分小批执行。
+- **写操作守卫**：AI 助手只在作者**明确要求**时执行写操作（生成/修订/删除章节、改设定等）。你只是提问、查信息时，助手只会回答、不会擅自改文——防止"随口一问"误触发生成。
+- **并发安全**：计划/生成/审稿落盘前会自动合并磁盘上的最新设定（道藏/角色库/剧情线/知情度），多窗口同时操作不会互相覆盖。
+- **数据落盘**：每本书一个输出目录（默认 `~/Desktop/<书名>`），正文为 Markdown 文件、项目状态为 `novel-project.json`、助手对话为 `novel-assistant.jsonl`；润色/重写应用草稿前自动生成 `.bak.md` 备份原稿。
+- **设置持久化**：面板「设置」页的修改（输出目录/模型/审稿阈值等）写入 `~/.dsh/settings.yaml` 的 `dsh-novel-forge` 段；界面偏好（主题/字号/面板宽度）存在浏览器 localStorage。
+- **token 优化**：生成与审稿已做上下文分片、相关事实注入与摘要合并，长篇连载下批量成本约省 25%，但单章仍受模型上下文窗口限制（超长设定会按需检索注入，而非全量塞入）。
 
 ## 限制 / Limitations
 
@@ -224,6 +252,74 @@ Or insert into `~/.dsh/profiles/web/cordis.patch.yml`:
 ```
 
 Restart dsh web, and the "Novel Forge" entry appears in the sidebar.
+
+## Workflow
+
+One main pipeline — **open a book → build the setting → plan chapters →
+compile chapter by chapter → audit & finalize → export**. Everything happens
+inside the "Novel Forge" panel in the sidebar.
+
+```
+① Open a book (bookshelf → book wizard: paste outline text / import docx; book name auto-detected)
+   ↓
+② Build the setting (read-only outline → ✨ extract story bible [characters/world/golden-finger rules/
+   red lines] → world [realms/regions/factions] → writing assets [genre/progression/templates/rules/style])
+   ↓
+③ Plan chapters (volume plan → chapter plan: AI generates goal / plot points / payoff hook / ending
+   hook per chapter; with existing chapters it auto-enters "continuation mode" — reads the previous
+   chapter's ending + fact anchors, never restarts from scratch)
+   ↓
+④ Compile chapter by chapter (generate 3000-4000 chars → auto extract summary + fact ledger → auto AI review)
+   ↓
+⑤ Revision loop (review failed → one-click revise per feedback / select-targeted local edits / polish
+   to remove AI flavor → re-review; or use "✔ approve directly" as the author's final say)
+   ↓
+⑥ Book-wide finalization (book audit [contradiction list] → sensitive-word scan → periodic maintenance
+   of chronicle/plotlines/role library/reviews)
+   ↓
+⑦ Export (full book as TXT / MD, with blurb & cover)
+```
+
+**Side paths (usable at any stage)**: 💬 floating AI assistant (ask about the
+setting / revise text / impact analysis), 🧵 plotline management (health check /
+design plans), 👥 role library (AI extraction / knowledge tracking), 📊 floating
+progress console (live task progress & activity log), multi-book bookshelf.
+
+**Suggested cadence**: fully land steps ②③ first (the richer the setting, the
+better the chapters); generate step ④ one chapter or small batches at a time so
+step ⑤ can correct early; run the step ⑥ book audit every 20-30 chapters on long
+serials to prevent setting drift.
+
+## Impact & Notes
+
+Using this plugin has the following effects on your account, disk and LLM quota:
+
+- **LLM quota consumption**: all AI operations (generate/review/polish/audit/
+  extract/review-backfill) call the LLM (default `deepseek-official` /
+  `deepseek-v4-flash`). Rough scale: one 3000-4000 char chapter ≈ 10-20k tokens
+  including reasoning; a review ≈ 2-3k tokens; book-wide audit and role
+  extraction are more expensive (tens of thousands of tokens). Batch operations
+  (multi-chapter generation, book audit, review backfill) consume quota
+  continuously — prefer small batches.
+- **Write guard**: the AI assistant only performs write actions (generate/revise/
+  delete chapters, change settings) when the author explicitly asks. If you are
+  just asking questions, it answers in prose and never modifies anything — casual
+  questions can never trigger chapter generation.
+- **Concurrency safety**: plan/generate/review merge the latest on-disk settings
+  (bible/roles/plotlines/knowledge) before saving, so parallel windows never
+  clobber each other.
+- **Data on disk**: each book owns an output directory (default `~/Desktop/<book name>`)
+  with per-chapter Markdown, `novel-project.json` project state, and
+  `novel-assistant.jsonl` assistant log; applying polish/rewrite drafts auto-backs-up
+  the original as `.bak.md`.
+- **Settings persistence**: panel "Settings" changes (output dir/model/review
+  threshold etc.) are written to the `dsh-novel-forge` section of
+  `~/.dsh/settings.yaml`; UI preferences (theme/font size/panel width) live in
+  browser localStorage.
+- **Token optimization**: generation and review use sharded contexts, related-fact
+  injection and merged summaries (~25% cheaper batches on long serials), but each
+  chapter is still bounded by the model context window — long settings are
+  retrieved on demand rather than injected in full.
 
 ## Directory Layout
 
