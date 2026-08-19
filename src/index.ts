@@ -44,6 +44,8 @@ export interface Config {
   provider?: string
   /** LLM model id. */
   model?: string
+  /** LLM reasoning effort (off/low/high/max). */
+  reasoningEffort?: 'off' | 'low' | 'high' | 'max'
   /** Target characters per chapter. */
   chapterChars?: number
   /** Max output tokens per chapter call. */
@@ -65,6 +67,7 @@ export const Config: z<Config> = z.object({
   outputDir: z.string().default('D:\\用户目录\\harness\\novels\\示例书'),
   provider: z.string().default('deepseek-official'),
   model: z.string().default('deepseek-v4-flash'),
+  reasoningEffort: z.union(['off', 'low', 'high', 'max']).default('off'),
   chapterChars: z.number().default(3500),
   maxTokens: z.number().default(12000),
   reviewPassScore: z.number().default(70),
@@ -79,6 +82,7 @@ const DEFAULT_OUTLINE_PATH = 'D:\\用户目录\\harness\\novels\\示例书\\《�
 const DEFAULT_OUTPUT_DIR = 'D:\\用户目录\\harness\\novels\\示例书'
 const DEFAULT_PROVIDER = 'deepseek-official'
 const DEFAULT_MODEL = 'deepseek-v4-flash'
+const DEFAULT_REASONING_EFFORT = 'off' as const
 const DEFAULT_CHAPTER_CHARS = 3500
 const DEFAULT_MAX_TOKENS = 12000
 const DEFAULT_REVIEW_PASS_SCORE = 70
@@ -99,6 +103,7 @@ export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
     outputDir: value?.outputDir ?? DEFAULT_OUTPUT_DIR,
     provider: value?.provider ?? DEFAULT_PROVIDER,
     model: value?.model ?? DEFAULT_MODEL,
+    reasoningEffort: value?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
     chapterChars: value?.chapterChars ?? DEFAULT_CHAPTER_CHARS,
     maxTokens: value?.maxTokens ?? DEFAULT_MAX_TOKENS,
     reviewPassScore: value?.reviewPassScore ?? DEFAULT_REVIEW_PASS_SCORE,
@@ -133,6 +138,7 @@ export function apply(ctx: Context, config?: Config): void {
     if (patch.outputDir !== undefined) next.outputDir = patch.outputDir
     if (patch.provider !== undefined) next.provider = patch.provider
     if (patch.model !== undefined) next.model = patch.model
+    if (patch.reasoningEffort !== undefined) next.reasoningEffort = patch.reasoningEffort
     if (patch.chapterChars !== undefined) next.chapterChars = patch.chapterChars
     if (patch.maxTokens !== undefined) next.maxTokens = patch.maxTokens
     if (patch.reviewPassScore !== undefined) next.reviewPassScore = patch.reviewPassScore

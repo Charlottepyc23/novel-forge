@@ -96,8 +96,8 @@ body[data-ds-dark-theme] .entry {
   --nf-glass-sheen: rgba(255, 255, 255, 0.55);
   --nf-glass-border: rgba(255, 255, 255, 0.65);
   --nf-glass-inset: rgba(255, 255, 255, 0.55);
-  --nf-glass-orb-a: rgba(0, 184, 92, 0.14);
-  --nf-glass-orb-b: rgba(120, 160, 255, 0.10);
+  --nf-glass-orb-a: rgba(0, 184, 92, 0.18);
+  --nf-glass-orb-b: rgba(120, 160, 255, 0.13);
   --nf-glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
   background: var(--nf-bg);
   /* Frosted glass: blur whatever is behind the panel (the chat dialog),
@@ -138,8 +138,8 @@ body[data-ds-dark-theme] .view {
   --nf-glass-sheen: rgba(255, 255, 255, 0.26);
   --nf-glass-border: rgba(255, 255, 255, 0.14);
   --nf-glass-inset: rgba(255, 255, 255, 0.07);
-  --nf-glass-orb-a: rgba(0, 202, 82, 0.20);
-  --nf-glass-orb-b: rgba(190, 200, 215, 0.07);
+  --nf-glass-orb-a: rgba(0, 202, 82, 0.28);
+  --nf-glass-orb-b: rgba(190, 200, 215, 0.10);
   --nf-glass-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -334,23 +334,6 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
     radial-gradient(120% 95% at 50% 42%, transparent 55%, rgba(2, 2, 3, 0.10) 100%);
 }
 
-.panelHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 10px 12px 0;
-  padding: 10px 16px;
-  border: 1px solid var(--nf-glass-border);
-  border-radius: 18px;
-  flex-shrink: 0;
-  background: var(--nf-glass-face);
-  box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
-  -webkit-backdrop-filter: blur(28px) saturate(175%);
-  backdrop-filter: blur(28px) saturate(175%);
-  /* 固定在面板顶部（panel 为 flex 列布局，header 正常占位），
-     下方内容在 panelBody 内独立滚动，header 永不遮挡内容。 */
-}
-
 .panelTitle {
   margin: 0;
   font-size: 16px;
@@ -456,15 +439,15 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 
 .panelNav {
   flex: none;
-  align-self: flex-start;
-  width: 142px;
+  align-self: stretch;
+  width: 200px;
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin: 10px 0 10px 12px;
-  padding: 10px 8px;
+  padding: 14px 10px 12px;
   border: 1px solid var(--nf-glass-border);
-  border-radius: 16px;
+  border-radius: 18px;
   background: var(--nf-glass-face);
   box-shadow: var(--nf-shadow), inset 0 1px 0 var(--nf-glass-sheen);
   -webkit-backdrop-filter: blur(28px) saturate(175%);
@@ -490,7 +473,7 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   letter-spacing: 0.6px;
   text-transform: uppercase;
   color: var(--nf-text-3);
-  padding: 8px 10px 3px;
+  padding: 10px 10px 4px;
   user-select: none;
 }
 
@@ -622,15 +605,15 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   align-items: center;
   gap: 8px;
   width: 100%;
-  border: none;
+  border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
-  border-radius: 12px;
-  padding: 8px 10px;
+  border-radius: 10px;
+  padding: 9px 10px;
   font-size: 13px;
   color: var(--nf-text-2-alpha, var(--nf-text-2));
   font-weight: 500;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
   position: relative;
   text-align: left;
   white-space: nowrap;
@@ -649,27 +632,20 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .navTab[data-active] {
   color: var(--nf-accent);
   font-weight: 600;
-  background: var(--nf-accent-soft);
+  background: color-mix(in srgb, var(--nf-text) 8%, transparent);
+  border-color: color-mix(in srgb, var(--nf-text) 16%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--nf-text) 6%, transparent);
 }
 
-.navTab[data-active]::before {
-  content: '';
-  position: absolute;
-  left: -8px;
-  top: 20%;
-  bottom: 20%;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--nf-accent);
-}
-
-.panelNavCollapsed .navTab[data-active]::before {
-  left: -6px;
+.navTab[data-active] .navTabIcon {
+  color: var(--nf-accent);
 }
 
 .navTabIcon {
   flex: none;
-  font-size: 15px;
+  width: 20px;
+  text-align: center;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -678,42 +654,182 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   text-overflow: ellipsis;
 }
 
-/* 顶栏副标题行：书名 + 进度摘要（iOS 大标题下方副标题） */
-.panelSubtitle {
+/* demo 风格：侧栏标题区（Logo + 小说工坊 + 当前书名） */
+.navTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 6px 12px;
+  border-bottom: 1px solid var(--nf-border);
+  margin-bottom: 6px;
+  flex: none;
+  min-width: 0;
+}
+
+.navTitleLogo {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(145deg, var(--nf-accent), var(--nf-accent-hover));
+  color: var(--nf-accent-fg);
+  font-weight: 800;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  box-shadow: 0 6px 16px var(--nf-accent-soft);
+}
+
+.navTitleName {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navTitleBook {
+  font-size: 11px;
+  color: var(--nf-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panelNavCollapsed .navTitle {
+  justify-content: center;
+  padding: 2px 0 10px;
+}
+
+.panelNavCollapsed .navTitleLogo {
+  width: 32px;
+  height: 32px;
+}
+
+/* 操作行：收起导航 / 关闭面板 */
+.navActions {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--nf-border);
+}
+
+.navActionBtn {
+  flex: 1;
+  border: 1px solid var(--nf-border);
+  background: rgba(0, 0, 0, 0);
+  color: var(--nf-text-2);
+  cursor: pointer;
+  border-radius: 10px;
+  height: 32px;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.navActionBtn:hover {
+  background: var(--nf-hover);
+  color: var(--nf-text);
+  border-color: var(--nf-border-strong);
+}
+
+.panelNavCollapsed .navActions {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* demo 风格：底部当前书切换卡（封面首字 + 书名/进度 + 箭头） */
+.bookSwitch {
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
-  color: var(--nf-text-2);
-  padding: 0 4px 2px;
+  margin-top: 4px;
+  padding: 9px;
+  border-radius: 12px;
+  background: var(--nf-bg-inset);
+  border: 1px solid var(--nf-border);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--nf-text);
   min-width: 0;
-  flex-wrap: wrap;
-  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.headerProgress {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--nf-text-2);
-  display: inline-flex;
+.bookSwitch:hover {
+  background: var(--nf-hover);
+  border-color: var(--nf-border-strong);
+}
+
+.bookSwitchCover {
+  width: 26px;
+  height: 34px;
+  border-radius: 5px;
+  background: linear-gradient(160deg, var(--nf-accent), color-mix(in srgb, var(--nf-accent) 45%, #000));
+  color: var(--nf-accent-fg);
+  display: flex;
   align-items: center;
-  gap: 6px;
-  margin-left: 0;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+
+.bookSwitchName {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.headerProgress b {
-  color: var(--nf-accent);
-  font-weight: 700;
+.bookSwitchMeta {
+  font-size: 11px;
+  color: var(--nf-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.headerProgressDot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--nf-border-strong, var(--nf-text-3));
-  display: inline-block;
+.bookSwitchArrow {
+  margin-left: auto;
+  color: var(--nf-text-3);
+  font-size: 12px;
+  flex: none;
 }
+
+/* demo 风格统计卡（今日待写 / 写作中 / 已通过 / 待审稿） */
+.statRowD { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.statCardD { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 14px 16px; border-radius: 16px; background: var(--nf-bg-inset); border: 1px solid var(--nf-border); min-width: 0; }
+.statCardDLabel { font-size: 12px; color: var(--nf-text-3); }
+.statCardDValue { font-size: 22px; font-weight: 700; margin-top: 2px; color: var(--nf-text); }
+.statCardDUnit { font-size: 12px; color: var(--nf-text-3); font-weight: 400; }
+.statCardDDetail { font-size: 11.5px; color: var(--nf-text-3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statCardDDown { color: var(--nf-error); }
+.statCardDIcon { width: 38px; height: 38px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex: none; background: var(--nf-accent-soft); }
+.statCardDIconRed { background: color-mix(in srgb, var(--nf-error) 13%, transparent); }
+
+/* demo 风格创作时间线（6 阶段分段条，点击跳转对应 tab） */
+.tlBar { display: flex; gap: 6px; margin-top: 8px; }
+.tlSeg { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; border: none; background: transparent; padding: 0; cursor: pointer; font: inherit; }
+.tlSegTrack { height: 8px; border-radius: 999px; background: var(--nf-hover); border: 1px solid var(--nf-border); overflow: hidden; }
+.tlSegFill { display: block; height: 100%; width: 100%; border-radius: 999px; background: var(--nf-accent); }
+.tlSegTodo .tlSegFill { opacity: 0; }
+.tlSegTodo .tlSegTrack { background: transparent; }
+.tlSegCurrent .tlSegTrack { border-color: var(--nf-accent); box-shadow: 0 0 0 2px var(--nf-accent-soft); }
+.tlSegCurrent .tlSegFill { opacity: 0.45; }
+.tlSegLabel { font-size: 10.5px; color: var(--nf-text-3); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tlSegDone .tlSegLabel { color: var(--nf-accent); font-weight: 600; }
+.tlSeg:hover .tlSegTrack { border-color: var(--nf-border-strong); }
+
 
 /* ------------------------------------------------------------ cards */
 
@@ -1592,8 +1708,16 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  background: var(--nf-glass-inset);
-  box-shadow: inset 0 1px 0 var(--nf-glass-sheen);
+  background: var(--nf-glass-face);
+  box-shadow: var(--nf-card-shadow), inset 0 1px 0 var(--nf-glass-sheen);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  backdrop-filter: blur(30px) saturate(180%);
+  transition: transform 0.22s ease, box-shadow 0.22s ease;
+}
+
+.assetStat:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--nf-card-shadow-hover), inset 0 1px 0 var(--nf-glass-sheen);
 }
 
 .assetStatLabel {

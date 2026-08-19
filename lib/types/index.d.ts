@@ -33,6 +33,8 @@ export interface Config {
     provider?: string;
     /** LLM model id. */
     model?: string;
+    /** LLM reasoning effort (off/low/high/max). */
+    reasoningEffort?: 'off' | 'low' | 'high' | 'max';
     /** Target characters per chapter. */
     chapterChars?: number;
     /** Max output tokens per chapter call. */

@@ -178,18 +178,19 @@ export function ShelfView({
             value={query}
             onChange={e => { setQuery(e.target.value) }}
           />
-          <div className={css.shelfFilters}>
-            {filters.map(f => (
-              <button
-                key={f.id}
-                type="button"
-                className={`${css.button} ${css.buttonSmall} ${filter === f.id ? css.buttonPrimary : ''}`}
-                onClick={() => { setFilter(f.id) }}
-              >
-                {f.label}{f.count > 0 ? `（${f.count}）` : ''}
-              </button>
-            ))}
-          </div>
+        </div>
+        <div className={css.shelfFilters} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {filters.map(f => (
+            <button
+              key={f.id}
+              type="button"
+              className={`${css.button} ${filter === f.id ? css.buttonPrimary : ''}`}
+              style={{ fontSize: 14, flex: 1 }}
+              onClick={() => { setFilter(f.id) }}
+            >
+              {f.label}{f.count > 0 ? `（${f.count}）` : ''}
+            </button>
+          ))}
         </div>
       </div>
 

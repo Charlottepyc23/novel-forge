@@ -306,6 +306,27 @@ export interface AuditResponse {
   auditedAt: string
 }
 
+/** 全书质检的实时状态（通过 /status 暴露给面板/外部读取）。 */
+export interface AuditStatus {
+  status: 'idle' | 'running' | 'done' | 'error'
+  /** 开始时间（ISO）。 */
+  startedAt?: string
+  /** 结束时间（ISO）。 */
+  finishedAt?: string
+  /** 总批次数（0 = 尚未开始/无章节）。 */
+  totalBatches: number
+  /** 已完成批次数。 */
+  completedBatches: number
+  /** 参与质检的章节数。 */
+  auditedChapters?: number
+  /** 发现的问题数（done 后有效）。 */
+  issuesCount?: number
+  /** 最近一次质检的问题清单（done 后有效；error 时为空）。 */
+  issues?: AuditIssue[]
+  /** 失败信息（error 时有效）。 */
+  error?: string
+}
+
 /** 一条剧情线（主线/支线/人物线/悬念线）。 */
 export interface Plotline {
   /** 稳定 id。 */
@@ -772,6 +793,8 @@ export interface NovelConfig {
   provider: string
   /** LLM model id (e.g. deepseek-v4-flash). */
   model: string
+  /** LLM reasoning effort: off = no thinking; low/high/max = thinking intensity. */
+  reasoningEffort: 'off' | 'low' | 'high' | 'max'
   /** Target characters per chapter. */
   chapterChars: number
   /** Max output tokens per chapter call. */
@@ -793,6 +816,8 @@ export interface StatusResponse {
   project?: ProjectState
   /** Chapter files already on disk (basenames, sorted). */
   generatedFiles: string[]
+  /** 全书质检实时状态（用于面板/外部读取进度）。 */
+  audit?: AuditStatus
 }
 
 /** 生产单状态（生产单 = 区间批量生产执行器：计划补足 + 逐章生成 + 被拒分级处理）。 */
@@ -985,6 +1010,7 @@ export interface ConfigPatch {
   outputDir?: string
   provider?: string
   model?: string
+  reasoningEffort?: 'off' | 'low' | 'high' | 'max'
   chapterChars?: number
   maxTokens?: number
   reviewPassScore?: number

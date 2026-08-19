@@ -206,6 +206,10 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+      <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+        <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🧰 创作资产</span>
+        <span className={css.meta}>题材基底 / 推进模式 / 笔法帖 / 文戒 / 心法</span>
+      </div>
       {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
       {notice !== '' && <div className={css.card}><span style={{ color: 'var(--nf-success)' }}>{notice}</span></div>}
 
@@ -233,6 +237,21 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
           <span className={css.assetStatValue}>{builtinRules.length} 内置 + {(assets.antiAiRules ?? []).length} 自定义</span>
           <span className={css.assetStatDetail}>全部生效于生成与审稿提示词</span>
         </div>
+      </div>
+
+      {/* 子页签：题材基底 / 推进模式 / 笔法帖 / 文戒 / 心法 */}
+      <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+        {SUB_TABS.map(t => (
+          <button
+            key={t.id}
+            type="button"
+            className={`${css.button} ${assetTab === t.id ? css.buttonPrimary : ''}`}
+            style={{ fontSize: 14, flex: 1 }}
+            onClick={() => { setAssetTab(t.id) }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {/* 题材基底库 */}

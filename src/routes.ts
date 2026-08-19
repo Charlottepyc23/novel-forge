@@ -23,6 +23,7 @@ import {
   type AssistantHistoryResponse,
   type AssistantRequest,
   type AuditResponse,
+  type AuditStatus,
   type AuthorReview,
   type BiblePatchRequest,
   type BibleRequest,
@@ -199,6 +200,9 @@ const DEFAULT_PLAN_COUNT = 30
 export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
   const { ctx, getConfig, patchConfig } = deps
 
+  /** 全书质检实时状态（内存态，重启后回到 idle；用于 /status 暴露进度）。 */
+  let auditState: AuditStatus = { status: 'idle', totalBatches: 0, completedBatches: 0 }
+
   /** Guard helper: fence + method check. */
   const guard = (req: IncomingMessage, res: ServerResponse, method: string): boolean => {
     if (!isLoopbackRequest(req)) {
@@ -260,6 +264,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           ? { ...project, facts: (project.facts ?? []).slice(-80) }
           : undefined,
         generatedFiles: listChapterFiles(config.outputDir),
+        audit: auditState,
       }
       writeJson(res, 200, response)
     },
@@ -1210,15 +1215,37 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       const config = getConfig()
       const project = requireProject(res)
       if (project === undefined) return
+      const startedAt = new Date().toISOString()
+      auditState = { status: 'running', startedAt, totalBatches: 0, completedBatches: 0 }
       try {
-        const issues = await auditBook(ctx, config, project, config.outputDir)
+        const issues = await auditBook(ctx, config, project, config.outputDir, (completed, total) => {
+          auditState.totalBatches = total
+          auditState.completedBatches = completed
+        })
+        const auditedChapters = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').length
+        auditState = {
+          status: 'done',
+          startedAt,
+          finishedAt: new Date().toISOString(),
+          totalBatches: auditState.totalBatches,
+          completedBatches: auditState.totalBatches,
+          auditedChapters,
+          issuesCount: issues.length,
+          issues,
+        }
         const response: AuditResponse = {
           issues,
-          auditedChapters: project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').length,
-          auditedAt: new Date().toISOString(),
+          auditedChapters,
+          auditedAt: auditState.finishedAt!,
         }
         writeJson(res, 200, response)
       } catch (error) {
+        auditState = {
+          ...auditState,
+          status: 'error',
+          finishedAt: new Date().toISOString(),
+          error: (error as Error).message,
+        }
         writeJson(res, 500, { error: (error as Error).message })
       }
     },
@@ -1798,7 +1825,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       }
 
       // 全书：NDJSON 流式补跑缺失复盘的已写章节。
-      const missing = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined)
+      const missing = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error' && c.authorReview === undefined)
       if (missing.length === 0) {
         writeJson(res, 200, { count: 0 })
         return

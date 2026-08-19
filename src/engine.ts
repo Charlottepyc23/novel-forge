@@ -279,6 +279,7 @@ async function complete(
     system: options.system,
     maxTokens: options.maxTokens ?? config.maxTokens,
     temperature: options.temperature ?? 0.7,
+    reasoningEffort: ReasoningEffortId(config.reasoningEffort ?? 'off'),
   }
   const assembler = new BlockAssembler()
   for await (const chunk of ctx.llm.stream(request)) {
@@ -2299,16 +2300,23 @@ export async function auditBook(
   config: NovelConfig,
   project: ProjectState,
   outputDir: string,
+  onProgress?: (completedBatches: number, totalBatches: number) => void,
 ): Promise<AuditIssue[]> {
   const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
-  if (written.length === 0) return []
+  if (written.length === 0) {
+    onProgress?.(0, 0)
+    return []
+  }
   // 分批：每批 AUDIT_BATCH_SIZE 章，避免超长后单次爆上下文。
+  const totalBatches = Math.ceil(written.length / AUDIT_BATCH_SIZE)
   const all: AuditIssue[] = []
+  onProgress?.(0, totalBatches)
   for (let i = 0; i < written.length; i += AUDIT_BATCH_SIZE) {
     const batch = written.slice(i, i + AUDIT_BATCH_SIZE)
     try {
       all.push(...await auditBatch(ctx, config, project, outputDir, batch))
     } catch { /* 单批失败不阻断其余批次 */ }
+    onProgress?.(Math.min(Math.ceil((i + AUDIT_BATCH_SIZE) / AUDIT_BATCH_SIZE), totalBatches), totalBatches)
   }
   return all.slice(0, 50)
 }

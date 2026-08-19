@@ -19,6 +19,7 @@ import { WorldTab } from './WorldTab.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
 import { extractDocxTextFromBuffer } from '../docx.ts'
 import type {
+  AuditStatus,
   BookshelfSnapshot,
   ChapterPlan,
   Foreshadow,
@@ -41,6 +42,7 @@ export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
   | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'storyboard'
   | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run'
+  | 'book' | 'assets'
 
 /** Panel shell props. */
 export interface NovelPanelProps {
@@ -69,10 +71,10 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
     items: [
       { id: 'workflow', label: tt('tab.workflow'), icon: '🛠️' },
       { id: 'overview', label: tt('tab.overview'), icon: '📄' },
-      { id: 'blurb', label: '卷首语', icon: '📖' },
+      { id: 'blurb', label: '简介 / 封面', icon: '📖' },
       { id: 'plan', label: tt('tab.plan'), icon: '📚' },
-      { id: 'plotlines', label: tt('tab.plotlines'), icon: '🧵' },
-      { id: 'run', label: '生产单', icon: '🏭' },
+      { id: 'plotlines', label: '长线管理', icon: '📜' },
+      { id: 'book', label: '本书设定', icon: '📚' },
     ],
   },
   {
@@ -83,29 +85,24 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'progress', label: '工作进度', icon: '📊' },
       { id: 'breakdown', label: '拆书分析', icon: '🔍' },
       { id: 'storyboard', label: '漫剧工坊', icon: '🎬' },
+      { id: 'run', label: '生产单', icon: '🏭' },
     ],
   },
   {
-    id: 'db',
-    label: '数据库',
+    id: 'assets',
+    label: '资产',
     items: [
-      { id: 'bible', label: tt('tab.bible'), icon: '📖' },
-      { id: 'world', label: '大世界', icon: '🌍' },
-      { id: 'roles', label: '角色库', icon: '👥' },
-      { id: 'foreshadow', label: tt('tab.foreshadow'), icon: '🔮' },
-      { id: 'facts', label: tt('tab.facts'), icon: '📜' },
-      { id: 'reviews', label: '复盘记录', icon: '📋' },
-      { id: 'assetsGenre', label: '题材基底', icon: '🏷️' },
-      { id: 'assetsProgression', label: '推进模式', icon: '📈' },
-      { id: 'assetsTemplates', label: '笔法帖', icon: '🖋️' },
-      { id: 'assetsRules', label: '文戒', icon: '🚫' },
-      { id: 'assetsStyle', label: '心法', icon: '🎨' },
+      { id: 'assets', label: '创作资产', icon: '🧰' },
     ],
   },
 ]
 
 /** Settings tab — pinned to the bottom of the nav rail. */
 const SETTINGS_TAB: { id: NovelTab; label: string; icon: string } = { id: 'settings', label: tt('tab.settings'), icon: '⚙️' }
+
+/** Common DeepSeek model presets shown in settings; users can also type any model id. */
+const MODEL_PRESETS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] as const
+const REASONING_OPTIONS = ['off', 'low', 'high', 'max'] as const
 
 /** 构建时注入的插件版本（tsdown define 替换为字符串字面量）。 */
 declare const __NOVEL_FORGE_VERSION__: string | undefined
@@ -319,9 +316,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [notice, setNotice] = useState('')
   const [progress, setProgress] = useState<ProgressLine[]>([])
   const [configDraft, setConfigDraft] = useState<NovelConfig | null>(null)
+  const [modelCustomMode, setModelCustomMode] = useState(false)
   const [expandedChapter, setExpandedChapter] = useState<number | null>(null)
   /** 复盘记录页：当前展开的章节号。 */
   const [expandedReviewChapter, setExpandedReviewChapter] = useState<number | null>(null)
+  /** 复盘记录页：按卷折叠，卷号 → 是否展开（默认全部收起）。 */
+  const [expandedVolumes, setExpandedVolumes] = useState<Record<number, boolean>>({})
   const [chapterText, setChapterText] = useState('')
   const progressId = useRef(0)
   /** id of the single live progress row (generation counter), if any. */
@@ -385,6 +385,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [updatingOutline, setUpdatingOutline] = useState(false)
   /** 全书质检结果（null = 未运行）。 */
   const [auditIssues, setAuditIssues] = useState<import('../../protocol.ts').AuditIssue[] | null>(null)
+  /** 全书质检实时状态（来自 /status，用于显示进度）。 */
+  const [auditStatus, setAuditStatus] = useState<AuditStatus | null>(null)
   /** 角色卡（从事实库聚合）。 */
   const [charCards, setCharCards] = useState<import('../../protocol.ts').RoleStatusCard[] | null>(null)
   /** 世界观规则编辑草稿（bible tab，每行一条）。 */
@@ -412,6 +414,39 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     progress: string
     status: Plotline['status']
   } | null>(null)
+  /** 长线管理页：子页签（剧情线 / 伏笔），localStorage 记忆。 */
+  const [longlineTab, setLonglineTab] = useState<'plotlines' | 'foreshadow'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.longline.tab')
+      return v === 'foreshadow' ? 'foreshadow' : 'plotlines'
+    } catch { return 'plotlines' }
+  })
+  const changeLonglineTab = (next: 'plotlines' | 'foreshadow'): void => {
+    setLonglineTab(next)
+    try { window.localStorage.setItem('dsh-novel-forge.longline.tab', next) } catch { /* ignore */ }
+  }
+  /** 编年 / 复盘页：子页签（编年录 / 复盘记录），localStorage 记忆。 */
+  const [archiveTab, setArchiveTab] = useState<'facts' | 'reviews'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.archive.tab')
+      return v === 'reviews' ? 'reviews' : 'facts'
+    } catch { return 'facts' }
+  })
+  const changeArchiveTab = (next: 'facts' | 'reviews'): void => {
+    setArchiveTab(next)
+    try { window.localStorage.setItem('dsh-novel-forge.archive.tab', next) } catch { /* ignore */ }
+  }
+  /** 本书设定页：子页签（设定库 / 大世界 / 角色库 / 编年·复盘），localStorage 记忆。 */
+  const [bookTab, setBookTab] = useState<'bible' | 'world' | 'roles' | 'facts'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.book.tab')
+      return v === 'world' || v === 'roles' || v === 'facts' ? v : 'bible'
+    } catch { return 'bible' }
+  })
+  const changeBookTab = (next: 'bible' | 'world' | 'roles' | 'facts'): void => {
+    setBookTab(next)
+    try { window.localStorage.setItem('dsh-novel-forge.book.tab', next) } catch { /* ignore */ }
+  }
   /** 角色知情度编辑草稿（角色名 → 文本，每行一条）。 */
   const [knowledgeDraft, setKnowledgeDraft] = useState<Record<string, string>>({})
   /** 角色库：AI 提炼候选（null = 未运行；localStorage 持久化，刷新不丢）。 */
@@ -615,6 +650,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       const status = await api.status()
       setConfig(status.config)
       setConfigDraft(status.config)
+      setModelCustomMode(!(MODEL_PRESETS as readonly string[]).includes(status.config.model))
+      setAuditStatus(status.audit ?? null)
       setProject(status.project ?? null)
       // 人物志存档同步：有 roleStatus 存档直接显示，无需重新刷新计算。
       if (status.project?.roleStatus !== undefined) {
@@ -774,18 +811,32 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setBusy(true)
     setBusyLabel('全书一致性质检中…')
     setError('')
+    setAuditStatus({ status: 'running', totalBatches: 0, completedBatches: 0 })
+    let stopped = false
+    const poll = window.setInterval(async () => {
+      if (stopped) return
+      try {
+        const s = await api.status()
+        if (s.audit !== undefined) setAuditStatus(s.audit)
+      } catch { /* 轮询失败忽略，主请求仍会给出最终结果 */ }
+    }, 1000)
     try {
       const result = await api.audit()
+      if (stopped) return
       setAuditIssues(result.issues)
       pushProgress(result.issues.length === 0
         ? `全书质检完成：${result.auditedChapters} 章未发现矛盾 🎉`
         : `全书质检完成：发现 ${result.issues.length} 处疑似矛盾`, result.issues.length === 0 ? 'done' : 'error')
     } catch (err) {
+      if (stopped) return
       setError((err as Error).message)
       pushProgress(`全书质检失败：${(err as Error).message}`, 'error')
     } finally {
+      stopped = true
+      window.clearInterval(poll)
       setBusy(false)
       setBusyLabel('')
+      await refresh(false)
     }
   }
 
@@ -1120,7 +1171,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
 
   /** 作者复盘补跑：全书缺失章节（流式）。 */
   const handleAuthorBackfillAll = async (): Promise<void> => {
-    const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined).length
+    const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error' && c.authorReview === undefined).length
     setBusy(true)
     setBusyLabel(`补齐历史章节作者复盘（${missing} 章）…`)
     setError('')
@@ -1966,6 +2017,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         outputDir: configDraft.outputDir,
         provider: configDraft.provider,
         model: configDraft.model,
+        reasoningEffort: configDraft.reasoningEffort ?? 'off',
         chapterChars: configDraft.chapterChars,
         maxTokens: configDraft.maxTokens,
         reviewPassScore: configDraft.reviewPassScore,
@@ -2057,6 +2109,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   // --------------------------------------------------- dashboard (workflow)
   const approvedCount = chapters.filter(c => c.status === 'approved').length
   const reviewPendingCount = chapters.filter(c => c.status === 'written' || c.status === 'rejected').length
+  const writingNow = chapters.find(c => c.status === 'generating' || c.status === 'reviewing')
   const totalChars = chapters.reduce((sum, c) => sum + (c.chars ?? 0), 0)
   const firstChapter = chapters[0]
   const currentVolumeName = (() => {
@@ -2080,6 +2133,24 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const journeyDoneCount = journeyStages.filter(s => s.done).length
   const journeyPercent = Math.round((journeyDoneCount / journeyStages.length) * 100)
   const currentStageId = journeyStages.find(s => !s.done)?.id
+
+  /** 创作时间线阶段点击 → 跳转对应 tab。 */
+  const jumpToStage = (id: string): void => {
+    switch (id) {
+      case 'outline': setActiveTab('overview'); break
+      case 'bible': setActiveTab('book'); changeBookTab('bible'); break
+      case 'volumes':
+      case 'plan':
+      case 'write': setActiveTab('plan'); break
+      case 'review': setActiveTab('book'); changeBookTab('facts'); changeArchiveTab('reviews'); break
+    }
+  }
+
+  /** 侧栏当前书卡（demo 风格）：书架激活书 → 封面首字 / 书名 / 进度。 */
+  const activeBook = shelf?.books.find(b => b.id === shelf?.activeBookId) ?? null
+  const activeBookName = activeBook?.bookName ?? project?.bookName ?? '未选书'
+  const activeBookMeta = activeBook !== null ? `${activeBook.done}/${activeBook.total} 章 · 点按打开书架` : '点按打开书架'
+  const activeBookLetter = activeBookName.trim().charAt(0) || '书'
 
   /** 主行动卡片：推荐下一步（AI-Novel-Writing-Assistant 首页主卡模式）。 */
   const nextAction = useMemo((): { eyebrow: string; title: string; reason: string; actionLabel: string; onClick: () => void } | null => {
@@ -2267,48 +2338,20 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         />
       ) : (
         <>
-      <div className={css.panelHeader}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-          <h2 className={css.panelTitle}>
-            <button type="button" className={css.iconButton} title="返回书架" aria-label="返回书架" onClick={() => { setViewMode('shelf') }}>
-              ←
-            </button>
-            {tt('panel.title')}
-          </h2>
-          {(project?.bookName !== '' && project?.bookName !== undefined) && (
-            <div className={css.panelSubtitle}>
-              <span>📖 {project.bookName}</span>
-              {chapters.length > 0 && (
-                <span className={css.headerProgress}>
-                  已完成 <b>{doneCount}</b>/{chapters.length} 章
-                  <span className={css.headerProgressDot} />
-                  通过 <b>{chapters.filter(c => c.status === 'approved').length}</b>
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <button
-            type="button"
-            className={css.iconButton}
-            title={navCollapsed ? '展开导航栏' : '收起导航栏'}
-            aria-label={navCollapsed ? '展开导航栏' : '收起导航栏'}
-            onClick={() => {
-              setNavCollapsed(prev => {
-                const next = !prev
-                try { window.localStorage.setItem('dsh-novel-forge.nav.collapsed', String(next)) } catch { /* ignore */ }
-                return next
-              })
-            }}
-          >
-            {navCollapsed ? '▸' : '◂'}
-          </button>
-          <button type="button" className={css.iconButton} title={tt('common.close')} aria-label={tt('common.close')} onClick={() => { controller.close() }}>×</button>
-        </div>
-      </div>
       <div className={css.panelBody}>
         <nav className={`${css.panelNav} ${navCollapsed ? css.panelNavCollapsed : ''}`} role="tablist" aria-label="工作台导航">
+          {/* 标题区：小说工坊 + 当前书名（顶部标题栏取消后移入侧栏） */}
+          <div className={css.navTitle}>
+            <div className={css.navTitleLogo}>书</div>
+            {!navCollapsed && (
+              <div style={{ minWidth: 0 }}>
+                <div className={css.navTitleName}>小说工坊</div>
+                <div className={css.navTitleBook} title={project?.bookName ?? ''}>
+                  {project?.bookName !== undefined && project.bookName !== '' ? `📖 ${project.bookName}` : '未选书'}
+                </div>
+              </div>
+            )}
+          </div>
           {/* 分组导航（创作 / 工具 / 数据库） */}
           {NAV_GROUPS.map(group => (
             <div key={group.id} className={css.navGroup}>
@@ -2340,7 +2383,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       {chapters.some(c => c.status === 'error') ? `!${pendingCount + reviewPendingCount}` : pendingCount + reviewPendingCount}
                     </span>
                   )}
-                  {tab.id === 'foreshadow' && foreshadows.some(f => f.status === 'planned') && (
+                  {tab.id === 'plotlines' && foreshadows.some(f => f.status === 'planned') && (
                     <span className={css.navTabBadge}>{foreshadows.filter(f => f.status === 'planned').length}</span>
                   )}
                   {tab.id === 'workflow' && chapters.length > 0 && (
@@ -2374,6 +2417,22 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             <span className={css.navTabIcon}>{SETTINGS_TAB.icon}</span>
             {!navCollapsed && <span className={css.navTabLabel}>{SETTINGS_TAB.label}</span>}
           </button>
+          {/* 当前书切换卡（demo 风格底部内容卡：封面首字 + 书名 + 进度，点击回书架） */}
+          {!navCollapsed && shelf !== null && (
+            <button
+              type="button"
+              className={css.bookSwitch}
+              title={activeBook !== null ? `当前书：${activeBook.bookName}（${activeBook.outputDir}）· 点击打开书架` : '打开书架'}
+              onClick={() => { setViewMode('shelf') }}
+            >
+              <span className={css.bookSwitchCover}>{activeBookLetter}</span>
+              <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <span className={css.bookSwitchName}>{activeBookName}</span>
+                <span className={css.bookSwitchMeta}>{activeBookMeta}</span>
+              </span>
+              <span className={css.bookSwitchArrow}>⌄</span>
+            </button>
+          )}
           {/* 关于：版本 + GitHub + 更新检测 */}
           <div className={css.navAbout}>
             <button
@@ -2399,6 +2458,33 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 📦 有新版本 v{npmLatest}
               </button>
             )}
+          </div>
+          {/* 操作行：收起导航 / 关闭面板（原顶部按钮下放，收起态保留图标） */}
+          <div className={css.navActions}>
+            <button
+              type="button"
+              className={css.navActionBtn}
+              title={navCollapsed ? '展开导航栏' : '收起导航栏'}
+              aria-label={navCollapsed ? '展开导航栏' : '收起导航栏'}
+              onClick={() => {
+                setNavCollapsed(prev => {
+                  const next = !prev
+                  try { window.localStorage.setItem('dsh-novel-forge.nav.collapsed', String(next)) } catch { /* ignore */ }
+                  return next
+                })
+              }}
+            >
+              {navCollapsed ? '▸' : '◂'}
+            </button>
+            <button
+              type="button"
+              className={css.navActionBtn}
+              title={tt('common.close')}
+              aria-label={tt('common.close')}
+              onClick={() => { controller.close() }}
+            >
+              ×
+            </button>
           </div>
         </nav>
         <div className={css.panelContent}>
@@ -2634,29 +2720,64 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <span className={css.meta} style={{ fontWeight: 600 }}>创作旅程</span>
                   <span className={css.meta}>{journeyPercent}% · 已完成 {journeyDoneCount}/{journeyStages.length} 步</span>
                 </div>
-                <div className={css.dashJourneyBar}>
-                  <div className={css.dashJourneyFill} style={{ width: `${journeyPercent}%` }} />
-                </div>
-                <div className={css.dashJourneyStages}>
+                <div className={css.tlBar}>
                   {journeyStages.map(stage => (
-                    <span
+                    <button
                       key={stage.id}
-                      className={`${css.dashStage} ${stage.done ? css.dashStageDone : stage.id === currentStageId ? css.dashStageCurrent : ''}`}
+                      type="button"
+                      className={`${css.tlSeg} ${stage.done ? css.tlSegDone : stage.id === currentStageId ? css.tlSegCurrent : css.tlSegTodo}`}
+                      title={`${stage.label}${stage.done ? ' · 已完成' : stage.id === currentStageId ? ' · 进行中' : ' · 未开始'}（点击跳转）`}
+                      onClick={() => { jumpToStage(stage.id) }}
                     >
-                      <span className={css.dashStageDot}>{stage.done ? '✓' : stage.id === currentStageId ? '●' : '○'}</span>
-                      {stage.label}
-                    </span>
+                      <span className={css.tlSegTrack}><span className={css.tlSegFill} /></span>
+                      <span className={css.tlSegLabel}>{stage.done ? '✓ ' : ''}{stage.label}</span>
+                    </button>
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* 状态摘要条：全书进度 + 六个统计格，同样式并排一行 */}
+            {/* 统计卡（demo 风格：今日待写 / 写作中 / 已通过 / 待审稿） */}
+            <div className={css.statRowD}>
+              <div className={css.statCardD}>
+                <div style={{ minWidth: 0 }}>
+                  <div className={css.statCardDLabel}>今日待写</div>
+                  <div className={css.statCardDValue}>{pendingCount} <span className={css.statCardDUnit}>章</span></div>
+                  <div className={css.statCardDDetail}>
+                    {chapters.some(c => c.status === 'error') ? `含 error ${chapters.filter(c => c.status === 'error').length} 章` : '待生成队列'}
+                  </div>
+                </div>
+                <div className={css.statCardDIcon}>📝</div>
+              </div>
+              <div className={css.statCardD}>
+                <div style={{ minWidth: 0 }}>
+                  <div className={css.statCardDLabel}>写作中</div>
+                  <div className={css.statCardDValue}>{chapters.filter(c => c.status === 'generating' || c.status === 'reviewing').length} <span className={css.statCardDUnit}>章</span></div>
+                  <div className={css.statCardDDetail}>{writingNow !== undefined ? `第 ${writingNow.no} 章 · ${writingNow.title}` : '无进行中任务'}</div>
+                </div>
+                <div className={css.statCardDIcon}>✍️</div>
+              </div>
+              <div className={css.statCardD}>
+                <div style={{ minWidth: 0 }}>
+                  <div className={css.statCardDLabel}>已通过</div>
+                  <div className={css.statCardDValue}>{approvedCount} <span className={css.statCardDUnit}>章</span></div>
+                  <div className={css.statCardDDetail}>{chapters.length > 0 ? `占全书 ${Math.round((approvedCount / chapters.length) * 100)}%` : '尚无已通过章节'}</div>
+                </div>
+                <div className={css.statCardDIcon}>✅</div>
+              </div>
+              <div className={css.statCardD}>
+                <div style={{ minWidth: 0 }}>
+                  <div className={css.statCardDLabel}>待审稿</div>
+                  <div className={css.statCardDValue}>{reviewPendingCount} <span className={css.statCardDUnit}>章</span></div>
+                  <div className={`${css.statCardDDetail} ${reviewPendingCount > 0 ? css.statCardDDown : ''}`}>
+                    {`written ${chapters.filter(c => c.status === 'written').length} · rejected ${chapters.filter(c => c.status === 'rejected').length}`}
+                  </div>
+                </div>
+                <div className={`${css.statCardDIcon} ${css.statCardDIconRed}`}>⚠️</div>
+              </div>
+            </div>
+            {/* 补充统计：总字数 / 当前卷 / 最近创作（原有数据保留） */}
             <div className={css.assetGrid}>
-              <StatCell label="全书进度" value={`${doneCount}/${chapters.length} 章`} valueColor="var(--nf-accent)" detail={`${chapters.length > 0 ? Math.round((doneCount / chapters.length) * 100) : 0}%`} />
-              <StatCell label="已通过审稿" value={String(approvedCount)} valueColor={approvedCount > 0 ? 'var(--nf-success)' : undefined} detail="章节已 approved" />
-              <StatCell label="待生成" value={String(pendingCount)} valueColor={pendingCount > 0 ? 'var(--nf-warn)' : undefined} detail="pending + error" />
-              <StatCell label="待审稿" value={String(reviewPendingCount)} valueColor={reviewPendingCount > 0 ? 'var(--nf-info)' : undefined} detail="written + rejected" />
               <StatCell label="总字数" value={String(totalChars)} detail="已生成正文累计" />
               <StatCell label="当前卷" value={currentVolumeName} valueFontSize={13} detail="正在推进的卷" />
               <StatCell label="最近创作" value={lastUpdated} valueFontSize={13} detail="最近生成/编辑时间" />
@@ -2670,6 +2791,19 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   🔍 全书质检
                 </button>
               </div>
+              {auditStatus?.status === 'running' && (
+                <div className={css.meta} style={{ marginTop: 8 }}>
+                  🔍 全书质检中：{auditStatus.completedBatches}/{auditStatus.totalBatches > 0 ? auditStatus.totalBatches : '…'} 批
+                  {auditStatus.totalBatches > 0 && (
+                    <div className={css.dashJourneyBar} style={{ marginTop: 4 }}>
+                      <div className={css.dashJourneyFill} style={{ width: `${Math.round((auditStatus.completedBatches / auditStatus.totalBatches) * 100)}%` }} />
+                    </div>
+                  )}
+                </div>
+              )}
+              {auditStatus?.status === 'error' && auditStatus.error !== undefined && (
+                <div className={css.meta} style={{ color: 'var(--nf-error)', marginTop: 8 }}>全书质检失败：{auditStatus.error}</div>
+              )}
               <div className={css.assetGrid}>
                 <StatCell
                   label="道藏"
@@ -2732,7 +2866,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <span className={css.cardTitle}>📋 作者复盘（最近 {Math.min(6, chapters.filter(c => c.authorReview !== undefined).length)} 章）</span>
                   <div className={css.row}>
                     {(() => {
-                      const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined).length
+                      const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error' && c.authorReview === undefined).length
                       return missing > 0 && (
                         <button
                           type="button"
@@ -2745,7 +2879,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                         </button>
                       )
                     })()}
-                    <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setActiveTab('reviews') }} title="查看按卷分组的全部复盘记录">
+                    <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setActiveTab('book'); changeBookTab('facts'); changeArchiveTab('reviews') }} title="查看按卷分组的全部复盘记录">
                       查看全部 →
                     </button>
                   </div>
@@ -2918,7 +3052,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'blurb' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between' }}>
-              <span className={css.cardTitle}>卷首语</span>
+              <span className={css.cardTitle}>📖 简介 / 封面</span>
               <div className={css.row}>
                 <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy || project === null} onClick={() => { void handleBlurbGenerate() }}>
                   ✨ AI 生成
@@ -3183,7 +3317,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                   )}
                                 </div>
                               )}
-                              {chapter.authorReview === undefined && chapter.status !== 'pending' && chapter.status !== 'generating' && (
+                              {chapter.authorReview === undefined && chapter.status !== 'pending' && chapter.status !== 'generating' && chapter.status !== 'error' && (
                                 <div className={css.row}>
                                   <button
                                     type="button"
@@ -3299,85 +3433,53 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </>
         )}
 
-        {activeTab === 'reviews' && (
-          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+        {activeTab === 'book' && (
+          <div className={css.card} style={{ gap: 12 }}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle}>📋 复盘记录（{chapters.filter(c => c.authorReview !== undefined).length} 章已复盘）</span>
-              <div className={css.row}>
-                {(() => {
-                  const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.authorReview === undefined).length
-                  return missing > 0 && (
-                    <button
-                      type="button"
-                      className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
-                      disabled={busy}
-                      onClick={() => { void handleAuthorBackfillAll() }}
-                      title="对历史已写章节逐章补跑作者复盘"
-                    >
-                      ↻ 补齐缺失复盘（{missing}）
-                    </button>
-                  )
-                })()}
-              </div>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📚 本书设定</span>
+              <span className={css.meta}>当前书的知识与资料（参考 AI-Novel-Writing-Assistant：世界观/角色准备收进书内）</span>
             </div>
-            {(() => {
-              const reviewed = chapters.filter(c => c.authorReview !== undefined)
-              if (reviewed.length === 0) {
-                return <span className={css.meta}>尚无作者复盘——生成/审稿后自动生成，或点「补齐缺失复盘」为已写章节补跑。</span>
-              }
-              const honored = reviewed.filter(c => c.authorReview!.hookHonored).length
-              const avg = Math.round(reviewed.reduce((s, c) => s + c.authorReview!.endingHook, 0) / reviewed.length * 10) / 10
-              return (
-                <span className={css.meta} style={{ fontWeight: 600 }}>
-                  钩子兑现 {honored}/{reviewed.length} · 结尾钩子均分 {avg}/10
-                </span>
-              )
-            })()}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1, minHeight: 0 }}>
-              {chapterGroups.map(group => {
-                const groupReviewed = group.chapters.filter(c => c.authorReview !== undefined)
-                if (groupReviewed.length === 0) return null
-                return (
-                  <div key={group.no} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div className={css.row} style={{ alignItems: 'center', gap: 8 }}>
-                      <b style={{ fontSize: 13 }}>{group.title}</b>
-                      <span className={css.meta}>已复盘 {groupReviewed.length}/{group.chapters.length} 章</span>
-                    </div>
-                    {[...groupReviewed].reverse().map(c => {
-                      const ar = c.authorReview!
-                      const expanded = expandedReviewChapter === c.no
-                      return (
-                        <div key={c.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, overflow: 'hidden' }}>
-                          <button
-                            type="button"
-                            style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
-                            onClick={() => { setExpandedReviewChapter(expanded ? null : c.no) }}
-                          >
-                            <span style={{ color: 'var(--nf-text-3)' }}>{expanded ? '▾' : '▸'}</span>
-                            <b>第{c.no}章《{c.title}》</b>
-                            <span style={{ color: ar.hookHonored ? 'var(--nf-success)' : 'var(--nf-warn)' }}>钩子{ar.hookHonored ? '✓' : '✗'}</span>
-                            <span style={{ color: ar.endingHook >= 6 ? 'var(--nf-success)' : 'var(--nf-error)' }}>结尾钩子 {ar.endingHook}/10</span>
-                            {ar.plotlineProgress !== '' && <span className={css.meta} style={{ marginLeft: 4 }}>{ar.plotlineProgress.slice(0, 40)}{ar.plotlineProgress.length > 40 ? '…' : ''}</span>}
-                          </button>
-                          {expanded && (
-                            <div style={{ padding: '4px 10px 8px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--nf-border)' }}>
-                              {ar.hookNote !== '' && <span className={css.meta}><b>钩子：</b>{ar.hookNote}</span>}
-                              {ar.plotlineProgress !== '' && <span className={css.meta}><b>推进：</b>{ar.plotlineProgress}</span>}
-                              {ar.continuity !== '' && <span className={css.meta}><b>衔接：</b>{ar.continuity}</span>}
-                              {ar.trend !== '' && <span className={css.meta}><b>趋势：</b>{ar.trend}</span>}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )
-              })}
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+              <button
+                type="button"
+                className={`${css.button} ${bookTab === 'bible' ? css.buttonPrimary : ''}`}
+                style={{ fontSize: 14, flex: 1 }}
+                onClick={() => { changeBookTab('bible') }}
+                title="设定库：题材 / 世界观规则 / 人物摘要 / 红线 / 文风"
+              >
+                📖 设定库
+              </button>
+              <button
+                type="button"
+                className={`${css.button} ${bookTab === 'world' ? css.buttonPrimary : ''}`}
+                style={{ fontSize: 14, flex: 1 }}
+                onClick={() => { changeBookTab('world') }}
+                title="大世界：境界体系 / 地理区域 / 势力分布（注入生成与审稿提示词）"
+              >
+                🌍 大世界
+              </button>
+              <button
+                type="button"
+                className={`${css.button} ${bookTab === 'roles' ? css.buttonPrimary : ''}`}
+                style={{ fontSize: 14, flex: 1 }}
+                onClick={() => { changeBookTab('roles') }}
+                title="角色库：全书角色主表（定位 / 关系网 / 成长线 / 知情度）"
+              >
+                👥 角色库（{project?.roles?.length ?? 0}）
+              </button>
+              <button
+                type="button"
+                className={`${css.button} ${bookTab === 'facts' ? css.buttonPrimary : ''}`}
+                style={{ fontSize: 14, flex: 1 }}
+                onClick={() => { changeBookTab('facts') }}
+                title="编年录与复盘记录"
+              >
+                📚 编年 / 复盘
+              </button>
             </div>
           </div>
         )}
-
-        {activeTab === 'bible' && (
+        {activeTab === 'book' && bookTab === 'bible' && (
           <>
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between' }}>
@@ -3457,7 +3559,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {/* 大世界：境界体系 / 区域 / 势力 */}
-        {activeTab === 'world' && (
+        {activeTab === 'book' && bookTab === 'world' && (
           <WorldTab
             api={api}
             world={project?.world}
@@ -3469,8 +3571,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {/* 角色库：全书角色主表（独立导航页） */}
-        {activeTab === 'roles' && (
-          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+        {activeTab === 'book' && bookTab === 'roles' && (
+          <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
               <span className={css.cardTitle}>👥 角色库（{(project?.roles ?? []).length} 个）</span>
               <div className={css.row}>
@@ -3583,63 +3685,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {/* 写作资产 5 个子分类（左侧导航直达） */}
-        {activeTab === 'assetsGenre' && <AssetsTab api={api} initialTab="genre" />}
-        {activeTab === 'assetsProgression' && <AssetsTab api={api} initialTab="progression" />}
-        {activeTab === 'assetsTemplates' && <AssetsTab api={api} initialTab="templates" />}
-        {activeTab === 'assetsRules' && <AssetsTab api={api} initialTab="rules" />}
-        {activeTab === 'assetsStyle' && <AssetsTab api={api} initialTab="style" />}
-
-        {activeTab === 'foreshadow' && (
-          <div className={css.card}>
-            <div className={css.row} style={{ justifyContent: 'space-between' }}>
-              <span className={css.cardTitle}>{tt('foreshadow.title')}（{foreshadows.length}）</span>
-              <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSuggestForeshadows() }}>
-                {tt('foreshadow.suggest')}
-              </button>
-            </div>
-            {foreshadows.length === 0 ? (
-              <span className={css.meta}>{tt('foreshadow.none')}</span>
-            ) : (
-              <div className={css.chapterList}>
-                {foreshadows.map(f => {
-                  const statusLabel = { planned: tt('foreshadow.planned'), planted: tt('foreshadow.planted'), progressing: tt('foreshadow.progressing'), resolved: tt('foreshadow.resolved'), abandoned: tt('foreshadow.abandoned') }[f.status]
-                  const statusColor = f.status === 'resolved' ? 'var(--nf-success)' : f.status === 'planted' || f.status === 'progressing' ? 'var(--nf-accent)' : f.status === 'abandoned' ? 'var(--nf-text-3)' : 'var(--nf-info)'
-                  return (
-                    <div key={f.id} className={css.chapter}>
-                      <div className={css.chapterMain}>
-                        <div className={css.chapterTitle}>
-                          <span>{f.description}</span>
-                        </div>
-                        <div className={css.meta}>
-                          {f.plantedChapter !== undefined && <span>{tt('foreshadow.plantedAt')} 第{f.plantedChapter}章 · </span>}
-                          {f.targetChapter !== undefined && <span>{tt('foreshadow.target')} 第{f.targetChapter}章 · </span>}
-                          {f.resolvedNote !== undefined && f.resolvedNote !== '' && <span>回收：{f.resolvedNote} · </span>}
-                        </div>
-                      </div>
-                      <span className={css.badge} style={{ borderColor: statusColor, color: statusColor }}>{statusLabel}</span>
-                      <div className={css.row} style={{ gap: 4 }}>
-                        {f.status === 'planned' && (
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
-                            void api.foreshadow({ id: f.id, status: 'planted', plantedChapter: doneCount + 1 }).then(r => setProject(prev => prev === null ? prev : { ...prev, foreshadows: r.foreshadows }))
-                          }}>
-                            {tt('foreshadow.setPlanted')}
-                          </button>
-                        )}
-                        {(f.status === 'planted' || f.status === 'progressing') && (
-                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
-                            void api.foreshadow({ id: f.id, status: 'resolved', resolvedNote: `第${doneCount}章回收` }).then(r => setProject(prev => prev === null ? prev : { ...prev, foreshadows: r.foreshadows }))
-                          }}>
-                            {tt('foreshadow.setResolved')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
+        {activeTab === 'assets' && <AssetsTab api={api} />}
 
         {activeTab === 'settings' && configDraft !== null && (
           <div className={css.card}>
@@ -3652,14 +3698,49 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <label className={css.fieldLabel}>{tt('settings.outputDir')}</label>
               <input className={css.input} value={configDraft.outputDir} onChange={e => { setConfigDraft({ ...configDraft, outputDir: e.target.value }) }} />
             </div>
-            <div className={css.row}>
+            <div className={css.row} style={{ alignItems: 'flex-start' }}>
               <div className={css.field} style={{ flex: 1 }}>
                 <label className={css.fieldLabel}>{tt('settings.provider')}</label>
                 <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
               </div>
-              <div className={css.field} style={{ flex: 1 }}>
+              <div className={css.field} style={{ flex: 1.4 }}>
                 <label className={css.fieldLabel}>{tt('settings.model')}</label>
-                <input className={css.input} value={configDraft.model} onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }} />
+                <select
+                  className={css.input}
+                  value={modelCustomMode ? '__custom__' : configDraft.model}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '__custom__') {
+                      setModelCustomMode(true)
+                    } else {
+                      setModelCustomMode(false)
+                      setConfigDraft({ ...configDraft, model: v })
+                    }
+                  }}
+                >
+                  {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+                  <option value="__custom__">{tt('settings.modelCustom')}</option>
+                </select>
+                {modelCustomMode && (
+                  <input
+                    className={css.input}
+                    style={{ marginTop: 6 }}
+                    value={configDraft.model}
+                    placeholder={tt('settings.modelCustomPlaceholder')}
+                    onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
+                  />
+                )}
+              </div>
+              <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>{tt('settings.reasoningEffort')}</label>
+                <select
+                  className={css.input}
+                  value={configDraft.reasoningEffort ?? 'off'}
+                  onChange={e => { setConfigDraft({ ...configDraft, reasoningEffort: e.target.value as NovelConfig['reasoningEffort'] }) }}
+                >
+                  {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
+                </select>
+                <span className={css.meta}>{tt('settings.reasoningHint')}</span>
               </div>
             </div>
             <div className={css.row}>
@@ -3780,8 +3861,142 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
-        {activeTab === 'facts' && (
+        {activeTab === 'book' && bookTab === 'facts' && (
           <div className={css.card}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📚 编年 / 复盘</span>
+            </div>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                <button
+                  type="button"
+                  className={`${css.button} ${archiveTab === 'facts' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
+                  onClick={() => { changeArchiveTab('facts') }}
+                  title="编年录：客观事实流水（第 N 章 · 事件），生成/审稿查证用"
+                >
+                  📜 编年录（{(project?.facts ?? []).length}）
+                </button>
+                <button
+                  type="button"
+                  className={`${css.button} ${archiveTab === 'reviews' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
+                  onClick={() => { changeArchiveTab('reviews') }}
+                  title="复盘记录：每章作者复盘（钩子 / 推进 / 衔接 / 趋势）"
+                >
+                  📋 复盘记录（{chapters.filter(c => c.authorReview !== undefined).length} 章）
+                </button>
+              </div>
+
+            {archiveTab === 'reviews' ? (
+              <>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle}>📋 复盘记录（{chapters.filter(c => c.authorReview !== undefined).length} 章已复盘）</span>
+              <div className={css.row}>
+                {(() => {
+                  const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error' && c.authorReview === undefined).length
+                  return missing > 0 && (
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
+                      disabled={busy}
+                      onClick={() => { void handleAuthorBackfillAll() }}
+                      title="对历史已写章节逐章补跑作者复盘"
+                    >
+                      ↻ 补齐缺失复盘（{missing}）
+                    </button>
+                  )
+                })()}
+              </div>
+            </div>
+            {(() => {
+              const reviewed = chapters.filter(c => c.authorReview !== undefined)
+              if (reviewed.length === 0) {
+                return <span className={css.meta}>尚无作者复盘——生成/审稿后自动生成，或点「补齐缺失复盘」为已写章节补跑。</span>
+              }
+              const honored = reviewed.filter(c => c.authorReview!.hookHonored).length
+              const avg = Math.round(reviewed.reduce((s, c) => s + c.authorReview!.endingHook, 0) / reviewed.length * 10) / 10
+              return (
+                <span className={css.meta} style={{ fontWeight: 600 }}>
+                  钩子兑现 {honored}/{reviewed.length} · 结尾钩子均分 {avg}/10
+                </span>
+              )
+            })()}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {(() => {
+                const groupsWithReviews = chapterGroups.filter(group => group.chapters.some(c => c.authorReview !== undefined))
+                if (groupsWithReviews.length === 0) return null
+                return (
+                  <div className={css.row} style={{ justifyContent: 'flex-end', gap: 6 }}>
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall}`}
+                      onClick={() => { setExpandedVolumes(Object.fromEntries(groupsWithReviews.map(g => [g.no, true]))) }}
+                    >
+                      全部展开
+                    </button>
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonSmall}`}
+                      onClick={() => { setExpandedVolumes({}) }}
+                    >
+                      全部折叠
+                    </button>
+                  </div>
+                )
+              })()}
+              {chapterGroups.map(group => {
+                const groupReviewed = group.chapters.filter(c => c.authorReview !== undefined)
+                if (groupReviewed.length === 0) return null
+                const volumeExpanded = expandedVolumes[group.no] === true
+                return (
+                  <div key={group.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, overflow: 'hidden' }}>
+                    <button
+                      type="button"
+                      style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+                      onClick={() => { setExpandedVolumes(prev => ({ ...prev, [group.no]: !volumeExpanded })) }}
+                    >
+                      <span style={{ color: 'var(--nf-text-3)' }}>{volumeExpanded ? '▾' : '▸'}</span>
+                      <b>{group.title}</b>
+                      <span className={css.meta}>已复盘 {groupReviewed.length}/{group.chapters.length} 章</span>
+                    </button>
+                    {volumeExpanded && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '4px 8px 8px', borderTop: '1px solid var(--nf-border)' }}>
+                        {[...groupReviewed].reverse().map(c => {
+                          const ar = c.authorReview!
+                          const expanded = expandedReviewChapter === c.no
+                          return (
+                            <div key={c.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, overflow: 'hidden' }}>
+                              <button
+                                type="button"
+                                style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+                                onClick={() => { setExpandedReviewChapter(expanded ? null : c.no) }}
+                              >
+                                <span style={{ color: 'var(--nf-text-3)' }}>{expanded ? '▾' : '▸'}</span>
+                                <b>第{c.no}章《{c.title}》</b>
+                                <span style={{ color: ar.hookHonored ? 'var(--nf-success)' : 'var(--nf-warn)' }}>钩子{ar.hookHonored ? '✓' : '✗'}</span>
+                                <span style={{ color: ar.endingHook >= 6 ? 'var(--nf-success)' : 'var(--nf-error)' }}>结尾钩子 {ar.endingHook}/10</span>
+                                {ar.plotlineProgress !== '' && <span className={css.meta} style={{ marginLeft: 4 }}>{ar.plotlineProgress.slice(0, 40)}{ar.plotlineProgress.length > 40 ? '…' : ''}</span>}
+                              </button>
+                              {expanded && (
+                                <div style={{ padding: '4px 10px 8px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--nf-border)' }}>
+                                  {ar.hookNote !== '' && <span className={css.meta}><b>钩子：</b>{ar.hookNote}</span>}
+                                  {ar.plotlineProgress !== '' && <span className={css.meta}><b>推进：</b>{ar.plotlineProgress}</span>}
+                                  {ar.continuity !== '' && <span className={css.meta}><b>衔接：</b>{ar.continuity}</span>}
+                                  {ar.trend !== '' && <span className={css.meta}><b>趋势：</b>{ar.trend}</span>}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+              </>
+            ) : (
+              <>
             <div className={css.busyRow} style={{ flexWrap: 'wrap' }}>
               <span className={css.cardTitle}>{tt('facts.title', { n: (project?.facts ?? []).length })}</span>
               <button
@@ -3809,14 +4024,92 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             ) : (
               <span className={css.meta}>暂无事实条目——写一章后会自动生成，或点击上方「回填」。</span>
             )}
+              </>
+            )}
           </div>
         )}
 
         {activeTab === 'plotlines' && (
-          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+          <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle}>{tt('tab.plotlines')}（{project?.plotlines?.length ?? 0}）</span>
-              <div className={css.row} style={{ flexWrap: 'wrap' }}>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📜 长线管理</span>
+            </div>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                <button
+                  type="button"
+                  className={`${css.button} ${longlineTab === 'plotlines' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
+                  onClick={() => { changeLonglineTab('plotlines') }}
+                  title="剧情线：故事明线（主线 / 支线 / 人物 / 悬念）"
+                >
+                  🧵 剧情线（{project?.plotlines?.length ?? 0}）
+                </button>
+                <button
+                  type="button"
+                  className={`${css.button} ${longlineTab === 'foreshadow' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
+                  onClick={() => { changeLonglineTab('foreshadow') }}
+                  title="伏笔：道具 / 事件级暗线（埋设 → 回收）"
+                >
+                  🔮 伏笔（{foreshadows.length}）
+                </button>
+              </div>
+
+            {longlineTab === 'foreshadow' ? (
+              <>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <span className={css.cardTitle}>🔮 {tt('foreshadow.title')}（{foreshadows.length}）</span>
+                <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSuggestForeshadows() }}>
+                  {tt('foreshadow.suggest')}
+                </button>
+              </div>
+              {foreshadows.length === 0 ? (
+                <span className={css.meta}>{tt('foreshadow.none')}</span>
+              ) : (
+                <div className={css.chapterList}>
+                  {foreshadows.map(f => {
+                    const statusLabel = { planned: tt('foreshadow.planned'), planted: tt('foreshadow.planted'), progressing: tt('foreshadow.progressing'), resolved: tt('foreshadow.resolved'), abandoned: tt('foreshadow.abandoned') }[f.status]
+                    const statusColor = f.status === 'resolved' ? 'var(--nf-success)' : f.status === 'planted' || f.status === 'progressing' ? 'var(--nf-accent)' : f.status === 'abandoned' ? 'var(--nf-text-3)' : 'var(--nf-info)'
+                    return (
+                      <div key={f.id} className={css.chapter}>
+                        <div className={css.chapterMain}>
+                          <div className={css.chapterTitle}>
+                            <span>{f.description}</span>
+                          </div>
+                          <div className={css.meta}>
+                            {f.plantedChapter !== undefined && <span>{tt('foreshadow.plantedAt')} 第{f.plantedChapter}章 · </span>}
+                            {f.targetChapter !== undefined && <span>{tt('foreshadow.target')} 第{f.targetChapter}章 · </span>}
+                            {f.resolvedNote !== undefined && f.resolvedNote !== '' && <span>回收：{f.resolvedNote} · </span>}
+                          </div>
+                        </div>
+                        <span className={css.badge} style={{ borderColor: statusColor, color: statusColor }}>{statusLabel}</span>
+                        <div className={css.row} style={{ gap: 4 }}>
+                          {f.status === 'planned' && (
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
+                              void api.foreshadow({ id: f.id, status: 'planted', plantedChapter: doneCount + 1 }).then(r => setProject(prev => prev === null ? prev : { ...prev, foreshadows: r.foreshadows }))
+                            }}>
+                              {tt('foreshadow.setPlanted')}
+                            </button>
+                          )}
+                          {(f.status === 'planted' || f.status === 'progressing') && (
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
+                              void api.foreshadow({ id: f.id, status: 'resolved', resolvedNote: `第${doneCount}章回收` }).then(r => setProject(prev => prev === null ? prev : { ...prev, foreshadows: r.foreshadows }))
+                            }}>
+                              {tt('foreshadow.setResolved')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              </>
+            ) : (
+              <>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                <span className={css.cardTitle}>🧵 {tt('tab.plotlines')}（{project?.plotlines?.length ?? 0}）</span>
+                <div className={css.row} style={{ flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   className={`${css.button} ${css.buttonSmall}`}
@@ -3945,6 +4238,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 ))}
               </div>
             )}
+              </>
+            )}
           </div>
         )}
 
@@ -3959,7 +4254,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <div className={css.row} style={{ flexWrap: 'wrap' }}>
                 <select
                   className={css.input}
-                  style={{ width: 130 }}
+                  style={{ width: 160 }}
                   value={breakdownScope}
                   onChange={e => { setBreakdownScope(e.target.value as typeof breakdownScope) }}
                   title="分析范围"
@@ -3972,13 +4267,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </select>
                 <select
                   className={css.input}
-                  style={{ width: 100 }}
+                  style={{ width: 150 }}
                   value={breakdownPreset}
                   onChange={e => { setBreakdownPreset(e.target.value as 'quick' | 'standard') }}
                   title="分析档位"
                 >
                   <option value="quick">快速（4 维）</option>
-                  <option value="standard">标准（+卖点）</option>
+                  <option value="standard">标准+卖点</option>
                 </select>
                 <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleBreakdown() }} title="对已写章节做结构/人物/文风/卖点体检（约 1-3 分钟，消耗 LLM 额度）">
                   {busy ? '⏳ 分析中…' : '✨ 开始拆书'}
@@ -4022,24 +4317,26 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'storyboard' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle}>🎬 漫剧工坊</span>
-              <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🎬 漫剧工坊</span>
+            </div>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
                 <button
                   type="button"
-                  className={`${css.button} ${css.buttonSmall} ${storyboardView === 'single' ? css.buttonPrimary : ''}`}
+                  className={`${css.button} ${storyboardView === 'single' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
                   onClick={() => { setStoryboardView('single') }}
                 >
                   🎞️ 单集分镜
                 </button>
                 <button
                   type="button"
-                  className={`${css.button} ${css.buttonSmall} ${storyboardView === 'plan' ? css.buttonPrimary : ''}`}
+                  className={`${css.button} ${storyboardView === 'plan' ? css.buttonPrimary : ''}`}
+                  style={{ fontSize: 14, flex: 1 }}
                   onClick={() => { setStoryboardView('plan') }}
                 >
                   📺 按卷规划
                 </button>
               </div>
-            </div>
 
             {storyboardView === 'plan' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

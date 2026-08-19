@@ -174,7 +174,7 @@ export declare function markForeshadowPlanted(project: ProjectState, outputDir: 
  */
 export declare function extractFacts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<number>;
 /** 全书一致性质检：LLM 分批扫描已生成章节 + 设定 + 事实库，聚合矛盾清单。 */
-export declare function auditBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string): Promise<AuditIssue[]>;
+export declare function auditBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, onProgress?: (completedBatches: number, totalBatches: number) => void): Promise<AuditIssue[]>;
 /** 小说简介：AI 生成或按已写开头补全（面向读者的作品门面）。 */
 export declare function generateBlurb(ctx: Context, config: NovelConfig, project: ProjectState, partial?: string): Promise<string>;
 /**
