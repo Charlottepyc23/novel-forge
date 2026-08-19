@@ -73,6 +73,12 @@ export declare const NOVEL_API: {
     readonly storyboard: "/api/dsh-novel-forge/storyboard";
     /** 漫剧分集计划：读一卷 → 按故事弧线分集（高潮拆集/过渡并章）。 */
     readonly storyboardPlan: "/api/dsh-novel-forge/storyboard/plan";
+    /** 生产单：启动批量生产（计划补足 + 逐章生成 + 被拒分级处理）。 */
+    readonly runStart: "/api/dsh-novel-forge/run/start";
+    /** 生产单控制：pause / resume / stop。 */
+    readonly runControl: "/api/dsh-novel-forge/run/control";
+    /** 生产单状态（含进度统计与日志）。 */
+    readonly runStatus: "/api/dsh-novel-forge/run/status";
     readonly config: "/api/dsh-novel-forge/config";
     readonly openFolder: "/api/dsh-novel-forge/open-folder";
 };
@@ -726,6 +732,52 @@ export interface StatusResponse {
     project?: ProjectState;
     /** Chapter files already on disk (basenames, sorted). */
     generatedFiles: string[];
+}
+/** 生产单状态（生产单 = 区间批量生产执行器：计划补足 + 逐章生成 + 被拒分级处理）。 */
+export interface RunState {
+    runId: string;
+    /** 区间起点（含）。 */
+    startNo: number;
+    /** 区间终点（含）。 */
+    endNo: number;
+    status: 'running' | 'paused' | 'done' | 'stopped' | 'error';
+    /** 当前处理到的章号（已 approved 的章会快进）。 */
+    currentNo: number;
+    stats: {
+        /** 新生成（含审稿）的章数。 */
+        generated: number;
+        /** 被拒后按意见修订并通过的章数。 */
+        revised: number;
+        /** 被拒后豁免通过（无 high）的章数。 */
+        exempted: number;
+        /** error 后重新生成的章数。 */
+        regenerated: number;
+        /** 生成失败的章数。 */
+        error: number;
+    };
+    /** 两轮修订仍不过、保留草稿待人工的章号。 */
+    pendingManual: number[];
+    /** 运行日志（保留最近 300 条）。 */
+    log: Array<{
+        at: string;
+        text: string;
+    }>;
+    startedAt: string;
+    updatedAt: string;
+    error?: string;
+}
+/** POST /run/start request. */
+export interface RunStartRequest {
+    /** 起始章号（默认 1）。 */
+    startNo?: number;
+    /** 结束章号（含；超出计划时自动补计划）。 */
+    endNo?: number;
+    /** 或指定新增章数（从当前最后一章 +1 起）。 */
+    count?: number;
+}
+/** POST /run/control request. */
+export interface RunControlRequest {
+    action: 'pause' | 'resume' | 'stop';
 }
 /** POST /load-outline request: either a docx path or raw text. */
 export interface LoadOutlineRequest {

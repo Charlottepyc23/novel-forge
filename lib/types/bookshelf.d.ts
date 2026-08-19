@@ -32,6 +32,6 @@ export declare function activateBook(id: string): BookEntry | undefined;
 export declare function removeBook(id: string): boolean;
 /** 当前书输出目录（无书架则 undefined，回退 settings）。 */
 export declare function activeBookOutputDir(): string | undefined;
-/** 默认输出目录推断：桌面/书名。 */
+/** 默认输出目录推断：小说目录/书名。 */
 export declare function defaultOutputDirFor(bookName: string): string;
 export {};

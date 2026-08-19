@@ -13,6 +13,7 @@ import { AssistantTab } from './AssistantTab.tsx'
 import { AssetsTab } from './AssetsTab.tsx'
 import { ShelfView } from './ShelfView.tsx'
 import { ReaderView } from './ReaderView.tsx'
+import { RunPanel } from './RunPanel.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
 import { WorldTab } from './WorldTab.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
@@ -39,7 +40,7 @@ import css from './panel.module.css'
 export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
   | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'storyboard'
-  | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle'
+  | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run'
 
 /** Panel shell props. */
 export interface NovelPanelProps {
@@ -71,6 +72,7 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'blurb', label: '卷首语', icon: '📖' },
       { id: 'plan', label: tt('tab.plan'), icon: '📚' },
       { id: 'plotlines', label: tt('tab.plotlines'), icon: '🧵' },
+      { id: 'run', label: '生产单', icon: '🏭' },
     ],
   },
   {
@@ -3944,6 +3946,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'run' && (
+          <RunPanel api={api} totalChapters={chapters.length} />
         )}
 
         {activeTab === 'breakdown' && (

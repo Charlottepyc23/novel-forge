@@ -116,6 +116,12 @@ export declare class NovelApi {
     bookActivate(id: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
     /** 移除书架条目。 */
     bookRemove(id: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
+    /** 生产单：启动批量生产（区间或新增 N 章；计划不足自动补）。 */
+    runStart(req: import('../protocol.ts').RunStartRequest): Promise<import('../protocol.ts').RunState>;
+    /** 生产单控制：pause / resume / stop。 */
+    runControl(action: 'pause' | 'resume' | 'stop'): Promise<import('../protocol.ts').RunState | null>;
+    /** 生产单状态（无生产单返回 null）。 */
+    runStatus(): Promise<import('../protocol.ts').RunState | null>;
     /** Get project writing assets + built-in libraries. */
     assets(): Promise<AssetsResponse>;
     /** Patch project writing assets. */

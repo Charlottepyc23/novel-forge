@@ -144,8 +144,8 @@ export function activeBookOutputDir(): string | undefined {
   return book?.outputDir
 }
 
-/** 默认输出目录推断：桌面/书名。 */
+/** 默认输出目录推断：小说目录/书名。 */
 export function defaultOutputDirFor(bookName: string): string {
   const clean = bookName.replace(/[\\/:*?"<>|]/g, '').trim().slice(0, 40) || '未命名小说'
-  return join(homedir(), 'Desktop', clean)
+  return join('D:\\用户目录\\harness\\novels', clean)
 }

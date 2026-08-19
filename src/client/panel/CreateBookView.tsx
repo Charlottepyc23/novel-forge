@@ -86,8 +86,8 @@ export function CreateBookView({
 
   /** 生成/换批：只补未暂留的空槽；exclude 传已暂留方案的卖点方向。 */
   const handleSuggest = async (): Promise<void> => {
-    if (idea.trim().length < 50) {
-      setError('想法太短（<50 字）：多写一两句——主角是谁、什么世界、想要什么爽点')
+    if (idea.trim().length < 10) {
+      setError('想法太短（<10 字）：至少写一句完整想法，如「男主穿越修仙界靠做菜无敌」')
       return
     }
     setSuggesting(true)
@@ -253,7 +253,7 @@ export function CreateBookView({
                 <button
                   type="button"
                   className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
-                  disabled={suggesting || idea.trim().length < 50}
+                  disabled={suggesting || idea.trim().length < 10}
                   onClick={() => { void handleSuggest() }}
                   title="生成 3 个方向不同的大纲方案供选择（约消耗 6-8k token）"
                 >

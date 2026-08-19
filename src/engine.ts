@@ -6,6 +6,23 @@
  * web-server dependencies), so routes stay thin and logic is testable.
  */
 
+/**
+ * 内容合规红线（平台硬性要求）：所有书籍、所有章节无条件生效，
+ * 优先级高于单书大纲/圣经中的任何设定与作者自定义红线。
+ * 注入点：章节生成系统提示 + 审稿系统提示（命中即 high）。
+ */
+export const COMPLIANCE_REDLINES: ReadonlyArray<string> = [
+  '1. 不得出现反对宪法所确定的基本原则的内容。',
+  '2. 不得出现危害国家安全、泄露国家秘密、颠覆国家政权、破坏国家统一的内容。',
+  '3. 不得出现危害国家荣誉和利益的内容。',
+  '4. 不得出现煽动民族仇恨、民族歧视、破坏民族团结的内容。',
+  '5. 不得出现破坏国家宗教政策、宣扬邪教和愚昧迷信的内容（不得以真实宗教、邪教或迷信活动为背景进行宣扬）。',
+  '6. 不得出现散布谣言、扰乱社会秩序、破坏社会稳定的内容。',
+  '7. 不得出现淫秽色情、赌博、暴力、凶杀、恐怖或教唆犯罪的内容（网文语境：禁止露骨性描写、血腥暴力渲染、赌博教唆、犯罪手法详细教学）。',
+  '8. 不得出现侮辱或者诽谤他人、侵害他人合法权益的内容（不得以真实人物、组织为原型进行侮辱或影射攻击）。',
+  '9. 不得出现法律法规禁止的其他内容。',
+]
+
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { createUserMessage, BlockAssembler, ReasoningEffortId, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
@@ -599,6 +616,14 @@ function writeSystemPrompt(project: ProjectState): string {
   sections.push('3. 尊重大纲与设定圣经：人设不崩、金手指规则不自相矛盾、战力不随意膨胀。')
   sections.push('4. 章末留一个钩子（悬念、反转或新线索），吸引读者读下一章。')
   sections.push('5. 语言流畅自然，符合中文网文语感，避免翻译腔与病句。')
+  sections.push('6. 对话与冲突密度：每章至少 1 处实质对话或正面对抗/交锋场面；推理与心理活动必须用动作、环境细节、微表情、对话呈现，禁止整章纯内心独白铺陈（禁止"解说式"交代线索）。')
+  sections.push('7. 反派与对手的行动力：本章出现的反派/对手必须有其行动、反制或压迫感（布局、试探、追索、交锋至少占其一），不得作为纯背景板存在。')
+  sections.push('8. 配角辨识度：重要新登场配角应给姓名或可辨识的独有特征；禁止通篇用"瘦高个/灰衣人/戴面具者"等身形标签代称同一角色。')
+  sections.push('9. 信息呈现方式：关键线索、设定、局势通过对话、动作、发现物呈现，禁止主角内心"讲解"给读者听。')
+  sections.push('')
+  sections.push('==================== 内容合规红线（平台硬性要求，最高优先级，违反即失败） ====================')
+  sections.push(COMPLIANCE_REDLINES.join('\n'))
+  sections.push('以上九条为硬性底线，任何情况下不得以任何形式出现或影射；若剧情确需涉及（如批判、反讽），只能以明确否定、揭露、批判的立场呈现，且不得展开细节。')
   return sections.join('\n')
 }
 
@@ -718,6 +743,8 @@ function reviewSystemPrompt(project: ProjectState): string {
     '5. 节奏与爽点：本章是否有推进、有钩子，是否拖沓灌水。',
     '6. 逻辑漏洞：前后矛盾、时间线错误、对话失真。',
     '7. 反 AI 规则：逐条核对下方「反 AI 规则」清单，命中即列为问题。',
+    '8. 呈现方式：整章是否纯内心推理铺陈（无对话/无对抗，推理全靠解说）；反派是否纯背景板无行动；重要配角是否无名标签化（瘦高个/灰衣人全程代称）——命中即列为问题。',
+    '9. 内容合规（最高优先级）：逐条核对下方「内容合规红线」，任何一条命中（含影射、暗示、详细描写）必须列为 high，并给出改写建议。',
     '输出必须是合法 JSON 对象，不要输出任何其他文字：',
     '{"score": 0-100的整数, "verdict": "一句话总评", "issues": [{"severity": "high|medium|low", "item": "问题描述", "suggestion": "修改建议"}]}',
     '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
@@ -739,6 +766,9 @@ function reviewSystemPrompt(project: ProjectState): string {
     }
     if (bible.redLines.length > 0) sections.push('红线：\n' + bible.redLines.map(r => `- ${r}`).join('\n'))
   }
+  sections.push('\n==================== 内容合规红线（平台硬性要求，最高优先级） ====================')
+  sections.push(COMPLIANCE_REDLINES.join('\n'))
+  sections.push('以上九条为硬性底线：正文中任何一条命中（含影射、暗示、详细展开）都必须列为 high，并给出改写建议；作者自定义红线不得豁免这九条。')
   return sections.join('\n')
 }
 
@@ -1217,6 +1247,9 @@ export async function suggestOutlines(
   ].join('\n')
   const user = [
     `作者的想法：${idea}`,
+    idea.trim().length < 40
+      ? '作者的想法非常简短（可能只有一句）。请基于通用网文套路合理扩展补全：为每个方案自洽地设计金手指/核心设定、主角人设与动机、主线走向，使其成为完整可开书的大纲；不同方案的方向仍须明显差异。'
+      : '',
     exclude.length > 0
       ? `需避开的已暂留方案方向（新方案不得与之雷同）：\n${exclude.map((e, i) => `${i + 1}. ${e}`).join('\n')}`
       : '',

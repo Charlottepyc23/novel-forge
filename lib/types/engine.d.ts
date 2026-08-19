@@ -5,6 +5,12 @@
  * tracking, project persistence, and whole-book export. Pure Node (no
  * web-server dependencies), so routes stay thin and logic is testable.
  */
+/**
+ * 内容合规红线（平台硬性要求）：所有书籍、所有章节无条件生效，
+ * 优先级高于单书大纲/圣经中的任何设定与作者自定义红线。
+ * 注入点：章节生成系统提示 + 审稿系统提示（命中即 high）。
+ */
+export declare const COMPLIANCE_REDLINES: ReadonlyArray<string>;
 import type { Context } from '@deepseek-ai/cordis';
 import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, StoryBible, StoryboardPlanResponse, StoryboardResponse, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */

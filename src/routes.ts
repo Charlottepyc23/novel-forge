@@ -14,6 +14,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { join } from 'node:path'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { Context } from '@deepseek-ai/cordis'
+import { ProductionRunner } from './run.ts'
 import {
   NOVEL_API,
   type AssetsPatch,
@@ -57,6 +58,9 @@ import {
   type ResetRequest,
   type ReviewReport,
   type ReviewRequest,
+  type RunControlRequest,
+  type RunStartRequest,
+  type RunState,
   type RewriteRequest,
   type RolesRequest,
   type RolesResponse,
@@ -1985,6 +1989,73 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ----------------------------------------------------------- production run
+  /** 生产单执行器（单例）：计划补足 → 逐章生成 → 被拒分级处理 → 断点续跑。 */
+  const runner = new ProductionRunner({ ctx, getConfig })
+
+  const runStartRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.runStart,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<RunStartRequest>(req)
+      const config = getConfig()
+      const project = loadProject(config.outputDir)
+      if (project === undefined) {
+        writeJson(res, 400, { error: '输出目录中没有项目' })
+        return
+      }
+      const startNo = Number.isInteger(body?.startNo) && (body!.startNo! >= 1) ? body!.startNo! : 1
+      let endNo: number
+      if (Number.isInteger(body?.endNo) && (body!.endNo! >= startNo)) {
+        endNo = body!.endNo!
+      } else if (Number.isInteger(body?.count) && (body!.count! >= 1) && (body!.count! <= 200)) {
+        const last = Math.max(0, ...project.chapters.map(c => c.no))
+        endNo = last + body!.count!
+      } else {
+        writeJson(res, 400, { error: '请提供 endNo 或 count（1-200）' })
+        return
+      }
+      try {
+        const state = await runner.start(startNo, endNo)
+        writeJson(res, 200, state satisfies RunState)
+      } catch (error) {
+        writeJson(res, 409, { error: (error as Error).message })
+      }
+    },
+  }
+
+  const runControlRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.runControl,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<RunControlRequest>(req)
+      const state = runner.status()
+      if (state === null) {
+        writeJson(res, 400, { error: '没有生产单' })
+        return
+      }
+      if (body?.action === 'pause') runner.pause()
+      else if (body?.action === 'resume') runner.resume()
+      else if (body?.action === 'stop') runner.stop()
+      else {
+        writeJson(res, 400, { error: 'action 须为 pause / resume / stop' })
+        return
+      }
+      writeJson(res, 200, runner.status())
+    },
+  }
+
+  const runStatusRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.runStatus,
+    handler: (req, res) => {
+      if (!guard(req, res, 'GET')) return
+      writeJson(res, 200, runner.status())
+    },
+  }
+
   return [
     statusRoute,
     loadOutlineRoute,
@@ -2033,6 +2104,9 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     breakdownRoute,
     storyboardRoute,
     storyboardPlanRoute,
+    runStartRoute,
+    runControlRoute,
+    runStatusRoute,
   ]
 }
 

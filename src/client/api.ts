@@ -254,6 +254,29 @@ export class NovelApi {
     return postJson<import('../protocol.ts').BookshelfSnapshot>('/api/dsh-novel-forge/bookshelf/remove', { id })
   }
 
+  /** 生产单：启动批量生产（区间或新增 N 章；计划不足自动补）。 */
+  async runStart(req: import('../protocol.ts').RunStartRequest): Promise<import('../protocol.ts').RunState> {
+    return postJson<import('../protocol.ts').RunState>(NOVEL_API.runStart, req)
+  }
+
+  /** 生产单控制：pause / resume / stop。 */
+  async runControl(action: 'pause' | 'resume' | 'stop'): Promise<import('../protocol.ts').RunState | null> {
+    const response = await fetch(NOVEL_API.runControl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    })
+    if (response.status === 400) return null
+    return readJson<import('../protocol.ts').RunState>(response)
+  }
+
+  /** 生产单状态（无生产单返回 null）。 */
+  async runStatus(): Promise<import('../protocol.ts').RunState | null> {
+    const response = await fetch(NOVEL_API.runStatus)
+    if (response.status === 404) return null
+    return readJson<import('../protocol.ts').RunState | null>(response)
+  }
+
   /** Get project writing assets + built-in libraries. */
   async assets(): Promise<AssetsResponse> {
     const response = await fetch(NOVEL_API.assets)

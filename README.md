@@ -157,7 +157,7 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 - **LLM 额度消耗**：生成/审稿/润色/质检/提炼/复盘等所有 AI 操作都调用 LLM（默认 `deepseek-official / deepseek-v4-flash`）。量级参考：一章 3000-4000 字正文 ≈ 1-2 万 token（含推理）；审稿约 2000-3000 token；全书质检与角色提炼更贵（数万 token）。批量操作（如一次生成多章、全书质检、复盘补齐）会连续消耗额度，建议分小批执行。
 - **写操作守卫**：AI 助手只在作者**明确要求**时执行写操作（生成/修订/删除章节、改设定等）。你只是提问、查信息时，助手只会回答、不会擅自改文——防止"随口一问"误触发生成。
 - **并发安全**：计划/生成/审稿落盘前会自动合并磁盘上的最新设定（道藏/角色库/剧情线/知情度），多窗口同时操作不会互相覆盖。
-- **数据落盘**：每本书一个输出目录（默认 `~/Desktop/<书名>`），正文为 Markdown 文件、项目状态为 `novel-project.json`、助手对话为 `novel-assistant.jsonl`；润色/重写应用草稿前自动生成 `.bak.md` 备份原稿。
+- **数据落盘**：每本书一个输出目录（默认 `~/.dsh/novels\<书名>`），正文为 Markdown 文件、项目状态为 `novel-project.json`、助手对话为 `novel-assistant.jsonl`；润色/重写应用草稿前自动生成 `.bak.md` 备份原稿。
 - **设置持久化**：面板「设置」页的修改（输出目录/模型/审稿阈值等）写入 `~/.dsh/settings.yaml` 的 `dsh-novel-forge` 段；界面偏好（主题/字号/面板宽度）存在浏览器 localStorage。
 - **token 优化**：生成与审稿已做上下文分片、相关事实注入与摘要合并，长篇连载下批量成本约省 25%，但单章仍受模型上下文窗口限制（超长设定会按需检索注入，而非全量塞入）。
 
@@ -308,7 +308,7 @@ Using this plugin has the following effects on your account, disk and LLM quota:
 - **Concurrency safety**: plan/generate/review merge the latest on-disk settings
   (bible/roles/plotlines/knowledge) before saving, so parallel windows never
   clobber each other.
-- **Data on disk**: each book owns an output directory (default `~/Desktop/<book name>`)
+- **Data on disk**: each book owns an output directory (default `~/.dsh/novels\<book name>`)
   with per-chapter Markdown, `novel-project.json` project state, and
   `novel-assistant.jsonl` assistant log; applying polish/rewrite drafts auto-backs-up
   the original as `.bak.md`.
