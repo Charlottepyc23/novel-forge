@@ -7,6 +7,8 @@
  * changes.
  */
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 import z from 'schemastery'
@@ -69,8 +71,8 @@ export interface Config {
 export const Config: z<Config> = z.object({
   announceToAgent: z.boolean().default(true),
   enabled: z.boolean().default(true),
-  outlinePath: z.string().default('D:\\用户目录\\harness\\novels\\示例书\\《示例书》全书大纲_重新排版版.docx'),
-  outputDir: z.string().default('D:\\用户目录\\harness\\novels\\示例书'),
+  outlinePath: z.string().default(''),
+  outputDir: z.string().default(join(homedir(), '.dsh', 'novels')),
   provider: z.string().default('deepseek-official'),
   model: z.string().default('deepseek-v4-flash'),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']).default('off'),
@@ -87,8 +89,8 @@ export const Config: z<Config> = z.object({
 
 /** Schema defaults, re-read for hand-built test contexts. */
 const DEFAULT_ANNOUNCE = true
-const DEFAULT_OUTLINE_PATH = 'D:\\用户目录\\harness\\novels\\示例书\\《示例书》全书大纲_重新排版版.docx'
-const DEFAULT_OUTPUT_DIR = 'D:\\用户目录\\harness\\novels\\示例书'
+const DEFAULT_OUTLINE_PATH = ''
+const DEFAULT_OUTPUT_DIR = join(homedir(), '.dsh', 'novels')
 const DEFAULT_PROVIDER = 'deepseek-official'
 const DEFAULT_MODEL = 'deepseek-v4-flash'
 const DEFAULT_REASONING_EFFORT = 'off' as const
@@ -103,7 +105,7 @@ const DEFAULT_AUTO_REVIEW_AFTER_REVISE = true
 const SECTION_ORDER = 160
 
 /** Model-facing announcement: plugin presence, capabilities, and limits. */
-export const NOVEL_GUIDANCE = '本机已安装 dsh-novel-forge 插件（AI 编译小说工作台）：侧边栏「小说工坊」入口。能力：读取 docx 大纲（默认 D:\\用户目录\\harness\\novels\\示例书 大纲）或粘贴大纲文本；用 LLM 提炼道藏（人设/世界观/金手指规则/写作红线，即设定圣经）；生成卷计划与章节计划；逐章调用 LLM 生成 3000-4000 字正文并保存为 Markdown（默认输出到 D:\\用户目录\\harness\\novels\\示例书）；每章自动生成摘要（叙事记忆）、自动 AI 审稿（人设/设定/红线/文笔/爽点/逻辑），支持按审稿意见重写、去 AI 味润色、暗线（伏笔）管理、批量连写与全本导出（txt/md）。限制：生成消耗 LLM API 额度；输出目录与模型可在插件设置中修改；章节正文质量取决于大纲完整度。用户提到「小说 / 大纲 / 写小说 / 章节 / 审稿 / 润色 / 示例书」时即指本插件，请据此协作。'
+export const NOVEL_GUIDANCE = '本机已安装 dsh-novel-forge 插件（AI 编译小说工作台）：侧边栏「小说工坊」入口。能力：读取 docx 大纲或粘贴大纲文本；用 LLM 提炼道藏（人设/世界观/金手指规则/写作红线，即设定圣经）；生成卷计划与章节计划；逐章调用 LLM 生成 3000-4000 字正文并保存为 Markdown（默认输出到用户主目录 ~/.dsh/novels）；每章自动生成摘要（叙事记忆）、自动 AI 审稿（人设/设定/红线/文笔/爽点/逻辑），支持按审稿意见重写、去 AI 味润色、暗线（伏笔）管理、批量连写与全本导出（txt/md）。限制：生成消耗 LLM API 额度；输出目录与模型可在插件设置中修改；章节正文质量取决于大纲完整度。用户提到「小说 / 大纲 / 写小说 / 章节 / 审稿 / 润色」时即指本插件，请据此协作。'
 
 /** Resolve a config-like value into the full runtime config. */
 export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
