@@ -47,6 +47,9 @@ Your personal AI novel-writing plugin for DSH: turn an outline into a complete n
 | **分组导航 + 状态角标**：创作/工具/数据库分组，章节待办/伏笔/进度角标 | **Grouped nav + badges**: creation/tools/database groups with live badges |
 | **iOS 风格毛玻璃 UI**（浅色/深色） | **iOS-style frosted glass UI** (light/dark) |
 | **书架 / 伏笔管理 / 写作资产（题材·推进·写法·反AI规则·自定义引擎）/ 全本导出（TXT/MD）/ 卷首语与封面** | **Bookshelf / foreshadowing / writing assets / full-book export (TXT/MD) / blurb & cover** |
+| **角色形象（🖼️）**：角色详情悬浮页=提示词分发中心——立绘/四视图/表情×N/细节 四类生图提示词（中文默认+英文标签折叠），一次提炼直接产出锚点+表情清单+精修提示词包，图集（立绘/四视图/表情/场景/细节）分类上传 | **Character visuals**: role detail modal as prompt hub — portrait / 4-view / expressions / details prompt kits (CN default + EN tags folded), one-shot extraction yields anchor + expression list + refined kits, gallery uploads by category |
+| **场景库（🏞️）**：从全书提炼「镜头场景」级视觉锚点（五幕结构/时间光态/关键镜头/人物状态），中英文生图提示词 + 场景图集，候选逐条采纳 | **Scene library**: shot-level visual anchors extracted from the book (act structure / time-of-day / key beats / character state), CN+EN prompts, adoptable candidates |
+| **视觉世界观规则（⚠️）**：从道藏提炼生图纠偏规则（如"货架商品=活人，禁止画成常规超市商品"），自动注入所有角色/场景提示词——反常识设定的书不再被生图模型画跑偏 | **Visual world rules**: extraction-time guardrails from the story bible (e.g. "shelf items are living people, no cans/bottles"), auto-injected into every prompt — counter-intuitive settings render correctly |
 
 ## 快速开始 / Quick Start
 
@@ -166,6 +169,8 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 - 生成消耗 LLM API 额度（默认 deepseek-official / deepseek-v4-flash）/ generation consumes LLM API quota
 - 章节质量取决于大纲完整度 / chapter quality depends on outline completeness
 - 设置写入 `~/.dsh/settings.yaml` 的 `dsh-novel-forge` 段 / settings persist in `~/.dsh/settings.yaml`
+- 角色/场景视觉资产为「提示词 + 图集」形态，不内置生图能力；出图请使用外部工具（即梦/豆包/Krea 等），提示词可直接复制 / visual assets are prompt+image anchors; image generation is external (Jimeng/Doubao/Krea) with copy-ready prompts
+- 漫剧分镜/漫画脚本功能已移除（v1.3.0），角色形象与场景库保留为漫剧流水线的视觉锚点底座 / storyboard & comic-script features removed in v1.3.0; role visuals & scene library remain as the visual-anchor foundation
 
 ---
 

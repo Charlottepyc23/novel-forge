@@ -57,6 +57,8 @@ export declare const NOVEL_API: {
     readonly plotlines: "/api/dsh-novel-forge/plotlines";
     /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
     readonly roles: "/api/dsh-novel-forge/roles";
+    readonly scenes: "/api/dsh-novel-forge/scenes";
+    readonly visualRules: "/api/dsh-novel-forge/visual-rules";
     /** 作者复盘补跑：对已写章节补齐 authorReview（全书流式 / 单章 JSON）。 */
     readonly reviewBackfill: "/api/dsh-novel-forge/review/backfill";
     /** 章节复位：generating 卡死 → pending（可重新生成）。 */
@@ -70,9 +72,8 @@ export declare const NOVEL_API: {
     /** 拆书分析：对已写章节做结构/人物/文风/卖点四维体检（两阶段：源笔记→分节分析）。 */
     readonly breakdown: "/api/dsh-novel-forge/breakdown";
     /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表（可适配豆包/Seedance/SD）。 */
-    readonly storyboard: "/api/dsh-novel-forge/storyboard";
     /** 漫剧分集计划：读一卷 → 按故事弧线分集（高潮拆集/过渡并章）。 */
-    readonly storyboardPlan: "/api/dsh-novel-forge/storyboard/plan";
+    /** 漫画脚本：章节 → 分页分格漫画脚本（含角色视觉锚点）。 */
     /** 生产单：启动批量生产（计划补足 + 逐章生成 + 被拒分级处理）。 */
     readonly runStart: "/api/dsh-novel-forge/run/start";
     /** 生产单控制：pause / resume / stop。 */
@@ -457,91 +458,6 @@ export interface BreakdownResponse {
     /** 估算消耗 token。 */
     usedTokens: number;
 }
-/** 漫剧分镜：一个角色锚点卡。 */
-export interface StoryboardCharacterCard {
-    name: string;
-    /** 视觉锚点：发型/五官/体型/标志物（中文描述）。 */
-    visualAnchor: string;
-    /** AI 标签组（英文，全分镜强制复用）。 */
-    tags: string;
-    /** 情绪表情库（英文，按需调用）。 */
-    expressions: string[];
-}
-/** 漫剧分镜：一个分镜格。 */
-export interface StoryboardPanel {
-    /** 序号。 */
-    index: number;
-    /** 时间码（如 0:00-0:03）。 */
-    timecode: string;
-    /** 景别（特写/中景/全景…）。 */
-    shot: string;
-    /** 画面描述（具象动作，非抽象情感）。 */
-    visual: string;
-    /** 台词（情绪标签 + 内容）。 */
-    dialogue: string;
-    /** 转场/动效。 */
-    transition: string;
-    /** AI 提示词（英文标签，豆包/SD 通用）。 */
-    prompt: string;
-}
-/** POST /storyboard 请求：章节 → 漫剧分镜。 */
-export interface StoryboardRequest {
-    chapterNo: number;
-    /** 赛道类型：爽文/甜宠/悬疑/搞笑（留空由 AI 推断）。 */
-    genre?: string;
-    /** 目标平台（抖音/快手/B站…，默认抖音）。 */
-    platform?: string;
-    /** AI 工具偏好：doubao / seedance / sd / mj（影响提示词格式，默认 doubao）。 */
-    tool?: string;
-}
-/** POST /storyboard 响应。 */
-export interface StoryboardResponse {
-    /** 本集标题。 */
-    title: string;
-    /** 赛道与节奏说明。 */
-    pacingNote: string;
-    /** 本集钩子（结尾悬念）。 */
-    hook: string;
-    /** 角色锚点卡。 */
-    characters: StoryboardCharacterCard[];
-    /** 分镜表。 */
-    panels: StoryboardPanel[];
-    /** 结尾钩子台词。 */
-    endingHook: string;
-}
-/** 漫剧分集计划：一集（含 1-N 章）。 */
-export interface StoryboardEpisode {
-    /** 集号。 */
-    index: number;
-    /** 集标题（冲突+悬念句式）。 */
-    title: string;
-    /** 涵盖章节号。 */
-    chapters: number[];
-    /** 叙事任务：这集讲什么、为什么这么分。 */
-    narrativeJob: string;
-    /** 开头钩子。 */
-    openingHook: string;
-    /** 结尾钩子（逼看下集）。 */
-    endingHook: string;
-}
-/** POST /storyboard/plan 请求：读一卷 → 输出漫剧分集计划。 */
-export interface StoryboardPlanRequest {
-    /** 卷号（1-5）。 */
-    volumeNo: number;
-    /** 目标平台（默认抖音）。 */
-    platform?: string;
-    /** 每集约 1-2 分钟，最多多少集（默认 25）。 */
-    maxEpisodes?: number;
-}
-/** POST /storyboard/plan 响应。 */
-export interface StoryboardPlanResponse {
-    /** 本卷漫剧化的叙事策略说明。 */
-    strategy: string;
-    /** 分集计划。 */
-    episodes: StoryboardEpisode[];
-    /** 参与规划的章节数。 */
-    chaptersScanned: number;
-}
 /** 角色卡：角色当前状态（从事实库聚合）。 */
 export interface RoleStatusCard {
     name: string;
@@ -585,14 +501,117 @@ export interface RoleRecord {
         /** 依据来源说明（哪几章哪些描写）。 */
         source?: string;
     };
+    /** 角色参考图（dataURL 或 URL）。用于漫画/漫剧出图时锁定角色一致性。 */
+    imageUrl?: string;
+    /** 角色图集（图像锚点）：立绘/四视图/表情/场景/细节等，label 标注用途。 */
+    gallery?: RoleImage[];
+    /** 该角色所需的情绪表情清单（提炼时 LLM 补全 6-12 个，如"疲惫/麻木/压抑悲伤"）。 */
+    expressions?: string[];
+    /** LLM 精修的四类生图提示词包（前端拼装版之外的高质量版，promptKit 接口生成）。 */
+    promptKit?: {
+        /** 立绘：全身/半身正视图。 */
+        portrait: {
+            zh: string;
+            en: string;
+        };
+        /** 四视图：正面/侧面/背面设定表。 */
+        sheet: {
+            zh: string;
+            en: string;
+        };
+        /** 表情：同一脸部锚换情绪，每表情一段。 */
+        expressions: {
+            name: string;
+            zh: string;
+            en: string;
+        }[];
+        /** 细节：标志物局部特写。 */
+        details: {
+            zh: string;
+            en: string;
+        };
+    };
+    /** 漫画/漫剧重要性：main=必须建卡保证一致；support=有锚点即可；extra=路人随机生成不约束。 */
+    importance?: 'main' | 'support' | 'extra';
 }
-/** POST /roles 请求：角色库增删改 + AI 提炼。 */
+/** 角色图集条目：一张已定型的角色图（图像锚点）。 */
+export interface RoleImage {
+    /** 用途标签：立绘 / 四视图 / 表情-疲惫 / 场景 / 细节 等。 */
+    label: string;
+    /** dataURL 或 URL。 */
+    dataUrl: string;
+}
+/** 场景库条目：从正文提炼的「镜头场景」视觉锚点（漫剧分镜/生图用）。 */
+export interface SceneCard {
+    /** 场景名（唯一键），如「旧茶渡·地下石殿」。 */
+    name: string;
+    /** 一句话定位：空间/氛围/功能。 */
+    summary: string;
+    /** 幕归属：第一幕·后场 / 第二幕·卖场 / …（便于按剧情段落组织）。 */
+    act?: string;
+    /** 时间光态：夜间闭店后 / 雨夜 / 凌晨 / 频闪灯… */
+    moment?: string;
+    /** 关键情节镜头 1-3 条：该场景拍什么（人物动作+情绪+镜头推进）。 */
+    beats?: string[];
+    /** 人物在场状态：主角/关键角色在该场景的状态一句话。 */
+    characterState?: string;
+    /** 环境构成：空间结构/陈设/标志物。 */
+    elements: string[];
+    /** 色调与光影（含 HEX 色板，可空）。 */
+    palette: string[];
+    /** 氛围关键词：压抑/神秘/空旷… */
+    moods: string[];
+    /** 中文生图提示词（连贯一段，写实电影感）。 */
+    zh: string;
+    /** 英文生图提示词（逗号分隔标签）。 */
+    en: string;
+    /** 关键标签。 */
+    tags: string[];
+    /** 依据来源（哪几章哪些描写）。 */
+    source?: string;
+    /** 场景图集（图像锚点）：全景/局部/氛围 等。 */
+    gallery?: RoleImage[];
+}
+/** POST /scenes 请求：场景库提炼 / 采纳 / 更新 / 删除 / 图集。 */
+export interface ScenesRequest {
+    op: 'extract' | 'adopt' | 'update' | 'remove' | 'image' | 'removeImage';
+    /** adopt / update 时传入的场景卡（adopt 可修改后采纳）。 */
+    scene?: SceneCard;
+    /** remove / image 时的场景名。 */
+    name?: string;
+    /** op='image' 时的图片 dataURL 与用途标签（全景/局部/氛围）。 */
+    dataUrl?: string;
+    label?: string;
+}
+/** POST /visual-rules 请求：视觉世界观规则提炼 / 保存。 */
+export interface VisualRulesRequest {
+    op: 'extract' | 'save';
+    /** op=save 时的规则数组。 */
+    rules?: string[];
+}
+/** POST /visual-rules 响应。 */
+export interface VisualRulesResponse {
+    rules: string[];
+}
+/** POST /scenes 响应。 */
+export interface ScenesResponse {
+    scenes: SceneCard[];
+    /** op=extract 时的 AI 候选场景。 */
+    candidates?: SceneCard[];
+}
+/** POST /roles 请求：角色库增删改 + AI 提炼 + 参考图上传。 */
 export interface RolesRequest {
-    op: 'extract' | 'adopt' | 'update' | 'remove' | 'visual';
+    op: 'extract' | 'adopt' | 'update' | 'remove' | 'visual' | 'image' | 'removeImage' | 'imageGenerate' | 'promptKit';
     /** adopt / update 时传入的角色（adopt 可修改后采纳）。 */
     role?: RoleRecord;
     /** remove 时的角色名。 */
     name?: string;
+    /** op='image' 时的参考图 dataURL。 */
+    dataUrl?: string;
+    /** op='image' 时的图集用途标签（立绘/四视图/表情-x/场景/细节）；缺省视为角色参考图（imageUrl）。 */
+    label?: string;
+    /** op='imageGenerate' 时的漫画风格预设 id（用于统一角色图与漫画页风格）。 */
+    style?: string;
 }
 /** POST /roles 响应。 */
 export interface RolesResponse {
@@ -601,6 +620,10 @@ export interface RolesResponse {
     candidates?: RoleRecord[];
     /** op=visual 时的动漫形象描述词（已写入角色卡）。 */
     visual?: RoleRecord['imagePrompt'];
+    /** op=promptKit 时的四类提示词精修包（已写入角色卡）。 */
+    promptKit?: RoleRecord['promptKit'];
+    /** op=image 时的角色参考图 dataURL。 */
+    imageUrl?: string;
 }
 /** POST /bible/patch 请求：局部修补设定圣经。 */
 export interface BiblePatchRequest {
@@ -716,8 +739,15 @@ export interface ProjectState {
     plotlines?: Plotline[];
     /** 角色库（作者维护 + AI 提炼的主表）。 */
     roles?: RoleRecord[];
+    /** 场景库（作者维护 + AI 提炼的主表）。 */
+    scenes?: SceneCard[];
+    /** 视觉世界观规则（生图/生视频必须遵守，从道藏提炼，注入所有提示词）。 */
+    visualRules?: string[];
     /** 人物志：角色当前状态聚合结果（从编年录刷新后存档，打开页面直接显示）。 */
     roleStatus?: RoleStatusCard[];
+    /** 漫剧分镜结果缓存：章号 → 分镜（持久化，刷新不丢）。 */
+    /** 漫剧分集计划缓存：卷号/0=全书 → 分集计划（持久化，刷新不丢）。 */
+    /** 漫画脚本缓存：章号 → 漫画脚本（持久化，刷新不丢）。 */
     /** ISO timestamps. */
     createdAt: string;
     updatedAt: string;
@@ -746,6 +776,12 @@ export interface NovelConfig {
     autoAuthorReview: boolean;
     /** 修订/润色产出草稿后是否自动附带一次 AI 审查（工作区显示新稿评分与剩余问题）。 */
     autoReviewAfterRevise: boolean;
+    /** 豆包/Seedream 生图 API Key（保存在服务端配置，不暴露给前端明文回显）。 */
+    imageApiKey?: string;
+    /** 豆包/Seedream 生图模型 ID（如 doubao-seedream-5-0-pro-260628）。 */
+    imageApiModel?: string;
+    /** 是否启用豆包生图（默认关，避免误调用付费 API）。 */
+    imageApiEnabled?: boolean;
 }
 /** GET /status response. */
 export interface StatusResponse {
@@ -970,6 +1006,9 @@ export interface ConfigPatch {
     autoReview?: boolean;
     autoAuthorReview?: boolean;
     autoReviewAfterRevise?: boolean;
+    imageApiKey?: string;
+    imageApiModel?: string;
+    imageApiEnabled?: boolean;
 }
 /** One assistant conversation message (persisted per project). */
 export interface AssistantMessage {

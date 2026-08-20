@@ -12,7 +12,7 @@
  */
 export declare const COMPLIANCE_REDLINES: ReadonlyArray<string>;
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, StoryBible, StoryboardPlanResponse, StoryboardResponse, Volume, WorldState } from './protocol.ts';
+import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, SceneCard, StoryBible, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -45,7 +45,7 @@ export declare function readChapterFile(outputDir: string, chapter: ChapterPlan)
 /** Create a fresh project from an outline. */
 export declare function createProject(outline: string, outlinePath?: string): ProjectState;
 /** Extract the story bible from an outline. */
-export declare function extractBible(ctx: Context, config: NovelConfig, outline: string): Promise<StoryBible>;
+export declare function extractBible(ctx: Context, config: NovelConfig, outline: string, project?: ProjectState): Promise<StoryBible>;
 /** Plan volumes from an outline. */
 export declare function planVolumes(ctx: Context, config: NovelConfig, outline: string): Promise<Volume[]>;
 /**
@@ -69,18 +69,31 @@ export declare function suggestPlotlines(ctx: Context, config: NovelConfig, proj
 export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfig, project: ProjectState, line: Plotline): Promise<string>;
 /** ✨ AI 从全书提炼角色库：大纲 + 道藏 + 编年录 + 章节摘要 → 结构化角色清单。 */
 export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
+/** ✨ AI 从全书提炼场景库：正文/编年录 → 高频重要场景的结构化视觉锚点。 */
+export declare function extractScenes(ctx: Context, config: NovelConfig, project: ProjectState): Promise<SceneCard[]>;
 /** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */
 export interface RoleVisualPrompt {
     zh: string;
     en: string;
     tags: string[];
     source: string;
+    /** 该角色所需情绪表情清单（6-12 个，如 疲惫/麻木/压抑悲伤）。 */
+    expressions?: string[];
+    /** 四类精修提示词（立绘/四视图/表情/细节，一次提炼直接产出）。 */
+    promptKit?: RoleRecord['promptKit'];
 }
 /**
  * 为单个角色提炼「动漫形象描述词」：扫描该角色出场的已写章节正文，
  * 截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
  */
 export declare function extractRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, roleName: string): Promise<RoleVisualPrompt>;
+/**
+ * 角色四类生图提示词精修包（promptKit）：以锚点 + 表情清单 + 视觉规则为输入，
+ * LLM 产出 立绘/四视图/表情×N/细节 四套 zh+en 提示词（比前端拼装更精炼）。
+ */
+export declare function generateRolePromptKit(ctx: Context, config: NovelConfig, project: ProjectState, roleName: string): Promise<RoleRecord['promptKit']>;
+/** ✨ 从道藏/红线提炼「视觉世界观规则」：生图/生视频必须遵守的设定纠偏（如"商品=人，禁止常规超市商品"）。 */
+export declare function extractVisualRules(ctx: Context, config: NovelConfig, project: ProjectState): Promise<string[]>;
 /**
  * 开书想法 → AI 大纲：输入一句话想法，生成 2-3 个方向不同、可直接开书的完整大纲方案。
  * @param count 本次生成几个（默认 3，最多 3）
@@ -96,17 +109,7 @@ export declare function suggestOutlines(ctx: Context, config: NovelConfig, idea:
  *  @param budgetTokens token 预算上限（超过即截断章节取样）。
  */
 export declare function breakdownBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<BreakdownResponse>;
-/**
- * 漫剧分镜生成：把一章正文改编为短视频漫剧分镜（吸收 manga-script-master 方法论）。
- * 产出：本集标题 + 赛道节奏说明 + 角色视觉锚点卡 + 分镜表（8-12 格）+ 结尾钩子。
- * 角色锚点优先复用角色库 imagePrompt（无则从正文提炼）。
- */
-export declare function generateStoryboard(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number, genre: string, platform: string, tool: string): Promise<StoryboardResponse>;
-/**
- * 漫剧分集计划：AI 通读一卷的章节标题+摘要+beats，按故事弧线把章节分组为漫剧集。
- * 原则（吸收 manga-script 节奏模型）：高潮章单独成集、过渡章合并、断点选在钩子最强处。
- */
-export declare function planStoryboardEpisodes(ctx: Context, config: NovelConfig, project: ProjectState, volumeNo: number, platform: string, maxEpisodes: number): Promise<StoryboardPlanResponse>;
+export declare function generateRoleReferenceImage(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, name: string, style?: string): Promise<string>;
 /** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
 export declare function analyzePlotlineHealth(ctx: Context, config: NovelConfig, project: ProjectState): Promise<PlotlineHealthReport>;
 /** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */

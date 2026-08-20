@@ -58,6 +58,12 @@ export interface Config {
   autoAuthorReview?: boolean
   /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
   autoReviewAfterRevise?: boolean
+  /** 豆包/Seedream 生图 API Key。 */
+  imageApiKey?: string
+  /** 豆包/Seedream 生图模型 ID。 */
+  imageApiModel?: string
+  /** 是否启用豆包生图（默认关）。 */
+  imageApiEnabled?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -74,6 +80,9 @@ export const Config: z<Config> = z.object({
   autoReview: z.boolean().default(true),
   autoAuthorReview: z.boolean().default(true),
   autoReviewAfterRevise: z.boolean().default(true),
+  imageApiKey: z.string().default(''),
+  imageApiModel: z.string().default(''),
+  imageApiEnabled: z.boolean().default(false),
 })
 
 /** Schema defaults, re-read for hand-built test contexts. */
@@ -110,6 +119,9 @@ export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
     autoReview: value?.autoReview ?? DEFAULT_AUTO_REVIEW,
     autoAuthorReview: value?.autoAuthorReview ?? DEFAULT_AUTO_AUTHOR_REVIEW,
     autoReviewAfterRevise: value?.autoReviewAfterRevise ?? DEFAULT_AUTO_REVIEW_AFTER_REVISE,
+    imageApiKey: value?.imageApiKey,
+    imageApiModel: value?.imageApiModel,
+    imageApiEnabled: value?.imageApiEnabled ?? false,
   }
 }
 
@@ -145,6 +157,9 @@ export function apply(ctx: Context, config?: Config): void {
     if (patch.autoReview !== undefined) next.autoReview = patch.autoReview
     if (patch.autoAuthorReview !== undefined) next.autoAuthorReview = patch.autoAuthorReview
     if (patch.autoReviewAfterRevise !== undefined) next.autoReviewAfterRevise = patch.autoReviewAfterRevise
+    if (patch.imageApiKey !== undefined) next.imageApiKey = patch.imageApiKey
+    if (patch.imageApiModel !== undefined) next.imageApiModel = patch.imageApiModel
+    if (patch.imageApiEnabled !== undefined) next.imageApiEnabled = patch.imageApiEnabled
     // Persist through the settings seam when available; otherwise keep in memory.
     // (ctx.get is the non-strict service access — no inject requirement, same
     // pattern installSettingsSection itself uses.)

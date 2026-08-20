@@ -40,7 +40,8 @@ import css from './panel.module.css'
 /** The panel's tab identifiers. */
 export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
-  | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'storyboard'
+  | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown'
+  | 'roleImage' | 'scenes'
   | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run'
   | 'book' | 'assets'
 
@@ -84,7 +85,8 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'assistant', label: tt('tab.assistant'), icon: '💬' },
       { id: 'progress', label: '工作进度', icon: '📊' },
       { id: 'breakdown', label: '拆书分析', icon: '🔍' },
-      { id: 'storyboard', label: '漫剧工坊', icon: '🎬' },
+      { id: 'roleImage', label: '角色形象', icon: '🖼️' },
+      { id: 'scenes', label: '场景库', icon: '🏞️' },
       { id: 'run', label: '生产单', icon: '🏭' },
     ],
   },
@@ -479,16 +481,23 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   const [breakdownResult, setBreakdownResult] = useState<import('../../protocol.ts').BreakdownResponse | null>(null)
   const [breakdownScope, setBreakdownScope] = useState<'recent' | 'volume:2' | 'volume:3' | 'all'>('recent')
   const [breakdownPreset, setBreakdownPreset] = useState<'quick' | 'standard'>('quick')
-  /** 漫剧分镜结果（null = 未生成）。 */
-  const [storyboardResult, setStoryboardResult] = useState<import('../../protocol.ts').StoryboardResponse | null>(null)
-  const [storyboardTool, setStoryboardTool] = useState<'doubao' | 'seedance' | 'sd' | 'mj'>('doubao')
-  /** 漫剧工坊当前选中的章节号。 */
-  const [storyboardChapterNo, setStoryboardChapterNo] = useState<number>(0)
-  /** 漫剧分集计划结果（null = 未生成）。 */
-  const [storyboardPlanResult, setStoryboardPlanResult] = useState<import('../../protocol.ts').StoryboardPlanResponse | null>(null)
-  const [storyboardPlanVolume, setStoryboardPlanVolume] = useState<number>(1)
-  /** 漫剧工坊子视图：single=单集分镜 / plan=按卷规划。 */
-  const [storyboardView, setStoryboardView] = useState<'single' | 'plan'>('single')
+  /** 角色图集上传：当前等待上传的角色名。 */
+  const [roleImageTarget, setRoleImageTarget] = useState<string | null>(null)
+  /** 角色图集上传：当前用途标签（立绘/四视图/表情-x/场景/细节）。 */
+  const [roleImageLabel, setRoleImageLabel] = useState('立绘')
+  /** 角色形象详情：当前打开的角色名（null = 关闭）。 */
+  const [detailRoleName, setDetailRoleName] = useState<string | null>(null)
+  /** 详情面板：上传标签输入。 */
+  const [detailUploadLabel, setDetailUploadLabel] = useState('立绘')
+  /** 场景库：AI 提炼候选（null = 未运行）。 */
+  const [sceneCandidates, setSceneCandidates] = useState<import('../../protocol.ts').SceneCard[] | null>(null)
+  /** 场景库：当前打开的场景名。 */
+  const [sceneDetailName, setSceneDetailName] = useState<string | null>(null)
+  /** 场景库：上传标签输入。 */
+  const [sceneUploadLabel, setSceneUploadLabel] = useState('全景')
+  /** 场景库：编辑草稿（null = 不在编辑）。 */
+  const [sceneDraft, setSceneDraft] = useState<import('../../protocol.ts').SceneCard | null>(null)
+  const roleImageInputRef = useRef<HTMLInputElement | null>(null)
   /** AI 建议的剧情线候选（null = 未运行）。 */
   const [plotlineSuggestions, setPlotlineSuggestions] = useState<Plotline[] | null>(null)
   /** 剧情健康检查报告（null = 未运行）。 */
@@ -1133,36 +1142,80 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
-  /** 漫剧分镜：对某章生成角色锚点 + 分镜表（约 1-2 分钟）。 */
-  const handleStoryboard = async (no: number): Promise<void> => {
+  /** 生成单个角色的形象锚点（复用角色库 visual 能力）。 */
+  const handleRoleVisual = async (name: string): Promise<void> => {
     setBusy(true)
-    setBusyLabel(`生成第${no}章漫剧分镜…`)
+    setBusyLabel(`生成「${name}」形象锚点…`)
     setError('')
     try {
-      const result = await api.storyboard(no, undefined, '抖音', storyboardTool)
-      setStoryboardResult(result)
-      pushProgress(`第${no}章分镜完成：${result.panels.length} 格 · 角色卡 ${result.characters.length} 张`, 'done')
+      await api.roles({ op: 'visual', name })
+      await refresh(false)
+      pushProgress(`已生成「${name}」形象锚点`, 'done')
     } catch (err) {
       setError((err as Error).message)
-      pushProgress(`分镜生成失败：${(err as Error).message}`, 'error')
+      pushProgress(`生成「${name}」形象锚点失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
       setBusyLabel('')
     }
   }
 
-  /** 漫剧分集计划：AI 读一卷 → 按故事弧线分集。 */
-  const handleStoryboardPlan = async (): Promise<void> => {
+  /** 上传角色图：读取本地图片为 dataURL 并写入角色卡（带用途标签 → 图集）。 */
+  const handleRoleImageUpload = async (name: string, file: File, label = '立绘'): Promise<void> => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(reader.error ?? new Error('读取图片失败'))
+      reader.readAsDataURL(file)
+    })
     setBusy(true)
-    setBusyLabel(`规划第${storyboardPlanVolume}卷漫剧分集…`)
+    setBusyLabel(`上传「${name}」${label}…`)
     setError('')
     try {
-      const result = await api.storyboardPlan(storyboardPlanVolume, '抖音', 25)
-      setStoryboardPlanResult(result)
-      pushProgress(`第${storyboardPlanVolume}卷分集计划完成：${result.episodes.length} 集（覆盖 ${result.chaptersScanned} 章）`, 'done')
+      await api.roles({ op: 'image', name, dataUrl, label })
+      await refresh(false)
+      pushProgress(`已上传「${name}」${label}`, 'done')
     } catch (err) {
       setError((err as Error).message)
-      pushProgress(`分集计划失败：${(err as Error).message}`, 'error')
+      pushProgress(`上传「${name}」${label}失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+      setRoleImageTarget(null)
+      if (roleImageInputRef.current !== null) roleImageInputRef.current.value = ''
+    }
+  }
+
+  /** 用豆包/Seedream 为角色生成参考图。 */
+  const handleRoleImageGenerate = async (name: string): Promise<void> => {
+    setBusy(true)
+    setBusyLabel(`用豆包生成「${name}」参考图…`)
+    setError('')
+    try {
+      await api.roles({ op: 'imageGenerate', name })
+      await refresh(false)
+      pushProgress(`已生成「${name}」参考图`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`生成「${name}」参考图失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+      setBusyLabel('')
+    }
+  }
+
+  /** 更新角色漫画重要性（main/support/extra）。 */
+  const handleRoleImportance = async (role: RoleRecord, importance: RoleRecord['importance']): Promise<void> => {
+    setBusy(true)
+    setBusyLabel(`更新「${role.name}」重要性…`)
+    setError('')
+    try {
+      await api.roles({ op: 'update', role: { ...role, importance } })
+      await refresh(false)
+      pushProgress(`已更新「${role.name}」重要性`, 'done')
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`更新「${role.name}」重要性失败：${(err as Error).message}`, 'error')
     } finally {
       setBusy(false)
       setBusyLabel('')
@@ -2024,6 +2077,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         autoReview: configDraft.autoReview,
         autoAuthorReview: configDraft.autoAuthorReview,
         autoReviewAfterRevise: configDraft.autoReviewAfterRevise,
+        imageApiKey: configDraft.imageApiKey,
+        imageApiModel: configDraft.imageApiModel,
+        imageApiEnabled: configDraft.imageApiEnabled ?? false,
       })
       setConfig(result.config)
       setConfigDraft(result.config)
@@ -3745,6 +3801,28 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             </div>
             <div className={css.row}>
               <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>豆包 API Key（生图）</label>
+                <input className={css.input} type="password" placeholder="ark-..." value={configDraft.imageApiKey ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiKey: e.target.value }) }} />
+              </div>
+              <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>豆包生图模型</label>
+                <input className={css.input} placeholder="doubao-seedream-5-0-pro-260628" value={configDraft.imageApiModel ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiModel: e.target.value }) }} />
+              </div>
+              <div className={css.field} style={{ flex: 1 }}>
+                <label className={css.fieldLabel}>启用豆包生图</label>
+                <select
+                  className={css.input}
+                  value={configDraft.imageApiEnabled ? '1' : '0'}
+                  onChange={e => { setConfigDraft({ ...configDraft, imageApiEnabled: e.target.value === '1' }) }}
+                >
+                  <option value="0">关（默认）</option>
+                  <option value="1">开</option>
+                </select>
+                <span className={css.meta}>开启后漫画工坊才显示「豆包生成」按钮</span>
+              </div>
+            </div>
+            <div className={css.row}>
+              <div className={css.field} style={{ flex: 1 }}>
                 <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
                 <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
               </div>
@@ -4314,173 +4392,573 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           </div>
         )}
 
-        {activeTab === 'storyboard' && (
-          <div className={css.card}>
+        {activeTab === 'roleImage' && (
+          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🎬 漫剧工坊</span>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🖼️ 角色形象</span>
+              <span className={css.meta}>角色形象锚点 / 参考图（漫画功能已移除，形象保留用于立绘与一致性）</span>
             </div>
-            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
-                <button
-                  type="button"
-                  className={`${css.button} ${storyboardView === 'single' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
-                  onClick={() => { setStoryboardView('single') }}
-                >
-                  🎞️ 单集分镜
-                </button>
-                <button
-                  type="button"
-                  className={`${css.button} ${storyboardView === 'plan' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
-                  onClick={() => { setStoryboardView('plan') }}
-                >
-                  📺 按卷规划
-                </button>
-              </div>
 
-            {storyboardView === 'plan' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
-                  <select
-                    className={css.input}
-                    style={{ width: 170 }}
-                    value={storyboardPlanVolume}
-                    onChange={e => { setStoryboardPlanVolume(Number(e.target.value)) }}
-                    title="选择要规划的卷"
-                  >
-                    {volumes !== undefined && volumes.map(v => (
-                      <option key={v.no} value={v.no}>第{v.no}卷《{v.title}》</option>
-                    ))}
-                  </select>
-                  <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleStoryboardPlan() }} title="AI 通读整卷章节摘要，按故事弧线把章节分组成漫剧集（高潮章单独成集、过渡章合并），约 1-3 分钟">
-                    {busy ? '⏳ 规划中…' : '✨ 生成分集计划'}
-                  </button>
-                  <span className={css.meta}>AI 读卷 → 按弧线分集（不再是固定一章一集）</span>
+            <input
+              ref={roleImageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={e => {
+                const file = e.target.files?.[0]
+                const target = roleImageTarget
+                if (file === undefined || target === null) return
+                const readDataUrl = (): Promise<string> => new Promise((resolve, reject) => {
+                  const reader = new FileReader()
+                  reader.onload = () => resolve(String(reader.result))
+                  reader.onerror = () => reject(reader.error ?? new Error('读取图片失败'))
+                  reader.readAsDataURL(file!)
+                })
+                void (async () => {
+                  const dataUrl = await readDataUrl()
+                  if (target.endsWith('||scene')) {
+                    const sceneName = target.slice(0, -'||scene'.length)
+                    setBusy(true)
+                    setBusyLabel(`上传场景图「${sceneName}」${roleImageLabel}…`)
+                    setError('')
+                    try {
+                      await api.scenes({ op: 'image', name: sceneName, dataUrl, label: roleImageLabel })
+                      await refresh(false)
+                      pushProgress(`已上传场景「${sceneName}」${roleImageLabel}`, 'done')
+                    } catch (err) {
+                      setError((err as Error).message)
+                      pushProgress(`场景图上传失败：${(err as Error).message}`, 'error')
+                    } finally {
+                      setBusy(false)
+                      setBusyLabel('')
+                      setRoleImageTarget(null)
+                      if (roleImageInputRef.current !== null) roleImageInputRef.current.value = ''
+                    }
+                  } else {
+                    await handleRoleImageUpload(target, file, roleImageLabel)
+                  }
+                })()
+              }}
+            />
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <div className={css.row} style={{ flexWrap: 'wrap', gap: 6, justifyContent: 'space-between' }}>
+                  <span className={css.row} style={{ gap: 6 }}>
+                    <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void (async () => {
+                      setBusy(true)
+                      setBusyLabel('⚠️ 提炼本书视觉规则…')
+                      setError('')
+                      try {
+                        const result = await api.visualRules({ op: 'extract' })
+                        await refresh(false)
+                        pushProgress(`已提炼 ${result.rules.length} 条视觉规则（已注入所有提示词）`, 'done')
+                      } catch (err) {
+                        setError((err as Error).message)
+                        pushProgress(`视觉规则提炼失败：${(err as Error).message}`, 'error')
+                      } finally {
+                        setBusy(false)
+                        setBusyLabel('')
+                      }
+                    })() }}>⚠️ 提炼视觉规则</button>
+                    <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { void refresh(false); pushProgress('角色库已刷新', 'done') }}>🔄 刷新角色库</button>
+                  </span>
                 </div>
-                <span className={css.meta}>分集原则：高潮章单独成集或两章一集；过渡章 2-3 章合并；断点选在钩子最强处；每集 60-120 秒。生成后逐集确认，满意再用「单集分镜」为某集生成分镜。</span>
 
-                {storyboardPlanResult === null ? (
-                  <div className={css.shelfEmpty} style={{ minHeight: 140 }}>
-                    <span className={css.shelfEmptyIcon}>📺</span>
-                    <span className={css.shelfEmptyTitle}>尚未生成分集计划</span>
-                    <span className={css.meta}>选卷后点「生成分集计划」，AI 把整卷按故事弧线分成漫剧集</span>
+                {(project?.visualRules ?? []).length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', marginTop: 6 }}>
+                    <span className={css.meta} style={{ fontSize: 11 }}>⚠️ 本书视觉规则：</span>
+                    {(project?.visualRules ?? []).map((r, i) => <span key={i} style={{ border: '1px solid var(--nf-warn, #b8860b)', borderRadius: 999, padding: '1px 8px', fontSize: 10, color: 'var(--nf-warn, #b8860b)' }}>{r}</span>)}
                   </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div className={css.meta}><b>策略：</b>{storyboardPlanResult.strategy}</div>
-                    <div className={css.meta}>共 {storyboardPlanResult.episodes.length} 集 · 覆盖 {storyboardPlanResult.chaptersScanned} 章</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 380, overflowY: 'auto' }}>
-                      {storyboardPlanResult.episodes.map(ep => (
-                        <div key={ep.index} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                          <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
-                            <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', flex: 'none' }}>第{ep.index}集</span>
-                            <b>{ep.title}</b>
-                            <span className={css.meta}>涵盖：第{ep.chapters[0]}-{ep.chapters[ep.chapters.length - 1]}章（{ep.chapters.length}章）</span>
+                )}
+
+{(() => {
+                  const roles = project?.roles ?? []
+                  if (roles.length === 0) {
+                    return (
+                      <div className={css.shelfEmpty} style={{ minHeight: 140, flex: 1 }}>
+                        <span className={css.shelfEmptyIcon}>🎭</span>
+                        <span className={css.shelfEmptyTitle}>角色库为空</span>
+                        <span className={css.meta}>请先到「角色库」提炼角色并生成形象锚点</span>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setActiveTab('roles') }}>去角色库</button>
+                      </div>
+                    )
+                  }
+                  const detailRole = detailRoleName !== null ? roles.find(r => r.name === detailRoleName) : undefined
+                  const group = (role: RoleRecord) => {
+                    const g = role.gallery ?? []
+                    const byLabel = (key: string) => g.filter(x => x.label === key)
+                    const byPrefix = (pre: string) => g.filter(x => x.label.startsWith(pre))
+                    return {
+                      portrait: byLabel('立绘')[0],
+                      sheet: byLabel('四视图')[0],
+                      expressions: byPrefix('表情-'),
+                      others: g.filter(x => x.label !== '立绘' && x.label !== '四视图' && !x.label.startsWith('表情-')),
+                    }
+                  }
+                  const uploadInDetail = (role: RoleRecord) => {
+                    setRoleImageLabel(detailUploadLabel.trim() !== '' ? detailUploadLabel.trim() : '立绘')
+                    setRoleImageTarget(role.name)
+                    roleImageInputRef.current?.click()
+                  }
+                  return (
+                    <>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
+                        {roles.map(r => (
+                          <div key={r.name} onClick={() => { setDetailRoleName(r.name); setDetailUploadLabel('立绘') }} style={{ cursor: 'pointer', border: '1px solid var(--nf-border)', borderRadius: 12, overflow: 'hidden', background: 'var(--nf-bg-inset)', display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ aspectRatio: '3/4', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--nf-bg-inset)', borderBottom: '1px solid var(--nf-border)', position: 'relative', overflow: 'hidden' }}>
+                              {r.imageUrl !== undefined
+                                ? <img src={r.imageUrl} alt={r.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center 20%' }} />
+                                : <span className={css.meta}>暂无形象</span>}
+                              <span style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 10, borderRadius: 6, padding: '1px 6px' }}>🖼 {(r.gallery ?? []).length}</span>
+                            </div>
+                            <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <b style={{ fontSize: 13 }}>{r.name}</b>
+                                <span className={css.meta} style={{ fontSize: 10 }}>{r.roleLabel}</span>
+                              </div>
+                              <div className={css.meta} style={{ fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {r.imagePrompt !== undefined ? '✓ 锚点' : '⚠ 无锚点'} · {(r.identity ?? '').slice(0, 16)}
+                              </div>
+                            </div>
                           </div>
-                          <div className={css.meta}>{ep.narrativeJob}</div>
-                          <div className={css.meta} style={{ color: 'var(--nf-info)' }}>开头钩子：{ep.openingHook}</div>
-                          <div className={css.meta} style={{ color: 'var(--nf-warn)' }}>结尾钩子：{ep.endingHook}</div>
+                        ))}
+                      </div>
+
+                      {detailRole !== undefined && (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={() => { setDetailRoleName(null) }}>
+                          <div style={{ background: 'var(--nf-bg)', border: '1px solid var(--nf-border)', borderRadius: 16, width: 'min(960px, 100%)', maxHeight: '92vh', overflowY: 'auto', padding: 20, position: 'relative' }} onClick={e => e.stopPropagation()}>
+                            <button type="button" className={css.iconButton} style={{ position: 'absolute', top: 12, right: 12, fontSize: 18 }} title="关闭" aria-label="关闭" onClick={() => { setDetailRoleName(null) }}>✕</button>
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                                <b style={{ fontSize: 22 }}>{detailRole.name}</b>
+                                <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{detailRole.roleLabel}</span>
+                              </div>
+                              <div className={css.meta} style={{ marginTop: 4 }}>{detailRole.identity}</div>
+                            </div>
+
+                            {(project?.visualRules ?? []).length > 0 && (
+                              <div style={{ border: '1px solid var(--nf-warn, #b8860b)', borderRadius: 10, padding: '6px 10px', marginBottom: 10, fontSize: 11 }}>
+                                <b>⚠️ 本书视觉规则（已内嵌到下方所有提示词）</b>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                  {(project?.visualRules ?? []).map((r, i) => <span key={i} style={{ border: '1px solid var(--nf-border)', borderRadius: 999, padding: '1px 8px', fontSize: 10 }}>{r}</span>)}
+                                </div>
+                              </div>
+                            )}
+
+                            <details style={{ marginBottom: 10, fontSize: 12 }}>
+                              <summary style={{ cursor: 'pointer', color: 'var(--nf-text-2)' }}>🖼 图集（{(detailRole.gallery ?? []).length} 张 · 点击展开/收起）</summary>
+                              <div style={{ marginTop: 8 }}>
+                            {(() => {
+                              const g = group(detailRole)
+                              const hasMain = g.portrait !== undefined || g.sheet !== undefined
+                              return (
+                                <>
+                                  {hasMain && (
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10, marginBottom: 12 }}>
+                                      {g.portrait !== undefined && (
+                                        <div style={{ border: '1px solid var(--nf-border)', borderRadius: 12, overflow: 'hidden' }}>
+                                          <img src={g.portrait.dataUrl} alt="立绘" style={{ width: '100%', maxHeight: 380, objectFit: 'contain', display: 'block', background: '#111' }} />
+                                          <div className={css.meta} style={{ padding: '2px 8px', fontSize: 11 }}>立绘</div>
+                                        </div>
+                                      )}
+                                      {g.sheet !== undefined && (
+                                        <div style={{ border: '1px solid var(--nf-border)', borderRadius: 12, overflow: 'hidden' }}>
+                                          <img src={g.sheet.dataUrl} alt="四视图" style={{ width: '100%', maxHeight: 380, objectFit: 'contain', display: 'block', background: '#111' }} />
+                                          <div className={css.meta} style={{ padding: '2px 8px', fontSize: 11 }}>四视图</div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {g.expressions.length > 0 && (
+                                    <div style={{ marginBottom: 12 }}>
+                                      <b style={{ fontSize: 13 }}>表情设定</b>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 8, marginTop: 6 }}>
+                                        {g.expressions.map(img => (
+                                          <div key={img.label} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
+                                            <img src={img.dataUrl} alt={img.label} style={{ width: '100%', height: 110, objectFit: 'cover', display: 'block' }} />
+                                            <div style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 10, padding: '1px 6px', textAlign: 'center' }}>{img.label.replace('表情-', '')}</div>
+                                            <button type="button" className={css.iconButton} style={{ position: 'absolute', top: 2, right: 2, fontSize: 11 }} title="删除" aria-label="删除" onClick={() => { void (async () => {
+                                              try {
+                                                await api.roles({ op: 'removeImage', name: detailRole.name, label: img.label })
+                                                await refresh(false)
+                                                pushProgress(`已删除「${detailRole.name}」${img.label}`, 'done')
+                                              } catch (err) { setError((err as Error).message) }
+                                            })() }}>×</button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                  {g.others.length > 0 && (
+                                    <div style={{ marginBottom: 12 }}>
+                                      <b style={{ fontSize: 13 }}>场景 / 细节</b>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, marginTop: 6 }}>
+                                        {g.others.map(img => (
+                                          <div key={img.label} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
+                                            <img src={img.dataUrl} alt={img.label} style={{ width: '100%', height: 90, objectFit: 'cover', display: 'block' }} />
+                                            <div style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 10, padding: '1px 6px', textAlign: 'center' }}>{img.label}</div>
+                                            <button type="button" className={css.iconButton} style={{ position: 'absolute', top: 2, right: 2, fontSize: 11 }} title="删除" aria-label="删除" onClick={() => { void (async () => {
+                                              try {
+                                                await api.roles({ op: 'removeImage', name: detailRole.name, label: img.label })
+                                                await refresh(false)
+                                                pushProgress(`已删除「${detailRole.name}」${img.label}`, 'done')
+                                              } catch (err) { setError((err as Error).message) }
+                                            })() }}>×</button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                              </div>
+                            </details>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, marginBottom: 12 }}>
+                              <div>
+                                <b style={{ fontSize: 13 }}>基本信息</b>
+                                <div style={{ fontSize: 12, lineHeight: 1.8, marginTop: 4 }}>
+                                  <div><span className={css.meta}>性格：</span>{(detailRole.traits ?? []).join('、') || '—'}</div>
+                                  <div><span className={css.meta}>目标：</span>{detailRole.goals || '—'}</div>
+                                  <div><span className={css.meta}>关系：</span>{(detailRole.relations ?? []).join('；') || '—'}</div>
+                                  <div><span className={css.meta}>成长线：</span>{(detailRole.arc ?? []).join('；') || '—'}</div>
+                                </div>
+                              </div>
+                              <div>
+                                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+                                  <b style={{ fontSize: 13 }}>📄 提示词包</b>
+                                  {detailRole.imagePrompt !== undefined && detailRole.promptKit === undefined && (
+                                    <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void (async () => {
+                                      setBusy(true)
+                                      setBusyLabel(`精修「${detailRole.name}」提示词…`)
+                                      setError('')
+                                      try {
+                                        await api.roles({ op: 'promptKit', name: detailRole.name })
+                                        await refresh(false)
+                                        pushProgress(`已生成「${detailRole.name}」四类精修提示词`, 'done')
+                                      } catch (err) {
+                                        setError((err as Error).message)
+                                        pushProgress(`提示词精修失败：${(err as Error).message}`, 'error')
+                                      } finally {
+                                        setBusy(false)
+                                        setBusyLabel('')
+                                      }
+                                    })() }}>✨ 生成精修版</button>
+                                  )}
+                                </div>
+                                {detailRole.imagePrompt === undefined && <span className={css.meta}>未生成锚点，先点「✨ 生成锚点」</span>}
+                                {(() => {
+                                  const anchor = detailRole.imagePrompt
+                                  if (anchor === undefined) return null
+                                  const rules = project?.visualRules ?? []
+                                  const rulesZh = rules.length > 0 ? '\n【本书视觉规则】' + rules.join('；') : ''
+                                  const expressions = detailRole.expressions ?? ['平静']
+                                  const expName = (n: string) => n.replace(/^表情-/, '')
+                                  const kit = detailRole.promptKit
+                                  const blocks: Array<{ key: string; title: string; zh: string; en: string }> = []
+                                  if (kit !== undefined) {
+                                    blocks.push({ key: 'portrait', title: '立绘', zh: kit.portrait.zh, en: kit.portrait.en })
+                                    blocks.push({ key: 'sheet', title: '四视图', zh: kit.sheet.zh, en: kit.sheet.en })
+                                    for (const e of kit.expressions) blocks.push({ key: 'exp-' + e.name, title: `表情·${e.name}`, zh: e.zh, en: e.en })
+                                    blocks.push({ key: 'details', title: '细节', zh: kit.details.zh, en: kit.details.en })
+                                  } else {
+                                    blocks.push({ key: 'portrait', title: '立绘', zh: anchor.zh + '。全身/半身正视图，写实电影感。' + rulesZh, en: anchor.en + ', full body, front view, plain background' })
+                                    blocks.push({ key: 'sheet', title: '四视图', zh: anchor.zh + '。同一角色的正面/左侧面/右侧面/背面四视图设定表，纯白背景，四个视角分别描述。' + rulesZh, en: anchor.en + ', character sheet, front view, left side view, right side view, back view, full body, plain white background' })
+                                    for (const n of expressions) blocks.push({ key: 'exp-' + n, title: `表情·${expName(n)}`, zh: anchor.zh + `。表情：${expName(n)}，脸部特写（头部到锁骨），纯白背景，五官与角色定稿完全一致，皮肤纹理细节完整，无多余杂物。` + rulesZh, en: anchor.en + `, facial close-up, head to collarbone, expression: ${expName(n)}, plain white background, consistent with character design, detailed skin texture, no extra objects` })
+                                    blocks.push({ key: 'details', title: '细节', zh: `多组局部细节集合参考图，纯白背景：${anchor.tags.map(t => t + '特写').join('；')}。细节清晰锐利，角色细节参考稿，无多余杂物。` + rulesZh, en: anchor.tags.join(', ') + ', multi-panel detail reference sheet, plain white background, macro close-up, sharp details, character detail sheet, no extra objects' })
+                                  }
+                                  return (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                                      {blocks.map(b => (
+                                        <div key={b.key} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 8px' }}>
+                                          <div className={css.row} style={{ justifyContent: 'space-between' }}>
+                                            <b style={{ fontSize: 11 }}>{b.title}</b>
+                                            <span className={css.row} style={{ gap: 4 }}>
+                                              <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ fontSize: 10 }} onClick={() => {
+                                                void navigator.clipboard?.writeText(b.zh).then(() => { pushProgress(`已复制「${detailRole.name}」${b.title}中文提示词`, 'done') }).catch(() => { /* ignore */ })
+                                              }}>复制</button>
+                                              <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ fontSize: 10 }} onClick={() => {
+                                                void navigator.clipboard?.writeText(b.en).then(() => { pushProgress(`已复制「${detailRole.name}」${b.title}英文标签`, 'done') }).catch(() => { /* ignore */ })
+                                              }}>EN</button>
+                                            </span>
+                                          </div>
+                                          <div className={css.meta} style={{ fontSize: 11, lineHeight: 1.5, marginTop: 3 }}>{b.zh}</div>
+                                          <details style={{ marginTop: 3 }}>
+                                            <summary style={{ cursor: 'pointer', fontSize: 10, color: 'var(--nf-text-2)' }}>🌐 英文标签（点击展开）</summary>
+                                            <div className={css.meta} style={{ fontSize: 9, fontFamily: 'monospace', marginTop: 2, wordBreak: 'break-all', color: 'var(--nf-text-2)' }}>{b.en}</div>
+                                          </details>
+                                        </div>
+                                      ))}
+                                      <div className={css.meta} style={{ fontSize: 10 }}>关键词：{(anchor.tags ?? []).join('、')}</div>
+                                    </div>
+                                  )
+                                })()}
+                              </div>
+                            </div>
+
+                            <div style={{ borderTop: '1px solid var(--nf-border)', paddingTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                              {detailRole.imagePrompt === undefined && (
+                                <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleRoleVisual(detailRole.name) }}>✨ 生成锚点</button>
+                              )}
+                              {detailRole.imagePrompt !== undefined && config?.imageApiEnabled === true && (
+                                <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { void handleRoleImageGenerate(detailRole.name) }}>豆包生成</button>
+                              )}
+                              {detailRole.imagePrompt !== undefined && (
+                                <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => {
+                                  const text = [detailRole.imagePrompt!.en, detailRole.imagePrompt!.tags.join(', ')].filter(Boolean).join('\n')
+                                  void navigator.clipboard?.writeText(text).then(() => { pushProgress(`已复制「${detailRole.name}」英文生图提示词`, 'done') }).catch(() => { /* ignore */ })
+                                }}>复制提示词</button>
+                              )}
+                              <input
+                                className={css.input}
+                                style={{ width: 140, fontSize: 12, padding: '3px 6px' }}
+                                placeholder="图集标签"
+                                value={detailUploadLabel}
+                                onChange={e => { setDetailUploadLabel(e.target.value) }}
+                              />
+                              <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { uploadInDetail(detailRole) }}>📤 上传图</button>
+                              <select
+                                className={css.input}
+                                style={{ fontSize: 12, padding: '3px 4px', width: 90 }}
+                                value={detailRole.importance ?? 'support'}
+                                onChange={e => { void handleRoleImportance(detailRole, e.target.value as RoleRecord['importance']) }}
+                                title="漫剧重要性"
+                              >
+                                <option value="main">重要</option>
+                                <option value="support">配角</option>
+                                <option value="extra">路人</option>
+                              </select>
+                            </div>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {storyboardView === 'single' && (
-              <>
-                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <span className={css.meta}>把一章网文改编为高完播率的漫剧分镜：角色视觉锚点（复用角色库形象词）+ 8-12 格分镜表（画面/台词/转场/AI 提示词），可直接用于豆包/即梦/SD 出图或视频。黄金开局 3 秒 + 每 10 秒小高潮 + 结尾钩子。</span>
-                  <div className={css.row} style={{ flexWrap: 'wrap' }}>
-                    <select
-                      className={css.input}
-                      style={{ width: 150 }}
-                      value={storyboardChapterNo}
-                      onChange={e => { setStoryboardChapterNo(Number(e.target.value)) }}
-                      title="选择要改编的章节"
-                    >
-                      {chapters.filter(c => c.status !== 'pending' && c.status !== 'generating').map(c => (
-                        <option key={c.no} value={c.no}>第{c.no}章 {c.title}</option>
-                      ))}
-                    </select>
-                    <select
-                      className={css.input}
-                      style={{ width: 100 }}
-                      value={storyboardTool}
-                      onChange={e => { setStoryboardTool(e.target.value as typeof storyboardTool) }}
-                      title="AI 工具（影响提示词格式）"
-                    >
-                      <option value="doubao">豆包</option>
-                      <option value="seedance">Seedance</option>
-                      <option value="sd">SD/ComfyUI</option>
-                      <option value="mj">Midjourney</option>
-                    </select>
-                    <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleStoryboard(storyboardChapterNo) }} title="把所选章节改编为抖音漫剧分镜（约 1-2 分钟，消耗 LLM 额度）">
-                      {busy ? '⏳ 生成中…' : '✨ 生成分镜'}
-                    </button>
-                  </div>
-                </div>
-
-            {storyboardResult === null ? (
-              <div className={css.shelfEmpty} style={{ minHeight: 140 }}>
-                <span className={css.shelfEmptyIcon}>🎬</span>
-                <span className={css.shelfEmptyTitle}>尚未生成分镜</span>
-                <span className={css.meta}>选择章节与 AI 工具，点「生成分镜」开始</span>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div className={css.meta}><b>本集：</b>{storyboardResult.title}</div>
-                <div className={css.meta}><b>赛道节奏：</b>{storyboardResult.pacingNote}</div>
-                <div className={css.meta}><b>本集钩子：</b>{storyboardResult.hook}</div>
-
-                {storyboardResult.characters.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <b>角色视觉锚点（全分镜强制复用）</b>
-                    {storyboardResult.characters.map(c => (
-                      <div key={c.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                        <div><b>{c.name}</b></div>
-                        <div className={css.meta}>{c.visualAnchor}</div>
-                        <div className={css.meta} style={{ fontFamily: 'monospace', fontSize: 11 }}>{c.tags}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div className={css.row} style={{ justifyContent: 'space-between' }}>
-                    <b>分镜表（{storyboardResult.panels.length} 格）</b>
-                    <button
-                      type="button"
-                      className={`${css.button} ${css.buttonSmall}`}
-                      onClick={() => {
-                        const text = storyboardResult.panels.map(p => `[${p.timecode}] ${p.shot}\n画面：${p.visual}\n台词：${p.dialogue}\n转场：${p.transition}\n提示词：${p.prompt}`).join('\n\n')
-                        void navigator.clipboard?.writeText(text).then(() => { pushProgress('分镜表已复制到剪贴板', 'done') }).catch(() => { /* ignore */ })
-                      }}
-                      title="复制全部分镜提示词"
-                    >
-                      📋 复制全部
-                    </button>
-                  </div>
-                  {storyboardResult.panels.map(p => (
-                    <div key={p.index} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, padding: '6px 10px', fontSize: 12 }}>
-                      <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
-                        <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', flex: 'none' }}>{p.timecode}</span>
-                        <b>{p.shot}</b>
-                        <span className={css.meta}>转场：{p.transition}</span>
-                      </div>
-                      <div className={css.meta}>{p.visual}</div>
-                      {p.dialogue !== '' && <div className={css.meta} style={{ color: 'var(--nf-info)' }}>💬 {p.dialogue}</div>}
-                      <div className={css.meta} style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--nf-text-2)' }}>{p.prompt}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-              </>
-            )}
+                      )}
+                    </>
+                  )
+                })()}
+            </div>
           </div>
         )}
+
+        {activeTab === 'scenes' && (
+          <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
+            <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🏞️ 场景库</span>
+              <span className={css.meta}>场景视觉锚点：提炼自正文，供漫剧分镜/生图锁定"在哪、什么氛围"</span>
+            </div>
+
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6, margin: '8px 0' }}>
+              <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void (async () => {
+                setBusy(true)
+                setBusyLabel('✨ 从全书提炼场景…')
+                setError('')
+                try {
+                  const result = await api.scenes({ op: 'extract' })
+                  setSceneCandidates(result.candidates ?? [])
+                  pushProgress(`提炼出 ${(result.candidates ?? []).length} 个候选场景，可采纳或修改后采纳`, 'done')
+                } catch (err) {
+                  setError((err as Error).message)
+                  pushProgress(`场景提炼失败：${(err as Error).message}`, 'error')
+                } finally {
+                  setBusy(false)
+                  setBusyLabel('')
+                }
+              })() }}>{busy ? '⏳ 提炼中…' : '✨ 从全书提炼场景'}</button>
+              <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { void refresh(false); pushProgress('场景库已刷新', 'done') }}>🔄 刷新</button>
+              {sceneCandidates !== null && (
+                <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setSceneCandidates(null) }}>收起候选</button>
+              )}
+            </div>
+
+            {sceneDraft !== null && (
+              <div style={{ border: '1px solid var(--nf-accent)', borderRadius: 10, padding: 10, marginBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <b style={{ fontSize: 13 }}>编辑场景</b>
+                <input className={css.input} style={{ fontSize: 12, padding: '4px 8px' }} placeholder="场景名" value={sceneDraft.name} onChange={e => { setSceneDraft({ ...sceneDraft, name: e.target.value }) }} />
+                <input className={css.input} style={{ fontSize: 12, padding: '4px 8px' }} placeholder="一句话定位" value={sceneDraft.summary} onChange={e => { setSceneDraft({ ...sceneDraft, summary: e.target.value }) }} />
+                <div className={css.row} style={{ gap: 6 }}>
+                  <input className={css.input} style={{ fontSize: 12, padding: '4px 8px', flex: 1 }} placeholder="幕归属（第一幕后场…）" value={sceneDraft.act ?? ''} onChange={e => { setSceneDraft({ ...sceneDraft, act: e.target.value }) }} />
+                  <input className={css.input} style={{ fontSize: 12, padding: '4px 8px', flex: 1 }} placeholder="时间光态（雨夜/闭店后…）" value={sceneDraft.moment ?? ''} onChange={e => { setSceneDraft({ ...sceneDraft, moment: e.target.value }) }} />
+                </div>
+                <textarea className={css.input} style={{ fontSize: 12, padding: '4px 8px', minHeight: 48 }} placeholder="关键镜头（每行一条：人物动作+情绪+镜头）" value={(sceneDraft.beats ?? []).join('\n')} onChange={e => { setSceneDraft({ ...sceneDraft, beats: e.target.value.split(/\n+/).map(x => x.trim()).filter(Boolean) }) }} />
+                <input className={css.input} style={{ fontSize: 12, padding: '4px 8px' }} placeholder="人物在场状态（含标志物细节）" value={sceneDraft.characterState ?? ''} onChange={e => { setSceneDraft({ ...sceneDraft, characterState: e.target.value }) }} />
+                <textarea className={css.input} style={{ fontSize: 12, padding: '4px 8px', minHeight: 60 }} placeholder="环境构成（每行一项）" value={(sceneDraft.elements ?? []).join('\n')} onChange={e => { setSceneDraft({ ...sceneDraft, elements: e.target.value.split(/\n+/).map(x => x.trim()).filter(Boolean) }) }} />
+                <textarea className={css.input} style={{ fontSize: 12, padding: '4px 8px', minHeight: 60 }} placeholder="中文生图提示词" value={sceneDraft.zh} onChange={e => { setSceneDraft({ ...sceneDraft, zh: e.target.value }) }} />
+                <textarea className={css.input} style={{ fontSize: 12, padding: '4px 8px', minHeight: 60 }} placeholder="英文生图提示词" value={sceneDraft.en} onChange={e => { setSceneDraft({ ...sceneDraft, en: e.target.value }) }} />
+                <div className={css.row} style={{ gap: 6 }}>
+                  <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy || sceneDraft.name.trim() === ''} onClick={() => { void (async () => {
+                    setBusy(true)
+                    try {
+                      await api.scenes({ op: 'update', scene: { ...sceneDraft, name: sceneDraft.name.trim() } })
+                      await refresh(false)
+                      setSceneDraft(null)
+                      pushProgress(`已保存场景「${sceneDraft.name.trim()}」`, 'done')
+                    } catch (err) {
+                      setError((err as Error).message)
+                    } finally {
+                      setBusy(false)
+                    }
+                  })() }}>保存</button>
+                  <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setSceneDraft(null) }}>取消</button>
+                </div>
+              </div>
+            )}
+
+            {sceneCandidates !== null && sceneCandidates.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                {sceneCandidates.map(s => (
+                  <div key={s.name} style={{ border: '1px solid var(--nf-accent)', borderRadius: 10, padding: '8px 10px', fontSize: 12 }}>
+                    <div className={css.row} style={{ flexWrap: 'wrap', gap: 6, justifyContent: 'space-between' }}>
+                      <span><b>{s.name}</b> <span className={css.meta}>· {(s.moods ?? []).join('、')}</span></span>
+                      <span className={css.row} style={{ gap: 4 }}>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { void (async () => {
+                          try {
+                            await api.scenes({ op: 'adopt', scene: s })
+                            setSceneCandidates((sceneCandidates ?? []).filter(x => x.name !== s.name))
+                            await refresh(false)
+                            pushProgress(`已采纳场景「${s.name}」`, 'done')
+                          } catch (err) { setError((err as Error).message) }
+                        })() }}>采纳</button>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setSceneDraft(s); setSceneCandidates(null) }}>修改后采纳</button>
+                      </span>
+                    </div>
+                    <div className={css.meta} style={{ marginTop: 2 }}>{s.summary}</div>
+                    <div className={css.meta} style={{ marginTop: 2, fontSize: 11 }}>要素：{(s.elements ?? []).join('；')}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(() => {
+              const scenes = project?.scenes ?? []
+              const detail = sceneDetailName !== null ? scenes.find(s => s.name === sceneDetailName) : undefined
+              if (scenes.length === 0 && sceneCandidates === null) {
+                return (
+                  <div className={css.shelfEmpty} style={{ minHeight: 140, flex: 1 }}>
+                    <span className={css.shelfEmptyIcon}>🏞️</span>
+                    <span className={css.shelfEmptyTitle}>场景库为空</span>
+                    <span className={css.meta}>点「✨ 从全书提炼场景」自动建立，或手动新增</span>
+                  </div>
+                )
+              }
+              return (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+                    {scenes.map(s => {
+                      const cover = (s.gallery ?? [])[0]
+                      return (
+                        <div key={s.name} onClick={() => { setSceneDetailName(s.name); setSceneUploadLabel('全景') }} style={{ cursor: 'pointer', border: '1px solid var(--nf-border)', borderRadius: 12, overflow: 'hidden', background: 'var(--nf-bg-inset)', display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--nf-bg-inset)', borderBottom: '1px solid var(--nf-border)', position: 'relative' }}>
+                            {cover !== undefined
+                              ? <img src={cover.dataUrl} alt={s.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                              : <span className={css.meta}>暂无场景图</span>}
+                            <span style={{ position: 'absolute', bottom: 4, right: 4, background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 10, borderRadius: 6, padding: '1px 6px' }}>🖼 {(s.gallery ?? []).length}</span>
+                          </div>
+                          <div style={{ padding: 6, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <b style={{ fontSize: 13 }}>{s.name}</b>
+                            <div className={css.meta} style={{ fontSize: 10 }}>{(s.moods ?? []).join('、') || s.summary.slice(0, 16)}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {detail !== undefined && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }} onClick={() => { setSceneDetailName(null) }}>
+                      <div style={{ background: 'var(--nf-bg)', border: '1px solid var(--nf-border)', borderRadius: 16, width: 'min(860px, 100%)', maxHeight: '92vh', overflowY: 'auto', padding: 20, position: 'relative' }} onClick={e => e.stopPropagation()}>
+                        <button type="button" className={css.iconButton} style={{ position: 'absolute', top: 12, right: 12, fontSize: 18 }} title="关闭" aria-label="关闭" onClick={() => { setSceneDetailName(null) }}>✕</button>
+                        <div style={{ marginBottom: 12 }}>
+                          <b style={{ fontSize: 20 }}>{detail.name}</b>
+                          <div className={css.meta} style={{ marginTop: 4 }}>{detail.summary}</div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 8, marginBottom: 12 }}>
+                          {(detail.gallery ?? []).map(img => (
+                            <div key={img.label} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
+                              <img src={img.dataUrl} alt={img.label} style={{ width: '100%', height: 100, objectFit: 'cover', display: 'block' }} />
+                              <div style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 10, padding: '1px 6px', textAlign: 'center' }}>{img.label}</div>
+                              <button type="button" className={css.iconButton} style={{ position: 'absolute', top: 2, right: 2, fontSize: 11 }} title="删除" aria-label="删除" onClick={() => { void (async () => {
+                                try {
+                                  await api.scenes({ op: 'removeImage', name: detail.name, label: img.label })
+                                  await refresh(false)
+                                  pushProgress(`已删除「${detail.name}」${img.label}`, 'done')
+                                } catch (err) { setError((err as Error).message) }
+                              })() }}>×</button>
+                            </div>
+                          ))}
+                          {(detail.gallery ?? []).length === 0 && <span className={css.meta}>暂无场景图</span>}
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, lineHeight: 1.8 }}>
+                            {(detail.act !== undefined || detail.moment !== undefined) && (
+                              <div style={{ marginBottom: 6 }}>
+                                {(detail.act !== undefined && detail.act !== '') && <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)', marginRight: 6 }}>{detail.act}</span>}
+                                {(detail.moment !== undefined && detail.moment !== '') && <span className={css.meta}>{detail.moment}</span>}
+                              </div>
+                            )}
+                            {(detail.beats ?? []).length > 0 && (
+                              <div style={{ marginBottom: 8 }}>
+                                <b style={{ fontSize: 13 }}>关键镜头</b>
+                                <div style={{ marginTop: 4 }}>{(detail.beats ?? []).map((b, i) => <div key={i} style={{ fontSize: 11, color: 'var(--nf-text-2)', marginTop: 2 }}>🎬 {b}</div>)}</div>
+                              </div>
+                            )}
+                            {detail.characterState !== undefined && detail.characterState !== '' && (
+                              <div style={{ marginBottom: 8 }}>
+                                <b style={{ fontSize: 13 }}>人物状态</b>
+                                <div className={css.meta} style={{ marginTop: 2 }}>{detail.characterState}</div>
+                              </div>
+                            )}
+                            <b style={{ fontSize: 13 }}>环境构成</b>
+                            <div style={{ marginTop: 4 }}>{(detail.elements ?? []).map(e => <span key={e} style={{ border: '1px solid var(--nf-border)', borderRadius: 999, padding: '1px 8px', fontSize: 11, margin: '0 4px 4px 0', display: 'inline-block' }}>{e}</span>)}</div>
+                            <div style={{ marginTop: 8 }}><b style={{ fontSize: 13 }}>色调光影</b></div>
+                            <div style={{ marginTop: 4 }}>{(detail.palette ?? []).join('；') || '—'}</div>
+                            <div style={{ marginTop: 8 }}><b style={{ fontSize: 13 }}>氛围</b></div>
+                            <div style={{ marginTop: 4 }}>{(detail.moods ?? []).join('、') || '—'}</div>
+                            <div style={{ marginTop: 8 }}><b style={{ fontSize: 13 }}>依据</b></div>
+                            <div className={css.meta} style={{ marginTop: 4 }}>{detail.source || '—'}</div>
+                          </div>
+                          <div>
+                            <b style={{ fontSize: 13 }}>生图提示词</b>
+                            <div className={css.meta} style={{ fontSize: 11, lineHeight: 1.6, marginTop: 4 }}>{detail.zh}</div>
+                            <div className={css.meta} style={{ fontSize: 10, fontFamily: 'monospace', marginTop: 4, wordBreak: 'break-all' }}>{detail.en}</div>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                              {(detail.tags ?? []).map(t => <span key={t} style={{ border: '1px solid var(--nf-border)', borderRadius: 999, padding: '2px 8px', fontSize: 11 }}>{t}</span>)}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={{ borderTop: '1px solid var(--nf-border)', paddingTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => {
+                            const text = [detail.en, detail.tags.join(', ')].filter(Boolean).join('\n')
+                            void navigator.clipboard?.writeText(text).then(() => { pushProgress(`已复制「${detail.name}」英文生图提示词`, 'done') }).catch(() => { /* ignore */ })
+                          }}>复制提示词</button>
+                          <input className={css.input} style={{ width: 130, fontSize: 12, padding: '3px 6px' }} placeholder="图集标签" value={sceneUploadLabel} onChange={e => { setSceneUploadLabel(e.target.value) }} />
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
+                            setRoleImageLabel(sceneUploadLabel.trim() !== '' ? sceneUploadLabel.trim() : '全景')
+                            setSceneUploadLabel(sceneUploadLabel.trim() !== '' ? sceneUploadLabel.trim() : '全景')
+                            setRoleImageTarget(detail.name + '||scene')
+                            roleImageInputRef.current?.click()
+                          }}>📤 上传场景图</button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setSceneDraft(detail); setSceneDetailName(null) }}>✏️ 编辑</button>
+                          <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ color: 'var(--nf-danger, #e05)' }} onClick={() => { void (async () => {
+                            if (!window.confirm(`确定删除场景「${detail.name}」？`)) return
+                            try {
+                              await api.scenes({ op: 'remove', name: detail.name })
+                              await refresh(false)
+                              setSceneDetailName(null)
+                              pushProgress(`已删除场景「${detail.name}」`, 'done')
+                            } catch (err) { setError((err as Error).message) }
+                          })() }}>🗑 删除</button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        )}
+
         </>)}
         </div>
       </div>

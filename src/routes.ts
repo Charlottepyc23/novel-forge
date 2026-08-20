@@ -65,14 +65,15 @@ import {
   type RewriteRequest,
   type RolesRequest,
   type RolesResponse,
+  type SceneCard,
+  type ScenesRequest,
+  type ScenesResponse,
+  type VisualRulesRequest,
+  type VisualRulesResponse,
   type OutlineSuggestRequest,
   type OutlineSuggestResponse,
   type BreakdownRequest,
   type BreakdownResponse,
-  type StoryboardRequest,
-  type StoryboardResponse,
-  type StoryboardPlanRequest,
-  type StoryboardPlanResponse,
   type SensitiveCheckRequest,
   type SensitiveCheckResponse,
   type SensitiveHit,
@@ -117,11 +118,13 @@ import {
   analyzePlotlineHealth,
   designPlotlinePlan,
   extractRoles,
+  extractScenes,
+  generateRolePromptKit,
+  extractVisualRules,
   extractRoleVisual,
   suggestOutlines,
   breakdownBook,
-  generateStoryboard,
-  planStoryboardEpisodes,
+  generateRoleReferenceImage,
   checkSensitiveText,
   suggestForeshadows,
   suggestPlotlines,
@@ -349,7 +352,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         return
       }
       try {
-        const bible = await extractBible(ctx, config, outline)
+        const bible = await extractBible(ctx, config, outline, project)
         const now = new Date().toISOString()
         const next = project ?? createProject(outline)
         next.bible = bible
@@ -1683,6 +1686,69 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         else project.roles[idx] = r
       } else if (op === 'remove' && body?.name !== undefined) {
         project.roles = project.roles.filter(x => x.name !== body.name)
+      } else if (op === 'image') {
+        const name = body?.name?.trim()
+        const dataUrl = body?.dataUrl?.trim()
+        if (name === undefined || name === '') {
+          writeJson(res, 400, { error: 'name（角色名）必填' })
+          return
+        }
+        if (dataUrl === undefined || dataUrl === '') {
+          writeJson(res, 400, { error: 'dataUrl（参考图）必填' })
+          return
+        }
+        const role = project.roles.find(r => r.name === name)
+        if (role === undefined) {
+          writeJson(res, 404, { error: `角色 ${name} 不存在` })
+          return
+        }
+        const label = body?.label?.trim() ?? ''
+        if (label !== '') {
+          // 图集上传：带用途标签。标签「立绘」时同步为角色参考图（imageUrl）。
+          role.gallery ??= []
+          role.gallery = role.gallery.filter(g => g.label !== label)
+          role.gallery.push({ label, dataUrl })
+          if (label === '立绘' || label.includes('立绘')) role.imageUrl = dataUrl
+        } else {
+          // 兼容旧行为：不带标签 = 角色参考图。
+          role.imageUrl = dataUrl
+        }
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { roles: project.roles, imageUrl: role.imageUrl } satisfies RolesResponse)
+        return
+      } else if (op === 'removeImage') {
+        const name = body?.name?.trim()
+        const label = body?.label?.trim() ?? ''
+        const role = project.roles.find(r => r.name === name)
+        if (role !== undefined) {
+          if (label !== '') {
+            role.gallery = (role.gallery ?? []).filter(g => g.label !== label)
+            if (label === '立绘' || label.includes('立绘')) role.imageUrl = undefined
+          } else {
+            role.imageUrl = undefined
+          }
+        }
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { roles: project.roles } satisfies RolesResponse)
+        return
+      } else if (op === 'imageGenerate') {
+        const name = body?.name?.trim()
+        if (name === undefined || name === '') {
+          writeJson(res, 400, { error: 'name（角色名）必填' })
+          return
+        }
+        try {
+          const imageUrl = await generateRoleReferenceImage(ctx, config, project, config.outputDir, name, body?.style ?? '')
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { roles: project.roles, imageUrl } satisfies RolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `角色参考图生成失败：${(error as Error).message}` })
+          return
+        }
       } else if (op === 'visual') {
         // 动漫形象描述词提炼：扫描正文外貌描写 → LLM 提炼 → 写入角色卡。
         const name = body?.name?.trim()
@@ -1693,13 +1759,36 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         try {
           const visual = await extractRoleVisual(ctx, config, project, config.outputDir, name)
           const role = project.roles.find(r => r.name === name)
-          if (role !== undefined) role.imagePrompt = visual
+          if (role !== undefined) {
+            role.imagePrompt = visual
+            if ((visual.expressions ?? []).length > 0) role.expressions = visual.expressions
+            if (visual.promptKit !== undefined) role.promptKit = visual.promptKit
+          }
           project.updatedAt = new Date().toISOString()
           saveProject(config.outputDir, project)
           writeJson(res, 200, { roles: project.roles, visual } satisfies RolesResponse)
           return
         } catch (error) {
           writeJson(res, 500, { error: `形象提炼失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'promptKit') {
+        // 角色四类提示词精修包（立绘/四视图/表情/细节）
+        const name = body?.name?.trim()
+        if (name === undefined || name === '') {
+          writeJson(res, 400, { error: 'name（角色名）必填' })
+          return
+        }
+        try {
+          const kit = await generateRolePromptKit(ctx, config, project, name)
+          const role = project.roles.find(r => r.name === name)
+          if (role !== undefined) role.promptKit = kit
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { roles: project.roles, promptKit: kit } satisfies RolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `提示词精修失败：${(error as Error).message}` })
           return
         }
       } else {
@@ -1952,67 +2041,99 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
-  // ---------------------------------------------------------- storyboard
-  /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表（适配豆包/Seedance/SD）。 */
-  const storyboardRoute: WebRoute = {
+  // --------------------------------------------------------------- scenes
+  /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
+  const scenesRoute: WebRoute = {
     kind: 'exact',
-    path: NOVEL_API.storyboard,
+    path: NOVEL_API.scenes,
     handler: async (req, res) => {
       if (!guard(req, res, 'POST')) return
       const config = getConfig()
       const project = requireProject(res)
       if (project === undefined) return
-      const body = await readJsonBody<StoryboardRequest>(req)
-      if (!Number.isInteger(body?.chapterNo)) {
-        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+      const body = await readJsonBody<ScenesRequest>(req)
+      if (project.scenes === undefined) project.scenes = []
+      const op = body?.op
+      if (op === 'extract') {
+        try {
+          const candidates = await extractScenes(ctx, config, project)
+          writeJson(res, 200, { scenes: project.scenes, candidates } satisfies ScenesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `场景提炼失败：${(error as Error).message}` })
+          return
+        }
+      } else if ((op === 'adopt' || op === 'update') && body?.scene !== undefined) {
+        const s = body.scene
+        const idx = project.scenes.findIndex(x => x.name === s.name)
+        if (idx === -1) project.scenes.push(s)
+        else project.scenes[idx] = s
+      } else if (op === 'remove' && body?.name !== undefined) {
+        project.scenes = project.scenes.filter(x => x.name !== body.name)
+      } else if (op === 'image') {
+        const name = body?.name?.trim()
+        const dataUrl = body?.dataUrl?.trim()
+        if (name === undefined || name === '' || dataUrl === undefined || dataUrl === '') {
+          writeJson(res, 400, { error: 'name（场景名）与 dataUrl 必填' })
+          return
+        }
+        const scene = project.scenes.find(x => x.name === name)
+        if (scene === undefined) {
+          writeJson(res, 404, { error: `场景 ${name} 不存在` })
+          return
+        }
+        const label = body?.label?.trim() ?? '全景'
+        scene.gallery ??= []
+        scene.gallery = scene.gallery.filter(g => g.label !== label)
+        scene.gallery.push({ label, dataUrl })
+      } else if (op === 'removeImage') {
+        const name = body?.name?.trim()
+        const label = body?.label?.trim() ?? ''
+        const scene = project.scenes.find(x => x.name === name)
+        if (scene !== undefined && label !== '') {
+          scene.gallery = (scene.gallery ?? []).filter(g => g.label !== label)
+        }
+      } else {
+        writeJson(res, 400, { error: `未知操作 ${op}` })
         return
       }
-      try {
-        const result = await generateStoryboard(
-          ctx,
-          config,
-          project,
-          config.outputDir,
-          body!.chapterNo!,
-          body?.genre ?? '',
-          body?.platform ?? '抖音',
-          body?.tool ?? 'doubao',
-        )
-        writeJson(res, 200, result satisfies StoryboardResponse)
-      } catch (error) {
-        writeJson(res, 500, { error: `分镜生成失败：${(error as Error).message}` })
-      }
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { scenes: project.scenes } satisfies ScenesResponse)
     },
   }
 
-  // --------------------------------------------------- storyboard plan
-  /** 漫剧分集计划：读一卷 → 按故事弧线分集（高潮拆集/过渡并章）。 */
-  const storyboardPlanRoute: WebRoute = {
+  // ----------------------------------------------------------- visual rules
+  /** 视觉世界观规则：从道藏提炼（生图/生视频纠偏），或手动保存。 */
+  const visualRulesRoute: WebRoute = {
     kind: 'exact',
-    path: NOVEL_API.storyboardPlan,
+    path: NOVEL_API.visualRules,
     handler: async (req, res) => {
       if (!guard(req, res, 'POST')) return
       const config = getConfig()
       const project = requireProject(res)
       if (project === undefined) return
-      const body = await readJsonBody<StoryboardPlanRequest>(req)
-      if (!Number.isInteger(body?.volumeNo) || (body?.volumeNo ?? 0) < 1) {
-        writeJson(res, 400, { error: 'volumeNo 须为正整数' })
+      const body = await readJsonBody<VisualRulesRequest>(req)
+      if (body?.op === 'extract') {
+        try {
+          const rules = await extractVisualRules(ctx, config, project)
+          project.visualRules = rules
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { rules } satisfies VisualRulesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `视觉规则提炼失败：${(error as Error).message}` })
+          return
+        }
+      } else if (body?.op === 'save' && Array.isArray(body.rules)) {
+        project.visualRules = body.rules.filter(r => typeof r === 'string' && r.trim() !== '').map(r => r.trim().slice(0, 80)).slice(0, 12)
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { rules: project.visualRules } satisfies VisualRulesResponse)
         return
       }
-      try {
-        const result = await planStoryboardEpisodes(
-          ctx,
-          config,
-          project,
-          body!.volumeNo!,
-          body?.platform ?? '抖音',
-          body?.maxEpisodes ?? 25,
-        )
-        writeJson(res, 200, result satisfies StoryboardPlanResponse)
-      } catch (error) {
-        writeJson(res, 500, { error: `分集计划生成失败：${(error as Error).message}` })
-      }
+      writeJson(res, 400, { error: 'op 须为 extract 或 save' })
     },
   }
 
@@ -2121,6 +2242,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     renameRoute,
     plotlinesRoute,
     rolesRoute,
+    scenesRoute,
+    visualRulesRoute,
     sensitiveRoute,
     reviewBackfillRoute,
     chapterResetRoute,
@@ -2129,8 +2252,6 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     openFolderRoute,
     outlineSuggestRoute,
     breakdownRoute,
-    storyboardRoute,
-    storyboardPlanRoute,
     runStartRoute,
     runControlRoute,
     runStatusRoute,

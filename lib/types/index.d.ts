@@ -47,6 +47,12 @@ export interface Config {
     autoAuthorReview?: boolean;
     /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
     autoReviewAfterRevise?: boolean;
+    /** 豆包/Seedream 生图 API Key。 */
+    imageApiKey?: string;
+    /** 豆包/Seedream 生图模型 ID。 */
+    imageApiModel?: string;
+    /** 是否启用豆包生图（默认关）。 */
+    imageApiEnabled?: boolean;
 }
 export declare const Config: z<Config>;
 /** Model-facing announcement: plugin presence, capabilities, and limits. */

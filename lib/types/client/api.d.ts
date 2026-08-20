@@ -20,10 +20,6 @@ export declare class NovelApi {
     outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse>;
     /** 拆书分析：对已写章节做结构/人物/文风/卖点体检。 */
     breakdown(scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<import('../protocol.ts').BreakdownResponse>;
-    /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表。 */
-    storyboard(chapterNo: number, genre?: string, platform?: string, tool?: string): Promise<import('../protocol.ts').StoryboardResponse>;
-    /** 漫剧分集计划：读一卷 → 按故事弧线分集。 */
-    storyboardPlan(volumeNo: number, platform?: string, maxEpisodes?: number): Promise<import('../protocol.ts').StoryboardPlanResponse>;
     plan(outline?: string, chapterCount?: number, volume?: number): Promise<PlanResponse>;
     volumes(outline?: string): Promise<VolumesResponse>;
     bible(outline?: string): Promise<BibleResponse>;
@@ -93,6 +89,10 @@ export declare class NovelApi {
     }>;
     /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
     roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse>;
+    /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
+    scenes(req: import('../protocol.ts').ScenesRequest): Promise<import('../protocol.ts').ScenesResponse>;
+    /** 视觉世界观规则：提炼 / 保存。 */
+    visualRules(req: import('../protocol.ts').VisualRulesRequest): Promise<import('../protocol.ts').VisualRulesResponse>;
     /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
     blurb(action: 'generate' | 'save', text?: string, partial?: string): Promise<{
         blurb: string;

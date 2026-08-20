@@ -85,16 +85,6 @@ export class NovelApi {
     return postJson<import('../protocol.ts').BreakdownResponse>(NOVEL_API.breakdown, { scope, preset, budgetTokens })
   }
 
-  /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表。 */
-  async storyboard(chapterNo: number, genre?: string, platform?: string, tool?: string): Promise<import('../protocol.ts').StoryboardResponse> {
-    return postJson<import('../protocol.ts').StoryboardResponse>(NOVEL_API.storyboard, { chapterNo, genre, platform, tool })
-  }
-
-  /** 漫剧分集计划：读一卷 → 按故事弧线分集。 */
-  async storyboardPlan(volumeNo: number, platform?: string, maxEpisodes?: number): Promise<import('../protocol.ts').StoryboardPlanResponse> {
-    return postJson<import('../protocol.ts').StoryboardPlanResponse>(NOVEL_API.storyboardPlan, { volumeNo, platform, maxEpisodes })
-  }
-
   async plan(outline?: string, chapterCount?: number, volume?: number): Promise<PlanResponse> {
     return postJson<PlanResponse>(NOVEL_API.plan, { outline, chapterCount, volume })
   }
@@ -215,6 +205,16 @@ export class NovelApi {
   /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
   async roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse> {
     return postJson<import('../protocol.ts').RolesResponse>(NOVEL_API.roles, req)
+  }
+
+  /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
+  async scenes(req: import('../protocol.ts').ScenesRequest): Promise<import('../protocol.ts').ScenesResponse> {
+    return postJson<import('../protocol.ts').ScenesResponse>(NOVEL_API.scenes, req)
+  }
+
+  /** 视觉世界观规则：提炼 / 保存。 */
+  async visualRules(req: import('../protocol.ts').VisualRulesRequest): Promise<import('../protocol.ts').VisualRulesResponse> {
+    return postJson<import('../protocol.ts').VisualRulesResponse>(NOVEL_API.visualRules, req)
   }
 
   /** 小说简介：AI 生成/补全（partial 留空 = 全量），或手动保存。 */
