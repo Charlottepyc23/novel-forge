@@ -11,7 +11,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { exec } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename, extname } from 'node:path'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { Context } from '@deepseek-ai/cordis'
 import { ProductionRunner } from './run.ts'
@@ -35,6 +35,10 @@ import {
   type BibleResponse,
   type BookActivateRequest,
   type BookCreateRequest,
+  type BookImportDirRequest,
+  type BookImportDirResponse,
+  type BookImportTextRequest,
+  type BookImportTextResponse,
   type BookRemoveRequest,
   type BookshelfSnapshot,
   type ChapterResponse,
@@ -86,7 +90,7 @@ import {
 } from './protocol.ts'
 import { readOutlineFromDocx } from './docx.ts'
 import { clearAssistantHistory, loadAssistantHistory, runAssistantTurn } from './assistant.ts'
-import { activateBook, bookshelfSnapshot, createBook, defaultOutputDirFor, loadBookshelf, removeBook, renameBook, seedBookshelfFromOutputDir } from './bookshelf.ts'
+import { activateBook, bookshelfSnapshot, createBook, defaultOutputDirFor, importDir, loadBookshelf, removeBook, renameBook, seedBookshelfFromOutputDir } from './bookshelf.ts'
 import { BUILTIN_ANTI_AI_RULES, BUILTIN_GENRE_LIBRARY, BUILTIN_PROGRESSION_MODES, BUILTIN_STYLE_TEMPLATES, emptyProjectAssets } from './assets.ts'
 import {
   chapterFileName,
@@ -96,6 +100,7 @@ import {
   backfillFacts,
   createProject,
   exportBook,
+  importBookText,
   extractBible,
   extractStyleAsset,
   extractWorld,
@@ -1208,6 +1213,59 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------- bookshelf import-dir
+  /** 导入已有项目目录（Mode A）：校验 novel-project.json，登记/激活书架。 */
+  const bookshelfImportDirRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.bookshelfImportDir,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<BookImportDirRequest>(req)
+      const outputDir = body?.outputDir?.trim()
+      if (outputDir === undefined || outputDir === '') {
+        writeJson(res, 400, { error: 'outputDir 不能为空' })
+        return
+      }
+      try {
+        const { book, existed } = importDir(outputDir)
+        writeJson(res, 200, { book, existed })
+      } catch (err) {
+        writeJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  }
+
+  // ------------------------------------------- bookshelf import-text
+  /** 导入 txt/md 全本（Mode B）：拆章落盘建项目，登记书架。 */
+  const bookshelfImportTextRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.bookshelfImportText,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<BookImportTextRequest>(req)
+      const filePath = body?.filePath?.trim()
+      if (filePath === undefined || filePath === '') {
+        writeJson(res, 400, { error: 'filePath 不能为空' })
+        return
+      }
+      if (!existsSync(filePath)) {
+        writeJson(res, 400, { error: `文件不存在：${filePath}` })
+        return
+      }
+      try {
+        const bookName = basename(filePath, extname(filePath)).slice(0, 40) || '导入小说'
+        const outDir = body?.outputDir?.trim() !== undefined && body.outputDir.trim() !== ''
+          ? body.outputDir.trim()
+          : defaultOutputDirFor(bookName)
+        const result = importBookText(filePath, outDir)
+        const { book } = importDir(outDir)
+        writeJson(res, 200, { ...result, book })
+      } catch (err) {
+        writeJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  }
+
   // ---------------------------------------------------------------- audit
   /** 全书一致性质检。 */
   const auditRoute: WebRoute = {
@@ -2231,6 +2289,8 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     bookshelfRoute,
     bookshelfActivateRoute,
     bookshelfRemoveRoute,
+    bookshelfImportDirRoute,
+    bookshelfImportTextRoute,
     resetRoute,
     auditRoute,
     charactersRefreshRoute,

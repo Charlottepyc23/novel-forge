@@ -118,6 +118,7 @@ export function ShelfView({
   onOpenBook,
   onReadBook,
   onAddBook,
+  onImportBook,
 }: {
   api: NovelApi
   shelf: BookshelfSnapshot
@@ -127,6 +128,8 @@ export function ShelfView({
   onReadBook: (id: string) => void
   /** 点击＋：进入开书向导页。 */
   onAddBook: () => void
+  /** 点击「导入」：打开导入弹窗（已有项目目录 / txt/md 全本）。 */
+  onImportBook: () => void
 }) {
   const [query, setQuery] = useState('')
   /** 筛选：all=全部 / active=进行中 / done=已完结 / none=未开书。 */
@@ -203,6 +206,9 @@ export function ShelfView({
           <button type="button" className={`${css.button} ${css.buttonPrimary}`} onClick={onAddBook}>
             ＋ 开第一本书
           </button>
+          <button type="button" className={`${css.button}`} onClick={onImportBook}>
+            📥 导入已有小说
+          </button>
         </div>
       ) : visible.length === 0 ? (
         <div className={css.shelfEmpty} style={{ minHeight: 160 }}>
@@ -228,6 +234,13 @@ export function ShelfView({
             <div className={css.bookAddIcon}>＋</div>
             <span>开一本新书</span>
             <span className={css.meta}>书名 + 大纲，开书即建项目</span>
+          </div>
+
+          {/* 导入入口：已有项目目录 / txt/md 全本 */}
+          <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onImportBook}>
+            <div className={css.bookAddIcon}>📥</div>
+            <span>导入已有小说</span>
+            <span className={css.meta}>项目目录或 txt/md 全本</span>
           </div>
         </div>
       )}

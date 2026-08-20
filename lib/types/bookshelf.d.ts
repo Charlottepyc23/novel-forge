@@ -26,6 +26,11 @@ export declare function renameBook(id: string, bookName: string): boolean;
  * @returns 是否发生了播种。
  */
 export declare function seedBookshelfFromOutputDir(outputDir: string): boolean;
+/** 导入已有项目目录到书架：校验 novel-project.json，已存在则直接激活。 */
+export declare function importDir(outputDir: string): {
+    book: BookEntry;
+    existed: boolean;
+};
 /** 激活一本书。 */
 export declare function activateBook(id: string): BookEntry | undefined;
 /** 移除一本书。 */

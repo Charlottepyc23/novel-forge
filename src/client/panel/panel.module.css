@@ -2939,3 +2939,99 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .readerError {
   color: var(--nf-error);
 }
+
+/* ---------------------------------------------------------- import modal */
+
+.importModalOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  padding: 24px;
+}
+
+.importModal {
+  width: min(520px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--nf-border-strong);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--nf-bg-raise);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(28px) saturate(180%);
+  box-shadow: var(--nf-shadow-lg);
+}
+
+.importModalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.importModalTabs {
+  display: flex;
+  gap: 8px;
+}
+
+.importModalTabs .button {
+  flex: 1;
+}
+
+.importModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.importField {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--nf-text-2);
+}
+
+.importHint {
+  font-size: 12px;
+  color: var(--nf-text-3);
+  line-height: 1.5;
+}
+
+.importError {
+  border: 1px solid color-mix(in srgb, var(--nf-danger, #e5484d) 55%, transparent);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--nf-danger, #e5484d);
+  background: color-mix(in srgb, var(--nf-danger, #e5484d) 10%, transparent);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.importResult {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid color-mix(in srgb, var(--nf-ok, #46a758) 45%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--nf-ok, #46a758) 9%, transparent);
+  word-break: break-all;
+}
+
+.importModalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

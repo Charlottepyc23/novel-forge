@@ -15,6 +15,7 @@ import { ShelfView } from './ShelfView.tsx'
 import { ReaderView } from './ReaderView.tsx'
 import { RunPanel } from './RunPanel.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
+import { ImportModal } from './ImportModal.tsx'
 import { WorldTab } from './WorldTab.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
 import { extractDocxTextFromBuffer } from '../docx.ts'
@@ -619,6 +620,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   })
   /** 视图：shelf = 书架首页；create = 开书向导；workspace = 当前书工作台。 */
   const [viewMode, setViewMode] = useState<'shelf' | 'create' | 'workspace' | 'reader'>('shelf')
+  const [showImport, setShowImport] = useState(false)
 
   /** Refresh bookshelf. */
   const refreshShelf = useCallback(async () => {
@@ -2339,6 +2341,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             await activateBook(id, 'reader')
           }}
           onAddBook={() => { setViewMode('create') }}
+          onImportBook={() => { setShowImport(true) }}
         />
       ) : viewMode === 'create' ? (
         /* 开书向导：独立页面 */
@@ -5040,6 +5043,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             }}
           />
         </div>
+      )}
+      {showImport && (
+        <ImportModal
+          api={api}
+          onClose={() => { setShowImport(false) }}
+          onImported={async () => {
+            await refreshShelf()
+          }}
+        />
       )}
     </div>
   )

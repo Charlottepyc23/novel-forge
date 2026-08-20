@@ -254,6 +254,16 @@ export class NovelApi {
     return postJson<import('../protocol.ts').BookshelfSnapshot>('/api/dsh-novel-forge/bookshelf/remove', { id })
   }
 
+  /** 导入已有项目目录（Mode A）：校验 novel-project.json，登记/激活书架。 */
+  async bookImportDir(outputDir: string): Promise<import('../protocol.ts').BookImportDirResponse> {
+    return postJson<import('../protocol.ts').BookImportDirResponse>(NOVEL_API.bookshelfImportDir, { outputDir })
+  }
+
+  /** 导入 txt/md 全本（Mode B）：拆章建项目并登记书架。 */
+  async bookImportText(filePath: string, outputDir?: string): Promise<import('../protocol.ts').BookImportTextResponse> {
+    return postJson<import('../protocol.ts').BookImportTextResponse>(NOVEL_API.bookshelfImportText, { filePath, outputDir })
+  }
+
   /** 生产单：启动批量生产（区间或新增 N 章；计划不足自动补）。 */
   async runStart(req: import('../protocol.ts').RunStartRequest): Promise<import('../protocol.ts').RunState> {
     return postJson<import('../protocol.ts').RunState>(NOVEL_API.runStart, req)

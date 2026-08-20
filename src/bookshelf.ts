@@ -114,6 +114,22 @@ export function seedBookshelfFromOutputDir(outputDir: string): boolean {
   return true
 }
 
+/** 导入已有项目目录到书架：校验 novel-project.json，已存在则直接激活。 */
+export function importDir(outputDir: string): { book: BookEntry; existed: boolean } {
+  const project = loadProject(outputDir)
+  if (project === undefined) throw new Error(`目录中未找到有效的 novel-project.json：${outputDir}`)
+  const store = loadBookshelf()
+  const existed = store.books.find(b => b.outputDir === outputDir)
+  if (existed !== undefined) {
+    store.activeBookId = existed.id
+    saveBookshelf(store)
+    return { book: existed, existed: true }
+  }
+  const bookName = project.bookName !== '' ? project.bookName : (outputDir.split(/[\\/]/).pop() ?? '未命名小说')
+  const book = createBook(bookName, outputDir)
+  return { book, existed: false }
+}
+
 /** 激活一本书。 */
 export function activateBook(id: string): BookEntry | undefined {
   const store = loadBookshelf()

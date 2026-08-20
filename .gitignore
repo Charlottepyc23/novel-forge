@@ -18,3 +18,9 @@ Thumbs.db
 
 # Test artifacts
 coverage/
+
+# Local-only (never publish)
+backup/
+restart-dsh.cmd
+*.tgz
+workbench-demo.html

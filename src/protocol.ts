@@ -36,6 +36,10 @@ export const NOVEL_API = {
   /** 清空助手对话记录。 */
   assistantClear: '/api/dsh-novel-forge/assistant/clear',
   bookshelf: '/api/dsh-novel-forge/bookshelf',
+  /** 导入已有项目目录（含 novel-project.json）到书架。 */
+  bookshelfImportDir: '/api/dsh-novel-forge/bookshelf/import-dir',
+  /** 导入 txt/md 全本：拆章建项目并登记书架。 */
+  bookshelfImportText: '/api/dsh-novel-forge/bookshelf/import-text',
   /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
   reset: '/api/dsh-novel-forge/reset',
   /** 全书一致性质检：LLM 扫描已生成章节，输出矛盾问题清单。 */
@@ -129,6 +133,39 @@ export interface BookActivateRequest {
 export interface BookRemoveRequest {
   id: string
 }
+
+/** POST /bookshelf/import-dir 请求：导入已有项目目录。 */
+export interface BookImportDirRequest {
+  /** 项目目录（须含 novel-project.json）。 */
+  outputDir: string
+}
+
+/** POST /bookshelf/import-dir 响应。 */
+export interface BookImportDirResponse {
+  book: BookEntry
+  /** true = 目录已在书架中（本次为重新激活）。 */
+  existed: boolean
+}
+
+/** POST /bookshelf/import-text 请求：导入 txt/md 全本。 */
+export interface BookImportTextRequest {
+  /** 源文件绝对路径（txt 或 md）。 */
+  filePath: string
+  /** 输出目录；缺省为 ~/.dsh/novels/书名。 */
+  outputDir?: string
+}
+
+/** POST /bookshelf/import-text 响应。 */
+export interface BookImportTextResponse {
+  bookName: string
+  /** 成功拆出的章节数。 */
+  chapters: number
+  /** 因内容过短被跳过的章节标题列表。 */
+  skipped: string[]
+  /** 登记后的书架条目。 */
+  book: BookEntry
+}
+
 
 /** Chapter lifecycle states (the writing pipeline's state machine). */
 export type ChapterStatus =

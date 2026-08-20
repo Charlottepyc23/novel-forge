@@ -24,7 +24,7 @@ export const COMPLIANCE_REDLINES: ReadonlyArray<string> = [
 ]
 
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename, extname } from 'node:path'
 import { createUserMessage, BlockAssembler, ReasoningEffortId, type GenerateOptions, type Message, type StreamChunk } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import { emptyProjectAssets, renderAllAssets, styleEngineSystemPrompt } from './assets.ts'
@@ -1244,6 +1244,64 @@ export async function extractScenes(
     })
   }
   return scenes
+}
+
+/** 从 txt/md 全本拆分章节并建立项目：正文落盘为章节文件，status=written（待审稿）。 */
+export function importBookText(
+  filePath: string,
+  outputDir: string,
+): { bookName: string; chapters: number; skipped: string[] } {
+  const raw = readFileSync(filePath, 'utf8')
+  const lines = raw.split(/\r?\n/)
+  // 拆章：识别"第X章/第X回/第X节/第X卷"（可带 # 标题前缀），后接可选标题。
+  const chapterHead = /^\s*(?:#\s*)?第\s*(\d+|[一二三四五六七八九十百千]+)\s*[章回节卷]\s*(.*?)\s*$/
+  const cnNum: Record<string, number> = { 一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,十:10,百:100,千:1000 }
+  const parseCn = (s: string): number => {
+    if (/^\d+$/.test(s)) return Number(s)
+    let total = 0; let section = 0
+    for (const ch of s) {
+      const v = cnNum[ch]
+      if (v === undefined) return 0
+      if (v >= 10) { total += (section > 0 ? section : 1) * v; section = 0 } else section = v
+    }
+    return total + section
+  }
+  const chunks: Array<{ no: number; title: string; body: string[] }> = []
+  let current: { no: number; title: string; body: string[] } | null = null
+  for (const line of lines) {
+    const m = chapterHead.exec(line)
+    if (m !== null) {
+      if (current !== null) chunks.push(current)
+      const no = parseCn(m[1])
+      const title = (m[2] ?? '').trim() || ''
+      current = { no: no > 0 ? no : chunks.length + 1, title, body: [] }
+    } else if (current !== null) {
+      current.body.push(line)
+    }
+  }
+  if (current !== null) chunks.push(current)
+  if (chunks.length === 0) throw new Error('未识别到章节（需要"第X章"格式，或带 # 的章节标题）')
+  const seen = new Set<number>()
+  const ordered = chunks.filter(c => { if (seen.has(c.no)) return false; seen.add(c.no); return true }).sort((a, b) => a.no - b.no)
+  const bookName = basename(filePath, extname(filePath)).slice(0, 40) || '导入小说'
+  const project = createProject(bookName)
+  mkdirSync(outputDir, { recursive: true })
+  const skipped: string[] = []
+  for (const c of ordered) {
+    const body = c.body.join('\n').trim()
+    if (body.length < 50) { skipped.push('第' + c.no + '章' + (c.title !== '' ? '「' + c.title + '」' : '') + '（内容过短，已跳过）'); continue }
+    const chapter: ChapterPlan = {
+      no: c.no, volume: 0, title: c.title !== '' ? c.title : '第' + c.no + '章', beats: '', targetChars: 0,
+      status: 'written', file: '', chars: 0,
+    }
+    chapter.file = chapterFileName(chapter)
+    writeFileSync(join(outputDir, chapter.file), '# 第' + c.no + '章 ' + chapter.title + '\n\n' + body + '\n', 'utf8')
+    chapter.chars = body.length
+    project.chapters.push(chapter)
+  }
+  project.updatedAt = new Date().toISOString()
+  saveProject(outputDir, project)
+  return { bookName, chapters: project.chapters.length, skipped }
 }
 
 /** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */

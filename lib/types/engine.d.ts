@@ -71,6 +71,12 @@ export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfi
 export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
 /** ✨ AI 从全书提炼场景库：正文/编年录 → 高频重要场景的结构化视觉锚点。 */
 export declare function extractScenes(ctx: Context, config: NovelConfig, project: ProjectState): Promise<SceneCard[]>;
+/** 从 txt/md 全本拆分章节并建立项目：正文落盘为章节文件，status=written（待审稿）。 */
+export declare function importBookText(filePath: string, outputDir: string): {
+    bookName: string;
+    chapters: number;
+    skipped: string[];
+};
 /** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */
 export interface RoleVisualPrompt {
     zh: string;
