@@ -143,12 +143,14 @@ export declare const zh: {
     readonly 'settings.model': "模型";
     readonly 'settings.modelCustom': "自定义…";
     readonly 'settings.modelCustomPlaceholder': "输入任意模型 id";
-    readonly 'settings.reasoningEffort': "思考强度 (reasoningEffort)";
+    readonly 'settings.reasoningEffort': "写作类任务思考强度 (reasoningEffort)";
+    readonly 'settings.reasoningHint': "章节生成/润色/重写/审稿等写作任务使用；关掉更省更快。";
+    readonly 'settings.analysisReasoning': "分析类任务思考强度（提炼/拆书/反推大纲）";
+    readonly 'settings.analysisReasoningHint': "角色/场景/道藏提炼、拆书、反推大纲等一次性分析任务默认 low，保证质量，不受上面写作档位影响。";
     readonly 'settings.reasoning.off': "off · 关闭思考（推荐日常写文）";
     readonly 'settings.reasoning.low': "low · 低思考";
     readonly 'settings.reasoning.high': "high · 高思考";
     readonly 'settings.reasoning.max': "max · 最高思考（质检/推演）";
-    readonly 'settings.reasoningHint': "off 最快最省；high/max 更慢更贵但推理更强";
     readonly 'settings.theme': "主题";
     readonly 'settings.themeLiquid': "iOS 液态玻璃（绿）";
     readonly 'settings.themeClassic': "经典毛玻璃（蓝）";

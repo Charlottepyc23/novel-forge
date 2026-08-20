@@ -75,6 +75,11 @@ export class NovelApi {
     return postJson<{ ok: boolean; bookName: string }>(NOVEL_API.saveOutline, { text })
   }
 
+  /** 反推大纲：从已写章节正文反向生成全书总纲（NDJSON 流）。 */
+  async outlineReverse(onFrame: (frame: JobFrame) => void): Promise<void> {
+    await this.streamJob(NOVEL_API.outlineReverse, {}, onFrame)
+  }
+
   /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
   async outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse> {
     return postJson<import('../protocol.ts').OutlineSuggestResponse>(NOVEL_API.outlineSuggest, { idea, count, exclude })
@@ -259,9 +264,19 @@ export class NovelApi {
     return postJson<import('../protocol.ts').BookImportDirResponse>(NOVEL_API.bookshelfImportDir, { outputDir })
   }
 
-  /** 导入 txt/md 全本（Mode B）：拆章建项目并登记书架。 */
+  /** 导入 txt/md 全本（Mode B）：服务器本地文件路径模式。 */
   async bookImportText(filePath: string, outputDir?: string): Promise<import('../protocol.ts').BookImportTextResponse> {
     return postJson<import('../protocol.ts').BookImportTextResponse>(NOVEL_API.bookshelfImportText, { filePath, outputDir })
+  }
+
+  /** 拆章预览（浏览器上传全文，不落盘）：返回识别到的章节与跳过清单。 */
+  async bookImportTextPreview(text: string, fileName?: string): Promise<import('../protocol.ts').BookImportTextPreviewResponse> {
+    return postJson<import('../protocol.ts').BookImportTextPreviewResponse>(NOVEL_API.bookshelfImportTextPreview, { text, fileName })
+  }
+
+  /** 导入 txt/md 全本（Mode B）：浏览器上传全文内容模式。 */
+  async bookImportTextContent(text: string, fileName: string, outputDir?: string): Promise<import('../protocol.ts').BookImportTextResponse> {
+    return postJson<import('../protocol.ts').BookImportTextResponse>(NOVEL_API.bookshelfImportText, { text, fileName, outputDir })
   }
 
   /** 生产单：启动批量生产（区间或新增 N 章；计划不足自动补）。 */

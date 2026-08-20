@@ -791,6 +791,30 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
+  /** 反推大纲：从已写章节正文反向生成全书总纲（流式进度）。 */
+  const handleReverseOutline = async (): Promise<void> => {
+    if (project === null) return
+    if (!window.confirm('将从已写章节正文反推出全书总纲（覆盖当前大纲文本，不影响章节/设定/进度）。确定继续？')) return
+    setBusy(true)
+    setError('')
+    try {
+      await api.outlineReverse(frame => {
+        if (frame.type === 'outline-progress') {
+          pushProgress(`反推大纲：${frame.phase}（${frame.done}/${frame.total}）`, 'info')
+        } else if (frame.type === 'outline-done') {
+          setOutlineText(frame.outline)
+          pushProgress(`反推大纲完成（${frame.chars} 字），已保存为当前总纲`, 'done')
+        }
+      })
+      await refresh(false)
+    } catch (err) {
+      setError((err as Error).message)
+      pushProgress(`反推大纲失败：${(err as Error).message}`, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   /** 大纲页「更新大纲」展开/收起（展开时预填当前大纲文本）。 */
   const handleToggleUpdateOutline = (): void => {
     if (!updatingOutline && project !== null) setOutlineText(project.outline)
@@ -3001,6 +3025,15 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       {tt('overview.bookName')}: {project.bookName} · {project.outline.length} 字
                       {project.outlinePath !== undefined && <span> · {project.outlinePath}</span>}
                     </span>
+                    <button
+                      type="button"
+                      className={`${css.button} ${css.buttonPrimary}`}
+                      disabled={busy || !(project.chapters ?? []).some(c => c.status === 'written' || c.status === 'approved' || c.status === 'rejected')}
+                      onClick={() => { void handleReverseOutline() }}
+                      title="从已写章节正文反向生成全书总纲（覆盖当前大纲文本）"
+                    >
+                      🔄 反推大纲
+                    </button>
                     <button type="button" className={css.button} disabled={busy} onClick={() => { handleToggleUpdateOutline() }}>
                       {updatingOutline ? '收起' : '更新大纲'}
                     </button>
@@ -3076,7 +3109,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </>
               ) : (
                 /* 只读展示：大纲是开书时的出生证明 */
+                <>
+                <div className={css.meta} style={{ marginBottom: 6 }}>
+                  大纲是本书的「出生证明」；已写章节可点右上角「🔄 反推大纲」从正文反推，或「更新大纲」手动修订。
+                </div>
                 <pre className={css.outlineReadonly}>{project.outline}</pre>
+                </>
               )}
             </div>
             <div className={css.card}>
@@ -3729,170 +3767,206 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'assets' && <AssetsTab api={api} />}
 
         {activeTab === 'settings' && configDraft !== null && (
-          <div className={css.card}>
-            <span className={css.cardTitle}>{tt('settings.title')}</span>
-            <div className={css.field}>
-              <label className={css.fieldLabel}>{tt('settings.outlinePath')}</label>
-              <input className={css.input} value={configDraft.outlinePath} onChange={e => { setConfigDraft({ ...configDraft, outlinePath: e.target.value }) }} />
-            </div>
-            <div className={css.field}>
-              <label className={css.fieldLabel}>{tt('settings.outputDir')}</label>
-              <input className={css.input} value={configDraft.outputDir} onChange={e => { setConfigDraft({ ...configDraft, outputDir: e.target.value }) }} />
-            </div>
-            <div className={css.row} style={{ alignItems: 'flex-start' }}>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.provider')}</label>
-                <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
+          <>
+            {/* ① 路径与输出 */}
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <span className={css.cardTitle}>📁 路径与输出</span>
+              <div className={css.field}>
+                <label className={css.fieldLabel}>{tt('settings.outlinePath')}</label>
+                <input className={css.input} value={configDraft.outlinePath} onChange={e => { setConfigDraft({ ...configDraft, outlinePath: e.target.value }) }} />
               </div>
-              <div className={css.field} style={{ flex: 1.4 }}>
-                <label className={css.fieldLabel}>{tt('settings.model')}</label>
-                <select
-                  className={css.input}
-                  value={modelCustomMode ? '__custom__' : configDraft.model}
-                  onChange={e => {
-                    const v = e.target.value
-                    if (v === '__custom__') {
-                      setModelCustomMode(true)
-                    } else {
-                      setModelCustomMode(false)
-                      setConfigDraft({ ...configDraft, model: v })
-                    }
-                  }}
-                >
-                  {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
-                  <option value="__custom__">{tt('settings.modelCustom')}</option>
-                </select>
-                {modelCustomMode && (
-                  <input
+              <div className={css.field}>
+                <label className={css.fieldLabel}>{tt('settings.outputDir')}</label>
+                <input className={css.input} value={configDraft.outputDir} onChange={e => { setConfigDraft({ ...configDraft, outputDir: e.target.value }) }} />
+              </div>
+              <div className={css.row}>
+                <button type="button" className={css.button} onClick={() => { void api.openFolder() }}>{tt('settings.openFolder')}</button>
+              </div>
+            </div>
+
+            {/* ② 模型与推理 */}
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <span className={css.cardTitle}>🤖 模型与推理</span>
+              <div className={css.row} style={{ alignItems: 'flex-start' }}>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.provider')}</label>
+                  <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
+                </div>
+                <div className={css.field} style={{ flex: 1.4 }}>
+                  <label className={css.fieldLabel}>{tt('settings.model')}</label>
+                  <select
                     className={css.input}
-                    style={{ marginTop: 6 }}
-                    value={configDraft.model}
-                    placeholder={tt('settings.modelCustomPlaceholder')}
-                    onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
-                  />
-                )}
+                    value={modelCustomMode ? '__custom__' : configDraft.model}
+                    onChange={e => {
+                      const v = e.target.value
+                      if (v === '__custom__') {
+                        setModelCustomMode(true)
+                      } else {
+                        setModelCustomMode(false)
+                        setConfigDraft({ ...configDraft, model: v })
+                      }
+                    }}
+                  >
+                    {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+                    <option value="__custom__">{tt('settings.modelCustom')}</option>
+                  </select>
+                  {modelCustomMode && (
+                    <input
+                      className={css.input}
+                      style={{ marginTop: 6 }}
+                      value={configDraft.model}
+                      placeholder={tt('settings.modelCustomPlaceholder')}
+                      onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
+                    />
+                  )}
+                </div>
               </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.reasoningEffort')}</label>
-                <select
-                  className={css.input}
-                  value={configDraft.reasoningEffort ?? 'off'}
-                  onChange={e => { setConfigDraft({ ...configDraft, reasoningEffort: e.target.value as NovelConfig['reasoningEffort'] }) }}
-                >
-                  {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
-                </select>
-                <span className={css.meta}>{tt('settings.reasoningHint')}</span>
-              </div>
-            </div>
-            <div className={css.row}>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>豆包 API Key（生图）</label>
-                <input className={css.input} type="password" placeholder="ark-..." value={configDraft.imageApiKey ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiKey: e.target.value }) }} />
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>豆包生图模型</label>
-                <input className={css.input} placeholder="doubao-seedream-5-0-pro-260628" value={configDraft.imageApiModel ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiModel: e.target.value }) }} />
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>启用豆包生图</label>
-                <select
-                  className={css.input}
-                  value={configDraft.imageApiEnabled ? '1' : '0'}
-                  onChange={e => { setConfigDraft({ ...configDraft, imageApiEnabled: e.target.value === '1' }) }}
-                >
-                  <option value="0">关（默认）</option>
-                  <option value="1">开</option>
-                </select>
-                <span className={css.meta}>开启后角色详情显示「豆包生成」参考图按钮</span>
-              </div>
-            </div>
-            <div className={css.row}>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
-                <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.maxTokens')}</label>
-                <input className={css.input} type="number" min={2000} max={64000} value={configDraft.maxTokens} onChange={e => { setConfigDraft({ ...configDraft, maxTokens: Number(e.target.value) }) }} />
-              </div>
-            </div>
-            <div className={css.row}>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.reviewPassScore')}</label>
-                <input className={css.input} type="number" min={0} max={100} value={configDraft.reviewPassScore} onChange={e => { setConfigDraft({ ...configDraft, reviewPassScore: Number(e.target.value) }) }} />
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.editorFontSize')}</label>
-                <select
-                  className={css.input}
-                  value={editorFontSize}
-                  onChange={e => { changeEditorFontSize(Number(e.target.value)) }}
-                >
-                  {[12, 13, 14, 15, 16, 18, 20, 22, 24].map(v => (
-                    <option key={v} value={v}>{v}px</option>
-                  ))}
-                </select>
-                <span className={css.meta}>{tt('settings.editorFontSizeHint')}</span>
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.autoReview')}</label>
-                <select
-                  className={css.input}
-                  value={configDraft.autoReview ? '1' : '0'}
-                  onChange={e => { setConfigDraft({ ...configDraft, autoReview: e.target.value === '1' }) }}
-                >
-                  <option value="1">✓ 是</option>
-                  <option value="0">✗ 否</option>
-                </select>
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.autoAuthorReview')}</label>
-                <select
-                  className={css.input}
-                  value={configDraft.autoAuthorReview ? '1' : '0'}
-                  onChange={e => { setConfigDraft({ ...configDraft, autoAuthorReview: e.target.value === '1' }) }}
-                >
-                  <option value="1">✓ 是</option>
-                  <option value="0">✗ 否</option>
-                </select>
-                <span className={css.meta}>{tt('settings.autoAuthorReviewHint')}</span>
-              </div>
-              <div className={css.field} style={{ flex: 1 }}>
-                <label className={css.fieldLabel}>{tt('settings.autoReviewAfterRevise')}</label>
-                <select
-                  className={css.input}
-                  value={configDraft.autoReviewAfterRevise ? '1' : '0'}
-                  onChange={e => { setConfigDraft({ ...configDraft, autoReviewAfterRevise: e.target.value === '1' }) }}
-                >
-                  <option value="1">✓ 是</option>
-                  <option value="0">✗ 否</option>
-                </select>
-                <span className={css.meta}>{tt('settings.autoReviewAfterReviseHint')}</span>
+              <div className={css.row} style={{ alignItems: 'flex-start' }}>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.reasoningEffort')}</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.reasoningEffort ?? 'off'}
+                    onChange={e => { setConfigDraft({ ...configDraft, reasoningEffort: e.target.value as NovelConfig['reasoningEffort'] }) }}
+                  >
+                    {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
+                  </select>
+                  <span className={css.meta}>{tt('settings.reasoningHint')}</span>
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.analysisReasoning')}</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.analysisReasoning ?? 'low'}
+                    onChange={e => { setConfigDraft({ ...configDraft, analysisReasoning: e.target.value as NovelConfig['analysisReasoning'] }) }}
+                  >
+                    {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
+                  </select>
+                  <span className={css.meta}>{tt('settings.analysisReasoningHint')}</span>
+                </div>
               </div>
             </div>
-            <div className={css.row}>
-              <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
-                {tt('settings.save')}
-              </button>
-              <button type="button" className={css.button} onClick={() => { void api.openFolder() }}>
-                {tt('settings.openFolder')}
-              </button>
-              <span className={css.meta}>当前：{config?.provider} / {config?.model} · {config?.outputDir}</span>
+
+            {/* ③ 生图（豆包） */}
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <span className={css.cardTitle}>🎨 生图（豆包）</span>
+              <div className={css.row}>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>豆包 API Key（生图）</label>
+                  <input className={css.input} type="password" placeholder="ark-..." value={configDraft.imageApiKey ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiKey: e.target.value }) }} />
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>豆包生图模型</label>
+                  <input className={css.input} placeholder="doubao-seedream-5-0-pro-260628" value={configDraft.imageApiModel ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiModel: e.target.value }) }} />
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>启用豆包生图</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.imageApiEnabled ? '1' : '0'}
+                    onChange={e => { setConfigDraft({ ...configDraft, imageApiEnabled: e.target.value === '1' }) }}
+                  >
+                    <option value="0">关（默认）</option>
+                    <option value="1">开</option>
+                  </select>
+                  <span className={css.meta}>开启后角色详情显示「豆包生成」参考图按钮</span>
+                </div>
+              </div>
             </div>
-            <div className={css.row}>
-              <span className={css.cardTitle}>{tt('settings.export')}</span>
-              <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('txt') }}>
-                {tt('settings.exportTxt')}
-              </button>
-              <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('md') }}>
-                {tt('settings.exportMd')}
-              </button>
+
+            {/* ④ 写作与审稿参数 */}
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <span className={css.cardTitle}>✍️ 写作与审稿参数</span>
+              <div className={css.row}>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
+                  <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.maxTokens')}</label>
+                  <input className={css.input} type="number" min={2000} max={64000} value={configDraft.maxTokens} onChange={e => { setConfigDraft({ ...configDraft, maxTokens: Number(e.target.value) }) }} />
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.editorFontSize')}</label>
+                  <select
+                    className={css.input}
+                    value={editorFontSize}
+                    onChange={e => { changeEditorFontSize(Number(e.target.value)) }}
+                  >
+                    {[12, 13, 14, 15, 16, 18, 20, 22, 24].map(v => (
+                      <option key={v} value={v}>{v}px</option>
+                    ))}
+                  </select>
+                  <span className={css.meta}>{tt('settings.editorFontSizeHint')}</span>
+                </div>
+              </div>
+              <div className={css.row}>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.reviewPassScore')}</label>
+                  <input className={css.input} type="number" min={0} max={100} value={configDraft.reviewPassScore} onChange={e => { setConfigDraft({ ...configDraft, reviewPassScore: Number(e.target.value) }) }} />
+                  <span className={css.meta}>通过判定：综合评分 ≥ 此分数（默认 70），或无 high 级问题且评分 ≥ 60；建议设 60-80。</span>
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.autoReview')}</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.autoReview ? '1' : '0'}
+                    onChange={e => { setConfigDraft({ ...configDraft, autoReview: e.target.value === '1' }) }}
+                  >
+                    <option value="1">✓ 是</option>
+                    <option value="0">✗ 否</option>
+                  </select>
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.autoAuthorReview')}</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.autoAuthorReview ? '1' : '0'}
+                    onChange={e => { setConfigDraft({ ...configDraft, autoAuthorReview: e.target.value === '1' }) }}
+                  >
+                    <option value="1">✓ 是</option>
+                    <option value="0">✗ 否</option>
+                  </select>
+                  <span className={css.meta}>{tt('settings.autoAuthorReviewHint')}</span>
+                </div>
+                <div className={css.field} style={{ flex: 1 }}>
+                  <label className={css.fieldLabel}>{tt('settings.autoReviewAfterRevise')}</label>
+                  <select
+                    className={css.input}
+                    value={configDraft.autoReviewAfterRevise ? '1' : '0'}
+                    onChange={e => { setConfigDraft({ ...configDraft, autoReviewAfterRevise: e.target.value === '1' }) }}
+                  >
+                    <option value="1">✓ 是</option>
+                    <option value="0">✗ 否</option>
+                  </select>
+                  <span className={css.meta}>{tt('settings.autoReviewAfterReviseHint')}</span>
+                </div>
+              </div>
             </div>
-          </div>
+
+            {/* ⑤ 保存与导出 */}
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <div className={css.row}>
+                <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
+                  {tt('settings.save')}
+                </button>
+                <span className={css.meta}>当前：{config?.provider} / {config?.model} · {config?.outputDir}</span>
+              </div>
+              <div className={css.row}>
+                <span className={css.cardTitle}>{tt('settings.export')}</span>
+                <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('txt') }}>
+                  {tt('settings.exportTxt')}
+                </button>
+                <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('md') }}>
+                  {tt('settings.exportMd')}
+                </button>
+              </div>
+            </div>
+          </>
         )}
 
         {activeTab === 'settings' && (
-          <div className={css.card}>
+          <div className={`${css.card} ${css.settingsCard}`}>
             <span className={css.cardTitle}>{tt('settings.theme')}</span>
             <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
               <button

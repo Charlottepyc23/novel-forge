@@ -71,7 +71,28 @@ export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfi
 export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
 /** ✨ AI 从全书提炼场景库：正文/编年录 → 高频重要场景的结构化视觉锚点。 */
 export declare function extractScenes(ctx: Context, config: NovelConfig, project: ProjectState): Promise<SceneCard[]>;
-/** 从 txt/md 全本拆分章节并建立项目：正文落盘为章节文件，status=written（待审稿）。 */
+/** 从 txt/md 全本文本拆章（纯逻辑，不落盘）：识别章节头、剥离重复标题、去重、排序并统一重新编号。 */
+export declare function splitBookText(raw: string): Array<{
+    no: number;
+    title: string;
+    body: string;
+}>;
+/** 拆章预览（不落盘）：章节编号/标题/字数 + 跳过清单。 */
+export declare function previewBookText(raw: string): {
+    chapters: Array<{
+        no: number;
+        title: string;
+        chars: number;
+    }>;
+    skipped: string[];
+};
+/** 从全本文本导入（浏览器上传 / 服务器文件共用）：建项目、写章节文件、保存。 */
+export declare function importBookTextFromText(raw: string, outputDir: string, bookName: string): {
+    bookName: string;
+    chapters: number;
+    skipped: string[];
+};
+/** 从 txt/md 全本文件导入：编码自适应读取后拆章建项目，status=written（待审稿）。 */
 export declare function importBookText(filePath: string, outputDir: string): {
     bookName: string;
     chapters: number;
@@ -161,6 +182,11 @@ export declare function generateChapterStream(ctx: Context, config: NovelConfig,
 }, void, unknown>;
 /** Generate a chapter summary (narrative memory). */
 export declare function summarizeChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<string>;
+/**
+ * 反向推大纲：从已写章节正文反推出全书总纲（分卷 + 章节要点 + 主线/人物弧线/伏笔清单）。
+ * 两阶段：分批提取章节事件摘要 → 汇总生成大纲。不修改章节/设定，只返回大纲文本。
+ */
+export declare function reverseOutlineFromChapters(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, onProgress?: (done: number, total: number, phase: string) => void): Promise<string>;
 /**
  * 摘要 + 事实抽取合并为一次 LLM 调用（省一次调用与一次正文输入，
  * 批量生成时整体开销约省 25%）。

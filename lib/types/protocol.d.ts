@@ -39,6 +39,8 @@ export declare const NOVEL_API: {
     readonly bookshelfImportDir: "/api/dsh-novel-forge/bookshelf/import-dir";
     /** 导入 txt/md 全本：拆章建项目并登记书架。 */
     readonly bookshelfImportText: "/api/dsh-novel-forge/bookshelf/import-text";
+    /** 导入 txt/md 全本：拆章预览（不落盘）。 */
+    readonly bookshelfImportTextPreview: "/api/dsh-novel-forge/bookshelf/import-text/preview";
     /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
     readonly reset: "/api/dsh-novel-forge/reset";
     /** 全书一致性质检：LLM 扫描已生成章节，输出矛盾问题清单。 */
@@ -73,6 +75,8 @@ export declare const NOVEL_API: {
     readonly sensitiveCheck: "/api/dsh-novel-forge/sensitive-check";
     /** 开书想法 → AI 补全大纲：输入一句话想法，生成 2-3 个可选大纲方案。 */
     readonly outlineSuggest: "/api/dsh-novel-forge/outline/suggest";
+    /** 反推大纲：从已写章节正文反向生成全书总纲（NDJSON 流）。 */
+    readonly outlineReverse: "/api/dsh-novel-forge/outline/reverse";
     /** 拆书分析：对已写章节做结构/人物/文风/卖点四维体检（两阶段：源笔记→分节分析）。 */
     readonly breakdown: "/api/dsh-novel-forge/breakdown";
     /** 漫剧分镜生成：章节 → 角色锚点 + 分镜表（可适配豆包/Seedance/SD）。 */
@@ -143,10 +147,17 @@ export interface BookImportDirResponse {
     /** true = 目录已在书架中（本次为重新激活）。 */
     existed: boolean;
 }
-/** POST /bookshelf/import-text 请求：导入 txt/md 全本。 */
+/** POST /bookshelf/import-text 请求：导入 txt/md 全本。两种模式二选一：
+ *  - filePath：服务器本地文件路径；
+ *  - text + fileName：浏览器上传的全文内容（fileName 用于推断书名）。
+ */
 export interface BookImportTextRequest {
-    /** 源文件绝对路径（txt 或 md）。 */
-    filePath: string;
+    /** 模式一：源文件绝对路径（txt 或 md）。 */
+    filePath?: string;
+    /** 模式二：浏览器上传的全文内容。 */
+    text?: string;
+    /** 模式二：原文件名（txt/md），用于推断书名与显示。 */
+    fileName?: string;
     /** 输出目录；缺省为 ~/.dsh/novels/书名。 */
     outputDir?: string;
 }
@@ -159,6 +170,25 @@ export interface BookImportTextResponse {
     skipped: string[];
     /** 登记后的书架条目。 */
     book: BookEntry;
+}
+/** POST /bookshelf/import-text/preview 请求：上传全文做拆章预览（不落盘）。 */
+export interface BookImportTextPreviewRequest {
+    text: string;
+    /** 原文件名（txt/md），用于推断书名。 */
+    fileName?: string;
+}
+/** POST /bookshelf/import-text/preview 响应。 */
+export interface BookImportTextPreviewResponse {
+    /** 预计书名（fileName 去扩展名）。 */
+    bookName: string;
+    /** 识别出的章节（已按正文长度过滤过短章节）。 */
+    chapters: Array<{
+        no: number;
+        title: string;
+        chars: number;
+    }>;
+    /** 因内容过短被跳过的章节标题列表。 */
+    skipped: string[];
 }
 /** Chapter lifecycle states (the writing pipeline's state machine). */
 export type ChapterStatus = 'pending' | 'generating' | 'written' | 'reviewing' | 'approved' | 'rejected' | 'error';
@@ -796,6 +826,8 @@ export interface NovelConfig {
     model: string;
     /** LLM reasoning effort: off = no thinking; low/high/max = thinking intensity. */
     reasoningEffort: 'off' | 'low' | 'high' | 'max';
+    /** 分析类任务（提炼/拆书/反推大纲等）的推理档位；默认 low，不受上面写作档位影响。 */
+    analysisReasoning: 'off' | 'low' | 'high' | 'max';
     /** Target characters per chapter. */
     chapterChars: number;
     /** Max output tokens per chapter call. */
@@ -962,6 +994,15 @@ export type JobFrame = {
     chars: number;
     draft: string;
 } | {
+    type: 'outline-progress';
+    done: number;
+    total: number;
+    phase: string;
+} | {
+    type: 'outline-done';
+    outline: string;
+    chars: number;
+} | {
     type: 'error';
     no: number;
     message: string;
@@ -1032,6 +1073,7 @@ export interface ConfigPatch {
     provider?: string;
     model?: string;
     reasoningEffort?: 'off' | 'low' | 'high' | 'max';
+    analysisReasoning?: 'off' | 'low' | 'high' | 'max';
     chapterChars?: number;
     maxTokens?: number;
     reviewPassScore?: number;

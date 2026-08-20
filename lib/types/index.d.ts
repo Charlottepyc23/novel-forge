@@ -35,6 +35,8 @@ export interface Config {
     model?: string;
     /** LLM reasoning effort (off/low/high/max). */
     reasoningEffort?: 'off' | 'low' | 'high' | 'max';
+    /** 分析类任务（提炼/拆书/反推大纲等）的推理档位；默认 low。 */
+    analysisReasoning?: 'off' | 'low' | 'high' | 'max';
     /** Target characters per chapter. */
     chapterChars?: number;
     /** Max output tokens per chapter call. */

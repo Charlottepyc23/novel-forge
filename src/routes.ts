@@ -39,6 +39,8 @@ import {
   type BookImportDirResponse,
   type BookImportTextRequest,
   type BookImportTextResponse,
+  type BookImportTextPreviewRequest,
+  type BookImportTextPreviewResponse,
   type BookRemoveRequest,
   type BookshelfSnapshot,
   type ChapterResponse,
@@ -101,6 +103,8 @@ import {
   createProject,
   exportBook,
   importBookText,
+  importBookTextFromText,
+  previewBookText,
   extractBible,
   extractStyleAsset,
   extractWorld,
@@ -128,6 +132,7 @@ import {
   extractVisualRules,
   extractRoleVisual,
   suggestOutlines,
+  reverseOutlineFromChapters,
   breakdownBook,
   generateRoleReferenceImage,
   checkSensitiveText,
@@ -139,7 +144,7 @@ import {
 } from './engine.ts'
 
 /** Cap on JSON request bodies (generous: cover images travel as base64). */
-const MAX_JSON_BODY_BYTES = 16 * 1024 * 1024
+const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024
 
 /** Loopback-only fence (mirrors the family plugins' pairing routes). */
 function isLoopbackRequest(request: IncomingMessage): boolean {
@@ -1236,23 +1241,35 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
   }
 
   // ------------------------------------------- bookshelf import-text
-  /** 导入 txt/md 全本（Mode B）：拆章落盘建项目，登记书架。 */
+  /** 导入 txt/md 全本（Mode B）：拆章落盘建项目，登记书架。支持浏览器上传（text+fileName）与服务器本地文件（filePath）两种模式。 */
   const bookshelfImportTextRoute: WebRoute = {
     kind: 'exact',
     path: NOVEL_API.bookshelfImportText,
     handler: async (req, res) => {
       if (!guard(req, res, 'POST')) return
       const body = await readJsonBody<BookImportTextRequest>(req)
-      const filePath = body?.filePath?.trim()
-      if (filePath === undefined || filePath === '') {
-        writeJson(res, 400, { error: 'filePath 不能为空' })
-        return
-      }
-      if (!existsSync(filePath)) {
-        writeJson(res, 400, { error: `文件不存在：${filePath}` })
-        return
-      }
       try {
+        // 模式二：浏览器上传全文内容
+        if (body?.text !== undefined && body.text.length > 0) {
+          const bookName = (body.fileName ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40) || '导入小说'
+          const outDir = body?.outputDir?.trim() !== undefined && body.outputDir.trim() !== ''
+            ? body.outputDir.trim()
+            : defaultOutputDirFor(bookName)
+          const result = importBookTextFromText(body.text, outDir, bookName)
+          const { book } = importDir(outDir)
+          writeJson(res, 200, { ...result, book })
+          return
+        }
+        // 模式一：服务器本地文件
+        const filePath = body?.filePath?.trim()
+        if (filePath === undefined || filePath === '') {
+          writeJson(res, 400, { error: 'filePath 不能为空（或请上传文件内容）' })
+          return
+        }
+        if (!existsSync(filePath)) {
+          writeJson(res, 400, { error: `文件不存在：${filePath}` })
+          return
+        }
         const bookName = basename(filePath, extname(filePath)).slice(0, 40) || '导入小说'
         const outDir = body?.outputDir?.trim() !== undefined && body.outputDir.trim() !== ''
           ? body.outputDir.trim()
@@ -1260,6 +1277,28 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         const result = importBookText(filePath, outDir)
         const { book } = importDir(outDir)
         writeJson(res, 200, { ...result, book })
+      } catch (err) {
+        writeJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  }
+
+  // --------------------------------------- bookshelf import-text preview
+  /** 上传全文做拆章预览（不落盘、不登记书架）。 */
+  const bookshelfImportTextPreviewRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.bookshelfImportTextPreview,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<BookImportTextPreviewRequest>(req)
+      if (body?.text === undefined || body.text.length === 0) {
+        writeJson(res, 400, { error: 'text 不能为空' })
+        return
+      }
+      try {
+        const bookName = (body.fileName ?? '').replace(/\.[^.]+$/, '').trim().slice(0, 40) || '导入小说'
+        const preview = previewBookText(body.text)
+        writeJson(res, 200, { bookName, ...preview })
       } catch (err) {
         writeJson(res, 400, { error: err instanceof Error ? err.message : String(err) })
       }
@@ -2071,6 +2110,42 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------- outline reverse
+  /** 反推大纲：从已写章节正文反向生成全书总纲（NDJSON 流式进度）。 */
+  const outlineReverseRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.outlineReverse,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      res.writeHead(200, {
+        'content-type': 'application/x-ndjson; charset=utf-8',
+        'cache-control': 'no-cache',
+        'x-accel-buffering': 'no',
+        'referrer-policy': 'no-referrer',
+      })
+      const send = (frame: JobFrame): void => {
+        res.write(JSON.stringify(frame) + '\n')
+      }
+      try {
+        const outline = await reverseOutlineFromChapters(ctx, config, project, config.outputDir, (done, total, phase) => {
+          send({ type: 'outline-progress', done, total, phase })
+        })
+        // 保存总纲（仅更新文本，不动书名/进度）。
+        project.outline = outline
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        send({ type: 'outline-done', outline, chars: outline.length })
+      } catch (error) {
+        send({ type: 'error', no: 0, message: (error as Error).message })
+      } finally {
+        res.end()
+      }
+    },
+  }
+
   // ----------------------------------------------------------- breakdown
   /** 拆书分析：对已写章节做结构/人物/文风/卖点体检（两阶段：源笔记→分节分析）。 */
   const breakdownRoute: WebRoute = {
@@ -2291,6 +2366,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     bookshelfRemoveRoute,
     bookshelfImportDirRoute,
     bookshelfImportTextRoute,
+    bookshelfImportTextPreviewRoute,
     resetRoute,
     auditRoute,
     charactersRefreshRoute,
@@ -2311,6 +2387,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     configRoute,
     openFolderRoute,
     outlineSuggestRoute,
+    outlineReverseRoute,
     breakdownRoute,
     runStartRoute,
     runControlRoute,

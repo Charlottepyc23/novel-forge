@@ -55,6 +55,30 @@ export const PROJECT_FILE = 'novel-project.json'
 
 // ------------------------------------------------------------------ helpers
 
+/** 智能解码文本文件：UTF-8 BOM / UTF-16 BOM / UTF-8（严格校验）/ GB18030 回退。 */
+function decodeTextSmart(buf: Buffer): string {
+  if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return buf.subarray(3).toString('utf8')
+  if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.subarray(2).toString('utf16le')
+  const utf8 = buf.toString('utf8')
+  const bad = countReplacementChars(utf8)
+  if (bad === 0) return utf8
+  try {
+    // GBK/GB18030 常见于网文 txt（Windows 下载站）；UTF-8 解码出现替换符时回退。
+    const gbk = new TextDecoder('gb18030').decode(buf)
+    if (countReplacementChars(gbk) < bad) return gbk
+  } catch { /* TextDecoder gb18030 不可用则保持 UTF-8 结果 */ }
+  return utf8
+}
+
+/** 统计替换字符 U+FFFD 数量（UTF-8 乱码检测）。 */
+function countReplacementChars(s: string): number {
+  let n = 0
+  for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) === 0xFFFD) n++
+  return n
+}
+
+
+
 /** Sanitize a file name: keep CJK/alphanumerics/space/dash/underscore. */
 function safeFileName(name: string): string {
   return name
@@ -266,7 +290,7 @@ export function createProject(outline: string, outlinePath?: string): ProjectSta
 async function complete(
   ctx: Context,
   config: NovelConfig,
-  options: { system: string; user: string; temperature?: number; maxTokens?: number },
+  options: { system: string; user: string; temperature?: number; maxTokens?: number; reasoning?: 'off' | 'low' | 'high' | 'max' },
 ): Promise<string> {
   const messages: Message[] = [createUserMessage({
     content: [{ type: 'text', text: options.user }],
@@ -279,7 +303,7 @@ async function complete(
     system: options.system,
     maxTokens: options.maxTokens ?? config.maxTokens,
     temperature: options.temperature ?? 0.7,
-    reasoningEffort: ReasoningEffortId(config.reasoningEffort ?? 'off'),
+    reasoningEffort: ReasoningEffortId(options.reasoning ?? config.reasoningEffort ?? 'off'),
   }
   const assembler = new BlockAssembler()
   for await (const chunk of ctx.llm.stream(request)) {
@@ -458,6 +482,7 @@ export async function extractBible(ctx: Context, config: NovelConfig, outline: s
     user,
     temperature: 0.4,
     maxTokens: Math.max(config.maxTokens, 16000),
+    reasoning: config.analysisReasoning ?? 'low',
   })
   const raw = parseJsonObject<{
     genre?: unknown
@@ -1040,7 +1065,7 @@ export async function suggestPlotlines(ctx: Context, config: NovelConfig, projec
       : '',
     '只输出 JSON 数组。',
   ].join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.6, maxTokens: Math.max(config.maxTokens, 4000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.6, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonArray<Record<string, unknown>>(text)
   const lines: Plotline[] = []
   const kinds = new Set(['main', 'branch', 'character', 'mystery'])
@@ -1088,7 +1113,7 @@ export async function refreshPlotlineProgress(
     '只输出 JSON 对象。',
   ].join('\n\n')
   const raw = parseJsonObject<{ progress?: unknown }>(
-    await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 2000) }),
+    await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 2000) , reasoning: config.analysisReasoning ?? 'low' }),
   )
   return typeof raw.progress === 'string' ? raw.progress.trim().slice(0, 300) : ''
 }
@@ -1103,6 +1128,8 @@ export async function extractRoles(
     '你是一位网文角色库管理员。请根据本书的大纲、设定、编年录与章节摘要，提炼完整的角色库。',
     '覆盖原则：所有在编年录/章节中实际出场或有名有姓的角色都应收录；无名的功能性人物（如"矮胖姑娘"）用其身份简称收录并标注。',
     '数量控制：最多输出 10 个角色，宁缺毋滥；路人级一次带过的不要收录。',
+    '重要：正文中若有明确的主角与主要反派，必须分别以 protagonist / antagonist 收录，禁止遗漏；反派确实未出场时才可省略。',
+    '输出优先级：主角（protagonist）与主要反派（antagonist）必须优先输出并完整刻画，其次女主/重要配角；判断不出名字时用正文中的身份称呼。',
     '每个角色输出：',
     '1. name：角色名（或身份简称）。主角/有名配角必须用正文中实际出现的人名（如「沈放」），禁止用「主角（38岁超市理货员）」这类把身份塞进名字的占位名；正文确实没点名时才可用身份简称（如「富商」「灰衣老人」）。',
     '2. roleLabel：定位——protagonist=主角；female_lead=女主（唯一知己/感情线核心，无后宫前提下只此一位）；female_support=重要女配；support=普通配角；antagonist=反派；extra=路人/背景。',
@@ -1120,13 +1147,23 @@ export async function extractRoles(
   ].join('\n')
   const written = project.chapters.filter(c => c.status !== 'pending' && c.status !== 'generating')
   const existingRoles = project.roles ?? []
-  // 正文摘录：让提炼真正读到书的内容（角色姓名/身份/关系以正文为准）。
+  // 正文摘录：均匀采样覆盖全书（开头/中间/结尾），避免只取前几章漏掉后期才出场的重要角色。
+  const sampleChapters: ChapterPlan[] = written.length <= 6
+    ? written
+    : (() => {
+      const picked = new Set<number>()
+      for (let i = 0; i < 3 && i < written.length; i++) picked.add(i)
+      const step = Math.max(1, Math.floor(written.length / 4))
+      for (let i = step; i < written.length - 2; i += step) picked.add(i)
+      for (let i = Math.max(0, written.length - 2); i < written.length; i++) picked.add(i)
+      return [...picked].sort((a, b) => a - b).map(i => written[i])
+    })()
   const excerptParts: string[] = []
-  for (const chapter of written.slice(0, 3)) {
+  for (const chapter of sampleChapters) {
     const body = readChapterFile(config.outputDir, chapter)
     if (body === undefined) continue
     const text = body.replace(/^#.*$/gm, '').trim()
-    if (text.length > 0) excerptParts.push(`第${chapter.no}章《${chapter.title}》\n${text.slice(0, 2400)}`)
+    if (text.length > 0) excerptParts.push(`第${chapter.no}章《${chapter.title}》\n${text.slice(0, 1500)}`)
   }
   const user = [
     `书名：《${project.bookName}》`,
@@ -1141,15 +1178,24 @@ export async function extractRoles(
       ? `已有角色卡（补充信息）：\n${project.bible.characters.map(c => `- ${c.name}（${c.role}）：${c.traits.join('、')}${c.goals !== '' ? `；目标：${c.goals}` : ''}`).join('\n')}`
       : '',
     (project.facts ?? []).length > 0
-      ? `编年录（最近 60 条）：\n${(project.facts ?? []).slice(-60).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 80)}`).join('\n')}`
+      ? `编年录（最近 30 条）：\n${(project.facts ?? []).slice(-30).map(f => `[第${f.chapterNo}章] ${f.text.slice(0, 60)}`).join('\n')}`
       : '',
     written.length > 0
       ? `已写章节标题（${written.length} 章）：\n${written.map(c => `第${c.no}章《${c.title}》`).join('、')}`
       : '',
     '只输出 JSON 数组。',
   ].join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000) })
-  const raw = parseJsonArray<Record<string, unknown>>(text)
+  let text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000), reasoning: config.analysisReasoning ?? 'low' })
+  let raw = parseJsonArray<Record<string, unknown>>(text)
+  const hasProtagonist = raw.some(e => typeof e === 'object' && e !== null && e.roleLabel === 'protagonist')
+  if (raw.length === 0 || !hasProtagonist) {
+    // LLM 偶发输出非 JSON / 空数组 / 漏主角：重试一次（追加明确指令），避免静默返回空或缺主角的候选。
+    const hint = raw.length === 0
+      ? '\n上一次输出为空或格式不正确。请直接输出 JSON 数组（即使只有一个角色也要输出），不要输出其他文字。'
+      : '\n上一次输出中缺少主角（roleLabel 为 protagonist 的角色）。请重新输出完整 JSON 数组，务必包含正文中的主角。'
+    text = await complete(ctx, config, { system: system + hint, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000), reasoning: config.analysisReasoning ?? 'low' })
+    raw = parseJsonArray<Record<string, unknown>>(text)
+  }
   const labels = new Set(['protagonist', 'female_lead', 'female_support', 'support', 'antagonist', 'extra'])
   const strArr = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []
   const roles: RoleRecord[] = []
@@ -1218,7 +1264,7 @@ export async function extractScenes(
       : '',
     '只输出 JSON 数组。',
   ].filter(s => s !== '').join('\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonArray<Record<string, unknown>>(text)
   const strArr = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []
   const str = (v: unknown): string => typeof v === 'string' ? v.trim() : ''
@@ -1246,15 +1292,18 @@ export async function extractScenes(
   return scenes
 }
 
-/** 从 txt/md 全本拆分章节并建立项目：正文落盘为章节文件，status=written（待审稿）。 */
-export function importBookText(
-  filePath: string,
-  outputDir: string,
-): { bookName: string; chapters: number; skipped: string[] } {
-  const raw = readFileSync(filePath, 'utf8')
+
+
+
+
+/** 从 txt/md 全本文本拆章（纯逻辑，不落盘）：识别章节头、剥离重复标题、去重、排序并统一重新编号。 */
+export function splitBookText(raw: string): Array<{ no: number; title: string; body: string }> {
   const lines = raw.split(/\r?\n/)
-  // 拆章：识别"第X章/第X回/第X节/第X卷"（可带 # 标题前缀），后接可选标题。
+  // 拆章：中文「第X章/回/节/卷」、中文数字章节（一、二、三…）、特殊章节（序章/楔子/尾声/番外…）、英文 Chapter N（均可带 # 前缀）。
   const chapterHead = /^\s*(?:#\s*)?第\s*(\d+|[一二三四五六七八九十百千]+)\s*[章回节卷]\s*(.*?)\s*$/
+  const cnOnlyHead = /^\s*(?:#\s*)?([一二三四五六七八九十百千万零〇]{1,6})(?:[、.．:：]\s*(.*?)\s*)?$/
+  const specialHead = /^\s*(?:#\s*)?(序章|序言|楔子|引子|前言|开篇|尾声|终章|大结局|番外(?:篇|章)?|后记|完结感言|上架感言|作者的话)\s*[：:、.\s]*(.*?)\s*$/
+  const enHead = /^\s*(?:#\s*)?chapter\s+(\d+)\s*[.:：、\-\s]*(.*?)\s*$/i
   const cnNum: Record<string, number> = { 一:1,二:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9,十:10,百:100,千:1000 }
   const parseCn = (s: string): number => {
     if (/^\d+$/.test(s)) return Number(s)
@@ -1266,29 +1315,92 @@ export function importBookText(
     }
     return total + section
   }
-  const chunks: Array<{ no: number; title: string; body: string[] }> = []
-  let current: { no: number; title: string; body: string[] } | null = null
+  interface Chunk { sortKey: number; title: string; body: string[] }
+  const chunks: Chunk[] = []
+  let current: Chunk | null = null
+  let specialSeq = 0
   for (const line of lines) {
     const m = chapterHead.exec(line)
     if (m !== null) {
-      if (current !== null) chunks.push(current)
       const no = parseCn(m[1])
-      const title = (m[2] ?? '').trim() || ''
-      current = { no: no > 0 ? no : chunks.length + 1, title, body: [] }
-    } else if (current !== null) {
-      current.body.push(line)
+      if (current !== null) chunks.push(current)
+      current = { sortKey: no > 0 ? no : chunks.length + 1, title: (m[2] ?? '').trim(), body: [] }
+      continue
     }
+    const mc = cnOnlyHead.exec(line)
+    if (mc !== null) {
+      const no = parseCn(mc[1])
+      if (current !== null) chunks.push(current)
+      const t = (mc[2] ?? '').trim()
+      current = { sortKey: no > 0 ? no : chunks.length + 1, title: t !== '' ? t : '第' + mc[1] + '章', body: [] }
+      continue
+    }
+    const ms = specialHead.exec(line)
+    if (ms !== null) {
+      specialSeq++
+      const name = ms[1]
+      const front = /序章|序言|楔子|引子|前言|开篇/.test(name)
+      const title = (ms[2] ?? '').trim()
+      if (current !== null) chunks.push(current)
+      current = { sortKey: front ? specialSeq * 0.001 : 999999 + specialSeq * 0.001, title: title !== '' ? title : name, body: [] }
+      continue
+    }
+    const me = enHead.exec(line)
+    if (me !== null) {
+      if (current !== null) chunks.push(current)
+      current = { sortKey: Number(me[1]), title: (me[2] ?? '').trim(), body: [] }
+      continue
+    }
+    if (current !== null) current.body.push(line)
   }
   if (current !== null) chunks.push(current)
-  if (chunks.length === 0) throw new Error('未识别到章节（需要"第X章"格式，或带 # 的章节标题）')
-  const seen = new Set<number>()
-  const ordered = chunks.filter(c => { if (seen.has(c.no)) return false; seen.add(c.no); return true }).sort((a, b) => a.no - b.no)
-  const bookName = basename(filePath, extname(filePath)).slice(0, 40) || '导入小说'
+  if (chunks.length === 0) throw new Error('未识别到章节（需要"第X章"格式、中文数字章节（一、二、三…）、序章/楔子/尾声等章节标题、英文 Chapter N，或带 # 的章节标题）')
+  // 章节头重复行（如 "第1章 xxx" 与 "# 第1章 xxx" 同现、空行）先从正文剥离。
+  const stripHead = (b: string[]): string => {
+    let i = 0
+    while (i < b.length) {
+      const t = b[i].trim()
+      if (t === '' || chapterHead.test(t) || cnOnlyHead.test(t) || specialHead.test(t) || enHead.test(t)) i++
+      else break
+    }
+    return b.slice(i).join('\n').trim()
+  }
+  // 同编号（目录+正文重复）保留正文最长的一份，再按位置排序后统一重新编号。
+  const byKey = new Map<number, Chunk>()
+  for (const c of chunks) {
+    const len = stripHead(c.body).length
+    const ex = byKey.get(c.sortKey)
+    if (ex === undefined || len > stripHead(ex.body).length) byKey.set(c.sortKey, c)
+  }
+  const ordered = [...byKey.values()].sort((a, b) => a.sortKey - b.sortKey)
+  return ordered.map((c, i) => ({ no: i + 1, title: c.title, body: stripHead(c.body) }))
+}
+
+/** 拆章预览（不落盘）：章节编号/标题/字数 + 跳过清单。 */
+export function previewBookText(raw: string): { chapters: Array<{ no: number; title: string; chars: number }>; skipped: string[] } {
+  const chapters: Array<{ no: number; title: string; chars: number }> = []
+  const skipped: string[] = []
+  for (const c of splitBookText(raw)) {
+    if (c.body.length < 50) {
+      skipped.push('第' + c.no + '章' + (c.title !== '' ? '「' + c.title + '」' : '') + '（内容过短，已跳过）')
+      continue
+    }
+    chapters.push({ no: c.no, title: c.title !== '' ? c.title : '第' + c.no + '章', chars: c.body.length })
+  }
+  return { chapters, skipped }
+}
+
+/** 从全本文本导入（浏览器上传 / 服务器文件共用）：建项目、写章节文件、保存。 */
+export function importBookTextFromText(
+  raw: string,
+  outputDir: string,
+  bookName: string,
+): { bookName: string; chapters: number; skipped: string[] } {
   const project = createProject(bookName)
   mkdirSync(outputDir, { recursive: true })
   const skipped: string[] = []
-  for (const c of ordered) {
-    const body = c.body.join('\n').trim()
+  for (const c of splitBookText(raw)) {
+    const body = c.body
     if (body.length < 50) { skipped.push('第' + c.no + '章' + (c.title !== '' ? '「' + c.title + '」' : '') + '（内容过短，已跳过）'); continue }
     const chapter: ChapterPlan = {
       no: c.no, volume: 0, title: c.title !== '' ? c.title : '第' + c.no + '章', beats: '', targetChars: 0,
@@ -1302,6 +1414,16 @@ export function importBookText(
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
   return { bookName, chapters: project.chapters.length, skipped }
+}
+
+/** 从 txt/md 全本文件导入：编码自适应读取后拆章建项目，status=written（待审稿）。 */
+export function importBookText(
+  filePath: string,
+  outputDir: string,
+): { bookName: string; chapters: number; skipped: string[] } {
+  const raw = decodeTextSmart(readFileSync(filePath))
+  const bookName = basename(filePath, extname(filePath)).slice(0, 40) || '导入小说'
+  return importBookTextFromText(raw, outputDir, bookName)
 }
 
 /** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */
@@ -1408,7 +1530,7 @@ export async function extractRoleVisual(
     ...excerpts.map(e => `[第${e.no}章] ${e.text}`),
     '只输出 JSON 对象。',
   ].join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ zh?: unknown; en?: unknown; tags?: unknown; source?: unknown; expressions?: unknown; promptKit?: unknown }>(text)
   const zh = typeof raw.zh === 'string' ? raw.zh.trim().slice(0, 500) : ''
   const en = typeof raw.en === 'string' ? raw.en.trim().slice(0, 1500) : ''
@@ -1483,7 +1605,7 @@ export async function generateRolePromptKit(
     `表情清单：${(role.expressions ?? []).join('、') || '（未提供，按角色气质推断 6 个）'}`,
     '只输出 JSON 对象。',
   ].join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<Record<string, unknown>>(text)
   const str = (v: unknown): string => typeof v === 'string' ? v.trim() : ''
   const pair = (v: unknown): { zh: string; en: string } => {
@@ -1533,7 +1655,7 @@ export async function extractVisualRules(
       : '',
     '只输出 JSON 数组。',
   ].filter(s => s !== '').join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonArray<string>(text)
   return raw.map(r => typeof r === 'string' ? r.trim().slice(0, 80) : '').filter(r => r !== '').slice(0, 8)
 }
@@ -1580,7 +1702,7 @@ export async function suggestOutlines(
     `请生成 ${n} 个大纲方案。`,
     '只输出 JSON 数组。',
   ].join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.85, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.85, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const candidates: OutlineCandidate[] = []
   for (const entry of parsed) {
@@ -1655,7 +1777,7 @@ export async function breakdownBook(
   for (const ch of chunks) {
     const noteUser = [`第${ch.no}章《${ch.title}》`, '正文：', ch.body.slice(0, 3000)].join('\n')
     try {
-      const text = await complete(ctx, config, { system: noteSystem, user: noteUser, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 3000) })
+      const text = await complete(ctx, config, { system: noteSystem, user: noteUser, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 3000), reasoning: config.analysisReasoning ?? 'low' })
       const raw = parseJsonObject<Record<string, unknown>>(text)
       const pick = (k: string): string[] => Array.isArray(raw[k]) ? raw[k].filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim().slice(0, 120)).slice(0, 4) : []
       notes.push(
@@ -1745,6 +1867,7 @@ export async function breakdownBook(
         user: `分析范围：${selected.length} 章（${scope === 'all' ? '全书' : scope === 'recent' ? '最近 20 章' : '指定卷'}）。\n\n章节笔记：\n${notesText}`,
         temperature: 0.3,
         maxTokens: Math.max(config.maxTokens, 6000),
+        reasoning: config.analysisReasoning ?? 'low',
       })
       const raw = parseJsonObject<{ markdown?: unknown; structured?: unknown }>(text)
       sections.push({
@@ -2322,6 +2445,54 @@ export async function summarizeChapter(
 }
 
 /**
+ * 反向推大纲：从已写章节正文反推出全书总纲（分卷 + 章节要点 + 主线/人物弧线/伏笔清单）。
+ * 两阶段：分批提取章节事件摘要 → 汇总生成大纲。不修改章节/设定，只返回大纲文本。
+ */
+export async function reverseOutlineFromChapters(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  onProgress?: (done: number, total: number, phase: string) => void,
+): Promise<string> {
+  const written = project.chapters
+    .filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error')
+    .filter(c => readChapterFile(outputDir, c) !== undefined)
+    .sort((a, b) => a.no - b.no)
+  if (written.length === 0) throw new Error('本书还没有已写章节，无法反推大纲')
+
+  // 阶段 1：分批提取章节事件摘要（每批 10 章，正文各取前 1000 字控制成本）。
+  const BATCH = 10
+  const notes: string[] = []
+  const total = written.length
+  for (let i = 0; i < written.length; i += BATCH) {
+    const batch = written.slice(i, i + BATCH)
+    const bodies = batch.map(c => {
+      const body = readChapterFile(outputDir, c) ?? ''
+      return '第' + c.no + '章《' + (c.title || '无题') + '》\n' + body.replace(/^#\s+.*$/m, '').trim().slice(0, 1000)
+    }).join('\n\n---\n\n')
+    const system = '你是一位网文编辑。下面是一本书若干章正文的节选。请为每一章输出一行「事件摘要」，格式严格为：第N章《标题》：关键事件+主角状态变化+新增伏笔或线索。每章恰好一行，不要空行，不要评价，不要输出其他内容。'
+    const note = await complete(ctx, config, { system, user: bodies, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 3000), reasoning: config.analysisReasoning ?? 'low' })
+    notes.push(note.trim())
+    onProgress?.(Math.min(i + BATCH, total), total, '章节摘要')
+  }
+
+  // 阶段 2：汇总反推总纲。
+  onProgress?.(total, total, '生成大纲')
+  const system2 = [
+    '你是一位经验丰富的小说主编。根据下面全书各章事件摘要，反推出这本书的总纲（大纲），可直接作为后续写作依据。要求：',
+    '1. 第一行写《书名》（从摘要中的书名或内容推断，若无则用《未命名》）。',
+    '2. 按故事弧线划分卷/部分：每卷给出卷名与主旨（标注覆盖章节范围）。',
+    '3. 每一章列出：章节号 + 标题 + 一句话核心情节（若原章无标题可自拟）。',
+    '4. 最后给出：全书主线、主要人物弧线、已埋设待回收的伏笔清单。',
+    '5. 输出为纯文本 Markdown 结构（# 一级标题、## 二级标题、- 列表），不要多余寒暄。',
+  ].join('\n')
+  const outline = await complete(ctx, config, { system: system2, user: notes.join('\n\n'), temperature: 0.4, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
+  onProgress?.(total, total, '完成')
+  return outline.trim()
+}
+
+/**
  * 摘要 + 事实抽取合并为一次 LLM 调用（省一次调用与一次正文输入，
  * 批量生成时整体开销约省 25%）。
  * @returns 摘要与新增事实条数（失败返回空，调用方 best-effort）。
@@ -2561,7 +2732,7 @@ export async function generateBlurb(
       ? `已有开头草稿（请保留其内容与语气，续写补全为完整简介）：\n${partial.trim()}`
       : '请全量生成一份完整简介。',
   ].filter(s => s !== '').join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 4000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.7, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
   const blurb = text.replace(/^["'「『]|["'」』]$/g, '').replace(/^简介[：:]\s*/, '').trim().slice(0, 600)
   return blurb
 }
@@ -2759,7 +2930,7 @@ export async function extractWorld(
     '大纲：\n' + project.outline.slice(0, 5000),
     '只输出 JSON 对象。',
   ].filter(s => s !== '').join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ realms?: unknown; regions?: unknown; factions?: unknown }>(text)
   const str = (value: unknown): string => typeof value === 'string' ? value.trim() : ''
   const objArray = (value: unknown): Record<string, unknown>[] =>
@@ -2924,7 +3095,7 @@ export async function suggestForeshadows(
     `大纲：\n${project.outline}`,
     `已规划章节数：${project.chapters.length}`,
   ].join('\n')
-  const text = await complete(ctx, config, { system: foreshadowSystemPrompt(), user, temperature: 0.5, maxTokens: Math.max(config.maxTokens, 12000) })
+  const text = await complete(ctx, config, { system: foreshadowSystemPrompt(), user, temperature: 0.5, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const parsed = parseJsonArray<Record<string, unknown>>(text)
   const existing = new Set(project.foreshadows.map(f => f.description))
   const created: Foreshadow[] = []

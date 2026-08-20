@@ -16,6 +16,8 @@ export declare class NovelApi {
         ok: boolean;
         bookName: string;
     }>;
+    /** 反推大纲：从已写章节正文反向生成全书总纲（NDJSON 流）。 */
+    outlineReverse(onFrame: (frame: JobFrame) => void): Promise<void>;
     /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
     outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse>;
     /** 拆书分析：对已写章节做结构/人物/文风/卖点体检。 */
@@ -118,8 +120,12 @@ export declare class NovelApi {
     bookRemove(id: string): Promise<import('../protocol.ts').BookshelfSnapshot>;
     /** 导入已有项目目录（Mode A）：校验 novel-project.json，登记/激活书架。 */
     bookImportDir(outputDir: string): Promise<import('../protocol.ts').BookImportDirResponse>;
-    /** 导入 txt/md 全本（Mode B）：拆章建项目并登记书架。 */
+    /** 导入 txt/md 全本（Mode B）：服务器本地文件路径模式。 */
     bookImportText(filePath: string, outputDir?: string): Promise<import('../protocol.ts').BookImportTextResponse>;
+    /** 拆章预览（浏览器上传全文，不落盘）：返回识别到的章节与跳过清单。 */
+    bookImportTextPreview(text: string, fileName?: string): Promise<import('../protocol.ts').BookImportTextPreviewResponse>;
+    /** 导入 txt/md 全本（Mode B）：浏览器上传全文内容模式。 */
+    bookImportTextContent(text: string, fileName: string, outputDir?: string): Promise<import('../protocol.ts').BookImportTextResponse>;
     /** 生产单：启动批量生产（区间或新增 N 章；计划不足自动补）。 */
     runStart(req: import('../protocol.ts').RunStartRequest): Promise<import('../protocol.ts').RunState>;
     /** 生产单控制：pause / resume / stop。 */

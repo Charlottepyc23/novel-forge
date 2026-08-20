@@ -1,11 +1,12 @@
 /**
  * 导入小说弹窗：两种模式 ——
- *  A) 已有项目目录（含 novel-project.json）→ 登记/激活书架；
- *  B) txt/md 全本 → 服务器拆章建项目后登记书架。
- * 浏览器无法直接浏览宿主机目录，故两种模式均输入绝对路径（粘贴或手输）。
+ *  A) 已有项目目录（含 novel-project.json）→ 登记/激活书架（粘贴服务器本地路径）；
+ *  B) txt/md 全本 → 点击选择文件，浏览器读取内容 → 服务器拆章预览 → 确认后导入。
+ *  Mode B 也保留「服务器本地路径」高级选项（大文件或服务器端已有文件时用）。
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { NovelApi } from '../api.ts'
+import type { BookImportTextPreviewResponse } from '../../protocol.ts'
 import css from './panel.module.css'
 
 type ImportMode = 'dir' | 'text'
@@ -30,12 +31,42 @@ export function ImportModal({
   onImported: () => void | Promise<void>
 }) {
   const [mode, setMode] = useState<ImportMode>('dir')
+  // Mode A
   const [dir, setDir] = useState('')
+  // Mode B：文件选择 + 预览
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [fileText, setFileText] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+  const [preview, setPreview] = useState<BookImportTextPreviewResponse | null>(null)
+  // Mode B：服务器本地路径（高级）
+  const [showPath, setShowPath] = useState(false)
   const [filePath, setFilePath] = useState('')
+  // 通用
   const [outDir, setOutDir] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState<ImportResult | null>(null)
+
+  /** 选择文件 → 读取内容 → 调服务器预览拆章。 */
+  const onPickFile = async (file: File | undefined) => {
+    if (file === undefined) return
+    setError('')
+    setResult(null)
+    setPreview(null)
+    setFileName(file.name)
+    setPreviewing(true)
+    try {
+      const text = await file.text()
+      setFileText(text)
+      const p = await api.bookImportTextPreview(text, file.name)
+      setPreview(p)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setPreviewing(false)
+    }
+  }
 
   const runImport = async () => {
     setError('')
@@ -53,13 +84,14 @@ export function ImportModal({
       } finally {
         setBusy(false)
       }
-    } else {
-      const f = filePath.trim()
-      if (f === '') { setError('请输入 txt/md 文件路径'); return }
+      return
+    }
+    // Mode B：优先上传内容；未选文件时退回服务器路径
+    if (fileText !== null && fileText.length > 0) {
       setBusy(true)
       try {
         const o = outDir.trim()
-        const r = await api.bookImportText(f, o !== '' ? o : undefined)
+        const r = await api.bookImportTextContent(fileText, fileName, o !== '' ? o : undefined)
         setResult({ kind: 'text', bookName: r.bookName, chapters: r.chapters, skipped: r.skipped })
         await onImported()
       } catch (err) {
@@ -67,8 +99,24 @@ export function ImportModal({
       } finally {
         setBusy(false)
       }
+      return
+    }
+    const f = filePath.trim()
+    if (f === '') { setError('请先选择文件，或输入服务器本地文件路径'); return }
+    setBusy(true)
+    try {
+      const o = outDir.trim()
+      const r = await api.bookImportText(f, o !== '' ? o : undefined)
+      setResult({ kind: 'text', bookName: r.bookName, chapters: r.chapters, skipped: r.skipped })
+      await onImported()
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
     }
   }
+
+  const switchMode = (m: ImportMode) => { setMode(m); setError(''); setResult(null); setPreview(null) }
 
   return (
     <div className={css.importModalOverlay} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
@@ -84,7 +132,7 @@ export function ImportModal({
             role="tab"
             aria-selected={mode === 'dir'}
             className={`${css.button} ${mode === 'dir' ? css.buttonPrimary : ''}`}
-            onClick={() => { setMode('dir'); setError(''); setResult(null) }}
+            onClick={() => { switchMode('dir') }}
           >
             📂 A · 已有项目目录
           </button>
@@ -93,7 +141,7 @@ export function ImportModal({
             role="tab"
             aria-selected={mode === 'text'}
             className={`${css.button} ${mode === 'text' ? css.buttonPrimary : ''}`}
-            onClick={() => { setMode('text'); setError(''); setResult(null) }}
+            onClick={() => { switchMode('text') }}
           >
             📄 B · txt/md 全本
           </button>
@@ -118,16 +166,51 @@ export function ImportModal({
             </>
           ) : (
             <>
-              <label className={css.importField}>
-                <span>全本文本文件（绝对路径，txt / md）</span>
-                <input
-                  className={css.input}
-                  type="text"
-                  placeholder="例如 D:\novels\全本.txt"
-                  value={filePath}
-                  onChange={e => { setFilePath(e.target.value) }}
-                />
-              </label>
+              {/* 文件选择 + 预览 */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".txt,.md,text/plain,text/markdown"
+                style={{ display: 'none' }}
+                onChange={e => { void onPickFile(e.target.files?.[0]); e.target.value = '' }}
+              />
+              <div className={css.importField}>
+                <span>全本文本文件（txt / md）</span>
+                <button
+                  type="button"
+                  className={`${css.button} ${css.buttonPrimary}`}
+                  onClick={() => { fileInputRef.current?.click() }}
+                >
+                  📄 选择文件
+                </button>
+              </div>
+              {fileName !== '' && (
+                <div className={css.importFileInfo}>
+                  <span>已选择：{fileName}</span>
+                  {previewing && <span className={css.meta}>正在拆章预览…</span>}
+                </div>
+              )}
+              {preview !== null && (
+                <div className={css.importPreview}>
+                  <span>📖 《{preview.bookName}》 · 识别到 {preview.chapters.length} 章</span>
+                  {preview.chapters.length > 0 && (
+                    <ul className={css.importPreviewList}>
+                      {preview.chapters.slice(0, 5).map(c => (
+                        <li key={c.no}>第{c.no}章 {c.title}（{c.chars} 字）</li>
+                      ))}
+                      {preview.chapters.length > 5 && <li className={css.meta}>… 共 {preview.chapters.length} 章</li>}
+                    </ul>
+                  )}
+                  {preview.skipped.length > 0 && (
+                    <span className={css.meta}>
+                      跳过 {preview.skipped.length} 个过短章节：{preview.skipped.slice(0, 5).join('、')}
+                      {preview.skipped.length > 5 ? ' 等' : ''}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* 输出目录 + 高级路径选项 */}
               <label className={css.importField}>
                 <span>输出目录（可选，默认 ~/.dsh/novels/书名）</span>
                 <input
@@ -138,8 +221,27 @@ export function ImportModal({
                   onChange={e => { setOutDir(e.target.value) }}
                 />
               </label>
+              <button
+                type="button"
+                className={`${css.button} ${css.buttonSmall}`}
+                onClick={() => { setShowPath(!showPath) }}
+              >
+                {showPath ? '▾ 收起高级选项' : '▸ 高级：使用服务器本地文件路径'}
+              </button>
+              {showPath && (
+                <label className={css.importField}>
+                  <span>服务器本地文件绝对路径（大文件或服务器端已有文件时用）</span>
+                  <input
+                    className={css.input}
+                    type="text"
+                    placeholder="例如 D:\novels\全本.txt"
+                    value={filePath}
+                    onChange={e => { setFilePath(e.target.value) }}
+                  />
+                </label>
+              )}
               <div className={css.importHint}>
-                服务器按「第X章 / 第X回 / 第X节 / 第X卷」（可带 # 前缀）拆章；正文过短（&lt;50 字）的章节会跳过并列出。
+                服务器按「第X章/第X回/第X节/第X卷」、中文数字章节（一、二、三…）、序章/楔子/尾声、英文 Chapter N 拆章；正文过短（&lt;50 字）的章节会跳过并列出。
               </div>
             </>
           )}
