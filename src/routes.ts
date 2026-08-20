@@ -1699,7 +1699,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         }
         const role = project.roles.find(r => r.name === name)
         if (role === undefined) {
-          writeJson(res, 404, { error: `角色 ${name} 不存在` })
+          writeJson(res, 404, { error: `当前激活《${project.bookName}》，角色 ${name} 不存在——若期望的书不对，请先在书架切换该书并刷新` })
           return
         }
         const label = body?.label?.trim() ?? ''
@@ -2079,7 +2079,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         }
         const scene = project.scenes.find(x => x.name === name)
         if (scene === undefined) {
-          writeJson(res, 404, { error: `场景 ${name} 不存在` })
+          writeJson(res, 404, { error: `当前激活《${project.bookName}》，场景 ${name} 不存在——若期望的书不对，请先在书架切换该书并刷新` })
           return
         }
         const label = body?.label?.trim() ?? '全景'

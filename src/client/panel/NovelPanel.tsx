@@ -1204,24 +1204,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     }
   }
 
-  /** 更新角色漫画重要性（main/support/extra）。 */
-  const handleRoleImportance = async (role: RoleRecord, importance: RoleRecord['importance']): Promise<void> => {
-    setBusy(true)
-    setBusyLabel(`更新「${role.name}」重要性…`)
-    setError('')
-    try {
-      await api.roles({ op: 'update', role: { ...role, importance } })
-      await refresh(false)
-      pushProgress(`已更新「${role.name}」重要性`, 'done')
-    } catch (err) {
-      setError((err as Error).message)
-      pushProgress(`更新「${role.name}」重要性失败：${(err as Error).message}`, 'error')
-    } finally {
-      setBusy(false)
-      setBusyLabel('')
-    }
-  }
-
   /** 作者复盘补跑：全书缺失章节（流式）。 */
   const handleAuthorBackfillAll = async (): Promise<void> => {
     const missing = chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error' && c.authorReview === undefined).length
@@ -3818,7 +3800,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <option value="0">关（默认）</option>
                   <option value="1">开</option>
                 </select>
-                <span className={css.meta}>开启后漫画工坊才显示「豆包生成」按钮</span>
+                <span className={css.meta}>开启后角色详情显示「豆包生成」参考图按钮</span>
               </div>
             </div>
             <div className={css.row}>
@@ -4396,7 +4378,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
               <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🖼️ 角色形象</span>
-              <span className={css.meta}>角色形象锚点 / 参考图（漫画功能已移除，形象保留用于立绘与一致性）</span>
+              <span className={css.meta}>角色形象锚点 / 生图提示词包 / 参考图集——复制提示词即可在即梦、豆包等工具出图</span>
             </div>
 
             <input
@@ -4663,10 +4645,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                     for (const e of kit.expressions) blocks.push({ key: 'exp-' + e.name, title: `表情·${e.name}`, zh: e.zh, en: e.en })
                                     blocks.push({ key: 'details', title: '细节', zh: kit.details.zh, en: kit.details.en })
                                   } else {
-                                    blocks.push({ key: 'portrait', title: '立绘', zh: anchor.zh + '。全身/半身正视图，写实电影感。' + rulesZh, en: anchor.en + ', full body, front view, plain background' })
-                                    blocks.push({ key: 'sheet', title: '四视图', zh: anchor.zh + '。同一角色的正面/左侧面/右侧面/背面四视图设定表，纯白背景，四个视角分别描述。' + rulesZh, en: anchor.en + ', character sheet, front view, left side view, right side view, back view, full body, plain white background' })
-                                    for (const n of expressions) blocks.push({ key: 'exp-' + n, title: `表情·${expName(n)}`, zh: anchor.zh + `。表情：${expName(n)}，脸部特写（头部到锁骨），纯白背景，五官与角色定稿完全一致，皮肤纹理细节完整，无多余杂物。` + rulesZh, en: anchor.en + `, facial close-up, head to collarbone, expression: ${expName(n)}, plain white background, consistent with character design, detailed skin texture, no extra objects` })
-                                    blocks.push({ key: 'details', title: '细节', zh: `多组局部细节集合参考图，纯白背景：${anchor.tags.map(t => t + '特写').join('；')}。细节清晰锐利，角色细节参考稿，无多余杂物。` + rulesZh, en: anchor.tags.join(', ') + ', multi-panel detail reference sheet, plain white background, macro close-up, sharp details, character detail sheet, no extra objects' })
+                                    blocks.push({ key: 'portrait', title: '立绘', zh: '正面站立全身人像，3D动漫，超精细建模，纯白纯色背景，' + anchor.zh + '。角色设计稿，服装磨损、标志物细节完整展示，无多余杂物，全身完整无裁切。' + rulesZh, en: anchor.en + ', full body, front view, plain white background, 3d render, character design sheet' })
+                                    blocks.push({ key: 'sheet', title: '四视图', zh: '角色设定四视图，3D动漫，超精细建模，纯白纯色背景，' + anchor.zh + '。同一角色正面/左侧面/右侧面/背面，四个视角分别描述，全身完整，服装与标志物细节完整展示，无多余杂物。' + rulesZh, en: anchor.en + ', character sheet, front view, left side view, right side view, back view, full body, plain white background, 3d render' })
+                                    for (const n of expressions) blocks.push({ key: 'exp-' + n, title: `表情·${expName(n)}`, zh: '脸部特写（头部到锁骨），3D动漫，超精细建模，纯白纯色背景，' + anchor.zh + `。表情：${expName(n)}，五官与角色定稿完全一致，皮肤纹理细节完整，无多余杂物。` + rulesZh, en: anchor.en + `, facial close-up, head to collarbone, expression: ${expName(n)}, plain white background, 3d render, consistent with character design, detailed skin texture, no extra objects` })
+                                    blocks.push({ key: 'details', title: '细节', zh: `多组局部细节集合参考图，3D动漫，超精细建模，纯白纯色背景：${anchor.tags.map(t => t + '特写').join('；')}。细节清晰锐利，角色细节参考稿，无多余杂物。` + rulesZh, en: anchor.tags.join(', ') + ', multi-panel detail reference sheet, plain white background, 3d render, macro close-up, sharp details, character detail sheet, no extra objects' })
                                   }
                                   return (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
@@ -4718,17 +4700,6 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                 onChange={e => { setDetailUploadLabel(e.target.value) }}
                               />
                               <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { uploadInDetail(detailRole) }}>📤 上传图</button>
-                              <select
-                                className={css.input}
-                                style={{ fontSize: 12, padding: '3px 4px', width: 90 }}
-                                value={detailRole.importance ?? 'support'}
-                                onChange={e => { void handleRoleImportance(detailRole, e.target.value as RoleRecord['importance']) }}
-                                title="漫剧重要性"
-                              >
-                                <option value="main">重要</option>
-                                <option value="support">配角</option>
-                                <option value="extra">路人</option>
-                              </select>
                             </div>
                           </div>
                         </div>
