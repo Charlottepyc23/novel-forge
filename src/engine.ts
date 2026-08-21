@@ -1229,10 +1229,15 @@ export async function extractScenes(
   ctx: Context,
   config: NovelConfig,
   project: ProjectState,
+  styleId?: string,
+  filterId?: string,
 ): Promise<SceneCard[]> {
+  const styleWords = styleKeywords(styleId, filterId)
   const system = [
     '你是一位网文漫剧场景导演。根据本书的大纲、编年录与已写章节摘录，提炼「镜头场景」——漫剧分镜/生图时每个镜头要知道"在哪、什么时间光态、拍什么情节、人物什么状态"。',
     '按五幕结构覆盖全书核心场景（短篇 10 章内可少于五幕，按实际剧情组织）：第一幕后场/核心主场、第二幕对外卖场/营业区、第三幕禁忌区域/地下深仓、第四幕外部人间世界（短暂出逃）、第五幕回归与抉择。',
+    '【当前视觉风格】（moment/palette/moods/zh/en 必须按此风格措辞，不能写中性描述）：' + styleWords,
+    '重要：每个场景的 zh 提示词段首必须原样嵌入【当前视觉风格】词块原文；en 提示词末尾追加风格标签。不得省略或改写。',
     '每个场景必须是「镜头场景」而非仅场地：给出该场景的关键情节镜头（人物动作+情绪+镜头推进）。',
     '数量控制：最多输出 8 个场景；每个场景必须能对应到正文实际出现过的地点与情节，不得凭空虚构。',
     '每个场景输出：',
@@ -1290,10 +1295,11 @@ export async function extractScenes(
       elements: strArr(entry.elements).map(t => t.slice(0, 60)).slice(0, 6),
       palette: strArr(entry.palette).map(t => t.slice(0, 40)).slice(0, 4),
       moods: strArr(entry.moods).map(t => t.slice(0, 20)).slice(0, 4),
-      zh: str(entry.zh).slice(0, 800),
-      en: str(entry.en).slice(0, 600),
+      zh: ensureStyleEmbedded(str(entry.zh).slice(0, 800), styleWords, 'zh'),
+      en: ensureStyleEmbedded(str(entry.en).slice(0, 600), styleWords, 'en'),
       tags: strArr(entry.tags).map(t => t.slice(0, 24)).slice(0, 6),
       source: str(entry.source).slice(0, 120),
+      styleId,
     })
   }
   return scenes
@@ -1433,6 +1439,66 @@ export function importBookText(
   return importBookTextFromText(raw, outputDir, bookName)
 }
 
+/** 常见职业/身份尾缀：角色名如「周野律师」正文可能只写「周野」或「周野的律师」。 */
+const ROLE_NAME_SUFFIXES = ['律师', '辩护律师', '医生', '老师', '教授', '先生', '女士', '小姐', '警官', '警察', '局长', '总经理', '经理', '老板', '师父', '师傅', '道长', '老祖', '长老', '掌门', '少主', '公主', '王子', '王妃', '皇后', '皇帝', '王爷', '公子', '姑娘', '夫人', '太太', '大人', '将军', '丞相', '尚书', '员外']
+
+/**
+ * 从角色名/身份拆出正文可能使用的检索词：
+ * - specific：具体称谓（含职业尾缀或 3 字以上身份片段），如「周野的律师」「辩护律师」「律师」——优先用，避免误抓到同名主干（周野）的段落；
+ * - stems：名字主干（如「周野」），最后兜底。
+ */
+function roleFallbackTokens(name: string, identity: string | undefined): { specific: string[]; stems: string[] } {
+  const specific = new Set<string>()
+  const stems = new Set<string>()
+  const addName = (s: string): void => {
+    const t = s.trim()
+    if (t.length < 2) return
+    specific.add(t)
+    for (const q of ['辩护', '助理', '高级', '首席', '御用', '御前', '专职']) {
+      if (t.includes(q)) specific.add(t.replace(q, ''))
+    }
+    for (const suf of ROLE_NAME_SUFFIXES) {
+      if (t.endsWith(suf) && t.length > suf.length + 1) {
+        const stem = t.slice(0, -suf.length)
+        // 「周野律师」→「周野的律师」（正文常见写法）
+        specific.add(stem + '的' + suf)
+        specific.add(suf)
+        if (stem.length >= 2) stems.add(stem)
+      }
+    }
+  }
+  addName(name)
+  for (const part of (identity ?? '').split(/[的，,。\s]+/)) {
+    const p = part.trim()
+    if (p.length < 2) continue
+    if (p.length >= 3 || ROLE_NAME_SUFFIXES.some(s => p.endsWith(s))) {
+      specific.add(p)
+      for (const suf of ROLE_NAME_SUFFIXES) {
+        if (p.endsWith(suf) && p.length > suf.length + 1) {
+          specific.add(suf)
+          stems.add(p.slice(0, -suf.length))
+        }
+      }
+    } else {
+      stems.add(p)
+    }
+  }
+  return { specific: [...specific].filter(t => t.length >= 2), stems: [...stems].filter(t => t.length >= 2) }
+}
+
+/** 保证风格词块已内嵌（LLM 偶发漏嵌时兜底）：zh 段首前缀，en 末尾追加。 */
+function ensureStyleEmbedded(text: string, styleWords: string, lang: 'zh' | 'en'): string {
+  const t = text.trim()
+  if (styleWords === '' || t === '') return t
+  if (t.includes(styleWords)) return t
+  return lang === 'zh' ? styleWords + '，' + t : t + '，' + styleWords
+}
+
+/** 对 zh/en 一对提示词统一补风格词块。 */
+function withStyle(pair: { zh: string; en: string }, styleWords: string): { zh: string; en: string } {
+  return { zh: ensureStyleEmbedded(pair.zh, styleWords, 'zh'), en: ensureStyleEmbedded(pair.en, styleWords, 'en') }
+}
+
 /** 动漫形象描述词（中文描述 + 英文 booru 标签 + 关键外貌标签）。 */
 export interface RoleVisualPrompt {
   zh: string
@@ -1460,6 +1526,7 @@ export async function extractRoleVisual(
 ): Promise<RoleVisualPrompt> {
   const role = (project.roles ?? []).find(r => r.name === roleName)
   if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
+  role.promptStyleId = styleId
 
   // 1. 扫描正文：收集该角色出场且可能含外貌描写的段落（最近 60 章内，每章最多 2 段，共 12 段）。
   // 支持“描述型角色名”（如「灰蓝工装女人」）：先精确匹配，匹配不到时用角色名拆分出的关键词兜底。
@@ -1479,29 +1546,45 @@ export async function extractRoleVisual(
     ...roleWords.filter(w => roleText.includes(w)),
     ...locationWords.filter(w => roleText.includes(w)),
   ])).filter(t => t.length >= 2)
-  const matchesRole = (para: string): boolean => para.includes(roleName) || searchTokens.some(tok => para.includes(tok))
+  const matchesRole = (para: string, tokens: string[]): boolean => para.includes(roleName) || tokens.some(tok => para.includes(tok))
   const excerpts: Array<{ no: number; text: string }> = []
   const written = project.chapters
     .filter(c => c.status !== 'pending' && c.status !== 'generating' && c.file !== undefined)
-    .slice(-60)
-  for (const chapter of written) {
-    const body = readChapterFile(outputDir, chapter)
-    if (body === undefined) continue
-    const paras = body.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 0)
-    let perChapter = 0
-    for (const para of paras) {
-      if (perChapter >= 2 || excerpts.length >= 12) break
-      if (!matchesRole(para)) continue
-      // 优先外貌描写段（含外貌关键词），否则纯动作段也收（LLM 自己判断）。
-      if (appearanceHints.test(para) || excerpts.length < 4) {
-        excerpts.push({ no: chapter.no, text: para.slice(0, 220) })
-        perChapter++
+  /** 扫描一批章节，收集该角色出场且可能含外貌描写的段落（每章最多 2 段，共 12 段）。 */
+  const scanChapters = (list: ChapterPlan[], tokens: string[]): void => {
+    for (const chapter of list) {
+      if (excerpts.length >= 12) break
+      const body = readChapterFile(outputDir, chapter)
+      if (body === undefined) continue
+      const paras = body.split(/\n{2,}/).map(p => p.trim()).filter(p => p.length > 0)
+      let perChapter = 0
+      for (const para of paras) {
+        if (perChapter >= 2 || excerpts.length >= 12) break
+        if (!matchesRole(para, tokens)) continue
+        // 优先外貌描写段（含外貌关键词），否则纯动作段也收（LLM 自己判断）。
+        if (appearanceHints.test(para) || excerpts.length < 4) {
+          excerpts.push({ no: chapter.no, text: para.slice(0, 220) })
+          perChapter++
+        }
       }
     }
-    if (excerpts.length >= 12) break
+  }
+  // 第 1 优先：最近 60 章（快路径）。
+  scanChapters(written.slice(-60), searchTokens)
+  // 第 2 优先：角色可能只在早期出场（全书 >60 章时），全书回扫。
+  if (excerpts.length === 0) scanChapters(written, searchTokens)
+  // 第 3 优先：角色名/身份带职业尾缀（如「周野律师」→ 正文写「周野的律师/律师」），用具体称谓扫。
+  if (excerpts.length === 0) {
+    const fb = roleFallbackTokens(role.name, role.identity)
+    if (fb.specific.length > 0) scanChapters(written, fb.specific)
+  }
+  // 第 4 兜底：具体称谓也没找到时，退回名字主干（如「周野」），交给 LLM 判断是否目标角色。
+  if (excerpts.length === 0) {
+    const fb = roleFallbackTokens(role.name, role.identity)
+    if (fb.stems.length > 0) scanChapters(written, fb.stems)
   }
   if (excerpts.length === 0) {
-    throw new Error(`正文中未找到「${roleName}」的出场描写（仅搜索最近 60 章），请确认角色名与正文一致`)
+    throw new Error(`正文中未找到「${roleName}」的出场描写（已扫描全书及角色名拆分词），请确认角色名与正文一致，或该角色尚未在正文出场`)
   }
 
   // 2. LLM 提炼：一次输出 锚点 + 表情清单 + 四类精修提示词。
@@ -1510,6 +1593,7 @@ export async function extractRoleVisual(
   const system = [
     '你是一位动漫角色设定师与 AI 绘图提示词工程师。根据网文正文中该角色的实际外貌描写，输出「形象锚点」与「四类生图提示词」——一次完成，用于 AI 绘图（NovelAI / Stable Diffusion / Midjourney / 豆包等）生成一致的角色立绘。',
     '【当前视觉风格】（portrait 立绘的「风格」字段必须原样使用，sheet/expressions/details 同样内嵌）：' + styleWords,
+    '重要：每段 zh 提示词的段首必须原样嵌入【当前视觉风格】词块原文；en 提示词末尾追加风格标签。不得省略或改写。',
     '硬性要求（依据优先）：',
     '1. 发色/发型/瞳色/服装/气质/标志物必须来自提供的正文段落，不得凭空发明。',
     '2. 正文未明确写到的项目（如瞳色没写、身高没写），用「未定」标注或直接不写，不要编造数值。',
@@ -1543,8 +1627,8 @@ export async function extractRoleVisual(
   ].join('\n\n')
   const text = await complete(ctx, config, { system, user, temperature: 0.4, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ zh?: unknown; en?: unknown; tags?: unknown; source?: unknown; expressions?: unknown; promptKit?: unknown }>(text)
-  const zh = typeof raw.zh === 'string' ? raw.zh.trim().slice(0, 500) : ''
-  const en = typeof raw.en === 'string' ? raw.en.trim().slice(0, 1500) : ''
+  let zh = typeof raw.zh === 'string' ? raw.zh.trim().slice(0, 500) : ''
+  let en = typeof raw.en === 'string' ? raw.en.trim().slice(0, 1500) : ''
   const tags = Array.isArray(raw.tags)
     ? raw.tags.filter((t): t is string => typeof t === 'string' && t.trim() !== '').map(t => t.trim().slice(0, 20)).slice(0, 12)
     : []
@@ -1578,6 +1662,17 @@ export async function extractRoleVisual(
   if (zh === '' || en === '') {
     throw new Error('形象描述提炼失败：LLM 未返回有效 JSON')
   }
+  // 风格兜底：LLM 漏嵌时强制补上（zh 段首 / en 末尾），保证出图风格与当前方案一致。
+  zh = ensureStyleEmbedded(zh, styleWords, 'zh')
+  en = ensureStyleEmbedded(en, styleWords, 'en')
+  if (promptKit !== undefined) {
+    promptKit = {
+      portrait: withStyle(promptKit.portrait, styleWords),
+      sheet: withStyle(promptKit.sheet, styleWords),
+      expressions: promptKit.expressions.map(e => ({ ...e, ...withStyle(e, styleWords) })),
+      details: withStyle(promptKit.details, styleWords),
+    }
+  }
   return { zh, en, tags, source, expressions, promptKit }
 }
 
@@ -1596,11 +1691,13 @@ export async function generateRolePromptKit(
   const role = (project.roles ?? []).find(r => r.name === roleName)
   if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
   if (role.imagePrompt === undefined) throw new Error(`角色「${roleName}」还没有形象锚点，请先生成锚点`)
+  role.promptStyleId = styleId
   const rules = project.visualRules ?? []
   const styleWords = styleKeywords(styleId, filterId)
   const system = [
     '你是一位 AI 绘图提示词工程师。基于给定角色的形象锚点、表情清单与本书视觉规则，输出四类生图提示词（每类 zh+en 各一段）。',
     '【当前视觉风格】（每类提示词必须内嵌）：' + styleWords,
+    '重要：每段 zh 提示词的段首必须原样嵌入【当前视觉风格】词块原文；en 提示词末尾追加风格标签。不得省略或改写。',
     '四类：',
     '1. portrait 立绘：正面站立全身人像，3D动漫超精细建模，纯白纯色背景；按字段流组织：身份（男子，角色名，外表年龄）→ 发型发色 → 胡茬 → 眼眸 → 面部 → 气质 → 上身服装分件（含磨损）→ 下身 → 鞋 → 标志物（含细节）→ 收尾（角色设计稿，细节完整展示，无多余杂物，全身完整无裁切）。',
     '2. sheet 四视图：同一角色的 正面/左侧面/右侧面/背面 四视图设定表（character sheet），纯白背景，四个视角分别描述。',
@@ -1629,14 +1726,13 @@ export async function generateRolePromptKit(
   }
   const expressionsRaw = Array.isArray(raw.expressions) ? raw.expressions.filter((e): e is Record<string, unknown> => typeof e === 'object' && e !== null) : []
   const kit: RoleRecord['promptKit'] = {
-    portrait: pair(raw.portrait),
-    sheet: pair(raw.sheet),
+    portrait: withStyle(pair(raw.portrait), styleWords),
+    sheet: withStyle(pair(raw.sheet), styleWords),
     expressions: expressionsRaw.map(e => ({
       name: str(e.name).slice(0, 12) || '表情',
-      zh: str(e.zh).slice(0, 800),
-      en: str(e.en).slice(0, 1200),
+      ...withStyle({ zh: str(e.zh).slice(0, 800), en: str(e.en).slice(0, 1200) }, styleWords),
     })).slice(0, 12),
-    details: pair(raw.details),
+    details: withStyle(pair(raw.details), styleWords),
   }
   if (kit.portrait.zh === '' || kit.portrait.en === '') {
     throw new Error('提示词精修失败：LLM 未返回有效 JSON')
@@ -2459,12 +2555,22 @@ export async function summarizeChapter(
   return chapter.summary
 }
 
-/** 把分镜产出写入项目持久化（按章 upsert）。 */
+/** 把分镜产出写入项目持久化（按章 upsert）。重新生成上游时级联清掉下游旧产物：
+ * 新骨架 → 清分镜表+提示词；新分镜表 → 清提示词；新提示词不动上游。 */
 function saveChapterStoryboard(project: ProjectState, outputDir: string, entry: ChapterStoryboard): void {
   if (project.storyboards === undefined) project.storyboards = []
   const idx = project.storyboards.findIndex(e => e.chapterNo === entry.chapterNo)
-  if (idx === -1) project.storyboards.push(entry)
-  else project.storyboards[idx] = { ...project.storyboards[idx], ...entry }
+  const prev = idx === -1 ? undefined : project.storyboards[idx]
+  const next: ChapterStoryboard = { ...(prev ?? {}), ...entry }
+  if (entry.skeleton !== undefined) {
+    next.table = undefined
+    next.prompts = undefined
+  }
+  if (entry.table !== undefined) {
+    next.prompts = undefined
+  }
+  if (idx === -1) project.storyboards.push(next)
+  else project.storyboards[idx] = next
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
 }
@@ -2496,10 +2602,8 @@ export async function generateStoryboardTable(
     .slice(0, 8)
     .map(r => `${r.name}（${r.roleLabel === 'protagonist' ? '主角' : r.roleLabel === 'antagonist' ? '反派' : r.roleLabel === 'female_lead' ? '女主' : '配角'}）：${r.identity ?? ''}`)
   // 场景卡：仅列名称与定位（正文命中优先，至多 6 个）。
-  const scenes = (project.scenes ?? [])
-    .filter(s => body.includes(s.name))
-    .slice(0, 6)
-    .map(s => `${s.name}：${s.summary ?? ''}`)
+  const usedScenes = (project.scenes ?? []).filter(s => body.includes(s.name)).slice(0, 6)
+  const scenes = usedScenes.map(s => `${s.name}：${s.summary ?? ''}`)
   const rules = (project.visualRules ?? []).map(r => '- ' + r)
 
   const baseStyle = styleId !== undefined ? findStyle(styleId) : undefined
@@ -2564,7 +2668,7 @@ export async function generateStoryboardTable(
   if (missing.length > 0) {
     console.warn(`[dsh-novel-forge] storyboard: beat ${missing.join(',')} 无镜头覆盖`)
   }
-  const table: StoryboardTable = { chapterNo, shots }
+  const table: StoryboardTable = { chapterNo, shots, usedScenes: usedScenes.map(s => s.name) }
   saveChapterStoryboard(project, outputDir, { chapterNo, table, updatedAt: new Date().toISOString() })
   return table
 }
@@ -2605,6 +2709,7 @@ export async function generateStoryboardPrompts(
     '任务：把分镜表的每个镜头写成一段可直接粘贴进视频生成工具的提示词。',
     '提示词结构（按顺序）：风格词块 → 画面主体（人物动作+表情+服装标志物）→ 机位运镜（含时长感）→ 光效氛围。单段中文 60-140 字，逗号分隔，流畅自然。',
     '风格词块（必须原样放在每段开头）：' + stylePrefix,
+    '重要：每段提示词开头必须原样嵌入风格词块原文，不得省略、不得改写。',
     '硬性要求：',
     '1. 只写画面与镜头，禁止写音频/台词配音说明（视频模型无音频）。',
     '2. 服装/发色/标志物必须沿用镜头表与视觉规则，禁止自行更换。',
@@ -2627,7 +2732,7 @@ export async function generateStoryboardPrompts(
         .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
         .map(entry => ({
           shotId: shotIds.has(entry.shotId as string) ? entry.shotId as string : '',
-          text: typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '',
+          text: ensureStyleEmbedded(typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '', stylePrefix, 'zh'),
         }))
         .filter(x => x.shotId !== '' && x.text !== '')
     : []

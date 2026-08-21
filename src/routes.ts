@@ -2374,7 +2374,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       const op = body?.op
       if (op === 'extract') {
         try {
-          const candidates = await extractScenes(ctx, config, project)
+          const candidates = await extractScenes(ctx, config, project, body?.styleId, body?.filterId)
           writeJson(res, 200, { scenes: project.scenes, candidates } satisfies ScenesResponse)
           return
         } catch (error) {

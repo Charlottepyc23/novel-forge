@@ -70,7 +70,7 @@ export declare function refreshPlotlineProgress(ctx: Context, config: NovelConfi
 /** ✨ AI 从全书提炼角色库：大纲 + 道藏 + 编年录 + 章节摘要 → 结构化角色清单。 */
 export declare function extractRoles(ctx: Context, config: NovelConfig, project: ProjectState): Promise<RoleRecord[]>;
 /** ✨ AI 从全书提炼场景库：正文/编年录 → 高频重要场景的结构化视觉锚点。 */
-export declare function extractScenes(ctx: Context, config: NovelConfig, project: ProjectState): Promise<SceneCard[]>;
+export declare function extractScenes(ctx: Context, config: NovelConfig, project: ProjectState, styleId?: string, filterId?: string): Promise<SceneCard[]>;
 /** 从 txt/md 全本文本拆章（纯逻辑，不落盘）：识别章节头、剥离重复标题、去重、排序并统一重新编号。 */
 export declare function splitBookText(raw: string): Array<{
     no: number;

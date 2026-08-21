@@ -1,6 +1,6 @@
 import type { NovelApi } from '../api.ts';
 import type { ChapterPlan, ProjectState } from '../../protocol.ts';
-export declare function StoryboardTab({ api, project, chapters, onProjectChanged, styleId, filterId, }: {
+export declare function StoryboardTab({ api, project, chapters, onProjectChanged, styleId, filterId, onProgress, }: {
     api: NovelApi;
     project: ProjectState | null;
     chapters: ChapterPlan[];
@@ -10,4 +10,6 @@ export declare function StoryboardTab({ api, project, chapters, onProjectChanged
     styleId?: string;
     /** 可选滤镜风格 id。 */
     filterId?: string;
+    /** 上报到「工作进度」控制台（分镜三步生成）。 */
+    onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void;
 }): import("react").JSX.Element;

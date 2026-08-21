@@ -440,12 +440,12 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .panelNav {
   flex: none;
   align-self: stretch;
-  width: 200px;
+  width: 216px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin: 10px 0 10px 12px;
-  padding: 14px 10px 12px;
+  padding: 16px 12px 14px;
   border: 1px solid var(--nf-glass-border);
   border-radius: 18px;
   background: var(--nf-glass-face);
@@ -464,16 +464,16 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .navGroup {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .navGroupLabel {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
   color: var(--nf-text-3);
-  padding: 10px 10px 4px;
+  padding: 12px 10px 6px;
   user-select: none;
 }
 
@@ -603,14 +603,14 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 .navTab {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
   border-radius: 10px;
-  padding: 9px 10px;
-  font-size: 13px;
+  padding: 11px 12px;
+  font-size: 14px;
   color: var(--nf-text-2-alpha, var(--nf-text-2));
   font-weight: 500;
   transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
@@ -643,9 +643,9 @@ body[data-ds-dark-theme] .panel[data-nf-theme='neumorph'] .buttonPrimary {
 
 .navTabIcon {
   flex: none;
-  width: 20px;
+  width: 22px;
   text-align: center;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1;
 }
 

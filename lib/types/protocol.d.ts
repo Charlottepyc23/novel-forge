@@ -256,6 +256,8 @@ export interface StoryboardShot {
 export interface StoryboardTable {
     chapterNo: number;
     shots: StoryboardShot[];
+    /** 生成时注入的场景卡名称（前端标注消费关系）。 */
+    usedScenes?: string[];
 }
 /** POST /storyboard/table 请求：骨架 → 分镜表。 */
 export interface StoryboardTableRequest {
@@ -734,6 +736,8 @@ export interface RoleRecord {
             en: string;
         };
     };
+    /** 生成形象锚点/精修提示词时的漫剧方案基底风格 id（= 方案 styleId；用于检测旧风格并提示重生成）。 */
+    promptStyleId?: string;
     /** 漫画/漫剧重要性：main=必须建卡保证一致；support=有锚点即可；extra=路人随机生成不约束。 */
     importance?: 'main' | 'support' | 'extra';
 }
@@ -774,10 +778,16 @@ export interface SceneCard {
     source?: string;
     /** 场景图集（图像锚点）：全景/局部/氛围 等。 */
     gallery?: RoleImage[];
+    /** 生成时的漫剧方案基底风格 id（场景卡随方案风格措辞）。 */
+    styleId?: string;
 }
 /** POST /scenes 请求：场景库提炼 / 采纳 / 更新 / 删除 / 图集。 */
 export interface ScenesRequest {
     op: 'extract' | 'adopt' | 'update' | 'remove' | 'image' | 'removeImage';
+    /** op='extract' 时的漫剧基底风格 id（场景卡按方案风格措辞）。 */
+    styleId?: string;
+    /** op='extract' 时的可选滤镜风格 id。 */
+    filterId?: string;
     /** adopt / update 时传入的场景卡（adopt 可修改后采纳）。 */
     scene?: SceneCard;
     /** remove / image 时的场景名。 */
