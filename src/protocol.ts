@@ -42,6 +42,14 @@ export const NOVEL_API = {
   bookshelfImportText: '/api/dsh-novel-forge/bookshelf/import-text',
   /** 导入 txt/md 全本：拆章预览（不落盘）。 */
   bookshelfImportTextPreview: '/api/dsh-novel-forge/bookshelf/import-text/preview',
+  /** 漫剧方案管理：create/remove/activate。 */
+  manhuaPlans: '/api/dsh-novel-forge/manhua/plans',
+  /** 分镜·编剧级：单章 → 剧情骨架（节拍链）。 */
+  storyboardSkeleton: '/api/dsh-novel-forge/storyboard/skeleton',
+  /** 分镜·导演级：骨架 → 分镜表（镜头级）。 */
+  storyboardTable: '/api/dsh-novel-forge/storyboard/table',
+  /** 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。 */
+  storyboardPrompts: '/api/dsh-novel-forge/storyboard/prompts',
   /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
   reset: '/api/dsh-novel-forge/reset',
   /** 全书一致性质检：LLM 扫描已生成章节，输出矛盾问题清单。 */
@@ -192,6 +200,154 @@ export interface BookImportTextPreviewResponse {
   chapters: Array<{ no: number; title: string; chars: number }>
   /** 因内容过短被跳过的章节标题列表。 */
   skipped: string[]
+}
+
+/** 分镜·编剧级：剧情骨架中的一节拍。 */
+export interface StoryboardBeat {
+  /** 节拍 id（如 b1、b2）。 */
+  id: string
+  /** 事件一句话（发生了什么）。 */
+  event: string
+  /** 情绪走向（如 压抑→隐忍→惊惧）。 */
+  emotion: string
+  /** 叙事功能：铺垫/冲突/转折/高潮/收束/伏笔/人物塑造。 */
+  function: string
+  /** 因果：承接上一节拍的原因（可选）。 */
+  cause?: string
+}
+
+/** 分镜·编剧级：单章剧情骨架。 */
+export interface StoryboardSkeleton {
+  chapterNo: number
+  /** 本章弧线一句话（起承转合）。 */
+  arc: string
+  /** 剧情节拍链（时间顺序，因果连贯）。 */
+  beats: StoryboardBeat[]
+}
+
+/** POST /storyboard/skeleton 请求：生成单章剧情骨架。 */
+export interface StoryboardSkeletonRequest {
+  chapterNo: number
+}
+
+/** POST /storyboard/skeleton 响应。 */
+export interface StoryboardSkeletonResponse {
+  skeleton: StoryboardSkeleton
+}
+
+/** 分镜·导演级：一个镜头。 */
+export interface StoryboardShot {
+  /** 镜头 id（如 s1、s2）。 */
+  id: string
+  /** 挂载的节拍 id（骨架中的 b1…）。 */
+  beatId: string
+  /** 景别：远景/全景/中景/近景/特写。 */
+  shot: string
+  /** 机位与运镜（如 低机位仰拍 + 缓慢推近）。 */
+  camera: string
+  /** 时长（秒，1-12）。 */
+  duration: number
+  /** 画面内容：角色动作 + 表情 + 服装/标志物。 */
+  visual: string
+  /** 台词/旁白（无则空字符串）。 */
+  line: string
+  /** 音效（无则空字符串）。 */
+  sound: string
+  /** 光效（如 雨夜顶光 + 手机屏幕冷光）。 */
+  light: string
+  /** 承接上一镜头结尾状态（位置/动作/情绪/服装）。 */
+  prevState: string
+  /** 本镜头结束状态。 */
+  nextState: string
+}
+
+/** 分镜·导演级：单章分镜表。 */
+export interface StoryboardTable {
+  chapterNo: number
+  shots: StoryboardShot[]
+}
+
+/** POST /storyboard/table 请求：骨架 → 分镜表。 */
+export interface StoryboardTableRequest {
+  chapterNo: number
+  /** 编剧级骨架（前端已生成/编辑后的版本）。 */
+  skeleton: StoryboardSkeleton
+  /** 漫剧方案基底风格 id（style-library）；提供时按风格措辞画面描述。 */
+  styleId?: string
+  /** 可选滤镜风格 id（stackable）。 */
+  filterId?: string
+}
+
+/** POST /storyboard/table 响应。 */
+export interface StoryboardTableResponse {
+  table: StoryboardTable
+}
+
+/** 分镜·提示词级：一个镜头的即梦视频提示词。 */
+export interface StoryboardPrompt {
+  /** 对应镜头 id（s1…）。 */
+  shotId: string
+  /** 即梦/视频模型可粘贴的中文提示词（画面+运镜+光效+风格词块）。 */
+  text: string
+}
+
+/** 分镜持久化：单章的分镜产出（骨架 + 分镜表 + 视频提示词，可分别存在）。 */
+export interface ChapterStoryboard {
+  chapterNo: number
+  skeleton?: StoryboardSkeleton
+  table?: StoryboardTable
+  prompts?: StoryboardPrompt[]
+  updatedAt: string
+}
+
+/** POST /storyboard/prompts 请求：分镜表 → 视频提示词。 */
+export interface StoryboardPromptsRequest {
+  chapterNo: number
+  /** 分镜表（前端已生成的镜头列表）。 */
+  table: StoryboardTable
+  /** 基底风格 id。 */
+  styleId?: string
+  /** 可选滤镜风格 id。 */
+  filterId?: string
+}
+
+/** POST /storyboard/prompts 响应。 */
+export interface StoryboardPromptsResponse {
+  prompts: StoryboardPrompt[]
+}
+
+/** 漫剧方案：同一本书的多套视觉演绎（基底风格 + 可选滤镜）。 */
+export interface MangaPlan {
+  /** 方案 id。 */
+  id: string
+  /** 方案名（如《保质期》3D 皮克斯版）。 */
+  name: string
+  /** 基底风格 id（style-library 中非 stackable 风格）。 */
+  styleId: string
+  /** 可选滤镜风格 id（style-library 中 stackable 风格）。 */
+  filterId?: string
+  /** 是否激活（分镜/角色图生成时使用）。 */
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/** POST /manhua/plans 请求：漫剧方案管理。 */
+export interface MangaPlansRequest {
+  op: 'create' | 'remove' | 'activate'
+  /** create：方案名。 */
+  name?: string
+  /** create：基底风格 id。 */
+  styleId?: string
+  /** create：可选滤镜风格 id。 */
+  filterId?: string
+  /** remove/activate：方案 id。 */
+  id?: string
+}
+
+/** POST /manhua/plans 响应。 */
+export interface MangaPlansResponse {
+  plans: MangaPlan[]
 }
 
 
@@ -709,6 +865,10 @@ export interface RolesRequest {
   label?: string
   /** op='imageGenerate' 时的漫画风格预设 id（用于统一角色图与漫画页风格）。 */
   style?: string
+  /** op='visual' / op='promptKit' 时的漫剧基底风格 id（角色图按方案风格重出）。 */
+  styleId?: string
+  /** op='visual' / op='promptKit' 时的可选滤镜风格 id。 */
+  filterId?: string
 }
 
 /** POST /roles 响应。 */
@@ -854,6 +1014,10 @@ export interface ProjectState {
   scenes?: SceneCard[]
   /** 视觉世界观规则（生图/生视频必须遵守，从道藏提炼，注入所有提示词）。 */
   visualRules?: string[]
+  /** 分镜工作台产出（骨架/分镜表，按章持久化，刷新/切换不丢）。 */
+  storyboards?: ChapterStoryboard[]
+  /** 漫剧方案列表（同一本书的多套视觉演绎：基底风格 + 可选滤镜）。 */
+  mangaPlans?: MangaPlan[]
   /** 人物志：角色当前状态聚合结果（从编年录刷新后存档，打开页面直接显示）。 */
   roleStatus?: RoleStatusCard[]
   /** 漫剧分镜结果缓存：章号 → 分镜（持久化，刷新不丢）。 */

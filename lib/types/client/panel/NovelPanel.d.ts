@@ -1,7 +1,7 @@
 import type { NovelApi } from '../api.ts';
 import type { PanelController } from './controller.ts';
 /** The panel's tab identifiers. */
-export type NovelTab = 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings' | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'roleImage' | 'scenes' | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run' | 'book' | 'assets';
+export type NovelTab = 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings' | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown' | 'roleImage' | 'scenes' | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run' | 'manhua' | 'styleLib' | 'book' | 'assets';
 /** Panel shell props. */
 export interface NovelPanelProps {
     /** The panel state owner (open/close/toggle). */

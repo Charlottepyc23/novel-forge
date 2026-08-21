@@ -17,6 +17,9 @@ import { RunPanel } from './RunPanel.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
 import { ImportModal } from './ImportModal.tsx'
 import { WorldTab } from './WorldTab.tsx'
+import { StoryboardTab } from './StoryboardTab.tsx'
+import { MangaWorkspace } from './MangaWorkspace.tsx'
+import { StyleGallery } from './StyleGallery.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
 import { extractDocxTextFromBuffer } from '../docx.ts'
 import type {
@@ -43,7 +46,7 @@ export type NovelTab =
   | 'workflow' | 'overview' | 'blurb' | 'plan' | 'bible' | 'world' | 'foreshadow' | 'assistant' | 'settings'
   | 'characters' | 'roles' | 'facts' | 'plotlines' | 'reviews' | 'progress' | 'breakdown'
   | 'roleImage' | 'scenes'
-  | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run'
+  | 'assetsGenre' | 'assetsProgression' | 'assetsTemplates' | 'assetsRules' | 'assetsStyle' | 'run' | 'manhua' | 'styleLib'
   | 'book' | 'assets'
 
 /** Panel shell props. */
@@ -88,6 +91,8 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
       { id: 'breakdown', label: '拆书分析', icon: '🔍' },
       { id: 'roleImage', label: '角色形象', icon: '🖼️' },
       { id: 'scenes', label: '场景库', icon: '🏞️' },
+      { id: 'styleLib', label: '风格库', icon: '🎨' },
+      { id: 'manhua', label: '漫剧', icon: '🎬' },
       { id: 'run', label: '生产单', icon: '🏭' },
     ],
   },
@@ -1174,7 +1179,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setBusyLabel(`生成「${name}」形象锚点…`)
     setError('')
     try {
-      await api.roles({ op: 'visual', name })
+      const activePlan = (project?.mangaPlans ?? []).find(pl => pl.active)
+      await api.roles({ op: 'visual', name, styleId: activePlan?.styleId, filterId: activePlan?.filterId })
       await refresh(false)
       pushProgress(`已生成「${name}」形象锚点`, 'done')
     } catch (err) {
@@ -4384,6 +4390,14 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           <RunPanel api={api} totalChapters={chapters.length} />
         )}
 
+        {activeTab === 'styleLib' && (
+          <StyleGallery />
+        )}
+
+        {activeTab === 'manhua' && (
+          <MangaWorkspace api={api} project={project} chapters={chapters} onProjectChanged={() => refresh(false)} />
+        )}
+
         {activeTab === 'breakdown' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -4693,7 +4707,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                       setBusyLabel(`精修「${detailRole.name}」提示词…`)
                                       setError('')
                                       try {
-                                        await api.roles({ op: 'promptKit', name: detailRole.name })
+                                        const activePlan = (project?.mangaPlans ?? []).find(pl => pl.active)
+                                        await api.roles({ op: 'promptKit', name: detailRole.name, styleId: activePlan?.styleId, filterId: activePlan?.filterId })
                                         await refresh(false)
                                         pushProgress(`已生成「${detailRole.name}」四类精修提示词`, 'done')
                                       } catch (err) {

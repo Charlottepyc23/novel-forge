@@ -12,6 +12,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { exec } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, basename, extname } from 'node:path'
+import { homedir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { Context } from '@deepseek-ai/cordis'
 import { ProductionRunner } from './run.ts'
@@ -55,6 +57,9 @@ import {
   type ForeshadowResponse,
   type JobFrame,
   type LoadOutlineRequest,
+  type MangaPlan,
+  type MangaPlansRequest,
+  type MangaPlansResponse,
   type LoadOutlineResponse,
   type NovelConfig,
   type PlotlinesRequest,
@@ -85,6 +90,12 @@ import {
   type SensitiveHit,
   type StatusResponse,
   type StoryBible,
+  type StoryboardSkeletonRequest,
+  type StoryboardSkeletonResponse,
+  type StoryboardTableRequest,
+  type StoryboardTableResponse,
+  type StoryboardPromptsRequest,
+  type StoryboardPromptsResponse,
   type StyleEngineRequest,
   type SummaryRequest,
   type VolumesRequest,
@@ -135,6 +146,9 @@ import {
   reverseOutlineFromChapters,
   breakdownBook,
   generateRoleReferenceImage,
+  generateStoryboardSkeleton,
+  generateStoryboardTable,
+  generateStoryboardPrompts,
   checkSensitiveText,
   suggestForeshadows,
   suggestPlotlines,
@@ -145,6 +159,9 @@ import {
 
 /** Cap on JSON request bodies (generous: cover images travel as base64). */
 const MAX_JSON_BODY_BYTES = 64 * 1024 * 1024
+
+/** 包内置风格效果图目录（assets/styles，随 npm 包分发）。 */
+const builtinStyleDir = fileURLToPath(new URL('../assets/styles/', import.meta.url))
 
 /** Loopback-only fence (mirrors the family plugins' pairing routes). */
 function isLoopbackRequest(request: IncomingMessage): boolean {
@@ -1854,7 +1871,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           return
         }
         try {
-          const visual = await extractRoleVisual(ctx, config, project, config.outputDir, name)
+          const visual = await extractRoleVisual(ctx, config, project, config.outputDir, name, body?.styleId, body?.filterId)
           const role = project.roles.find(r => r.name === name)
           if (role !== undefined) {
             role.imagePrompt = visual
@@ -1877,7 +1894,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           return
         }
         try {
-          const kit = await generateRolePromptKit(ctx, config, project, name)
+          const kit = await generateRolePromptKit(ctx, config, project, name, body?.styleId, body?.filterId)
           const role = project.roles.find(r => r.name === name)
           if (role !== undefined) role.promptKit = kit
           project.updatedAt = new Date().toISOString()
@@ -2146,6 +2163,174 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------- storyboard prompts
+  /** 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。 */
+  const storyboardPromptsRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.storyboardPrompts,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<StoryboardPromptsRequest>(req)
+      const no = body?.chapterNo
+      if (!Number.isInteger(no) || no === undefined || no < 1) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      if (body?.table === undefined || (body.table.shots ?? []).length === 0) {
+        writeJson(res, 400, { error: 'table 不能为空，请先生成分镜表' })
+        return
+      }
+      try {
+        const prompts = await generateStoryboardPrompts(ctx, config, project, config.outputDir, no, body.table, body?.styleId, body?.filterId)
+        writeJson(res, 200, { prompts } satisfies StoryboardPromptsResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `视频提示词生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // ---------------------------------------------------- storyboard table
+  /** 分镜·导演级：骨架 → 分镜表（镜头级）。 */
+  const storyboardTableRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.storyboardTable,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<StoryboardTableRequest>(req)
+      const no = body?.chapterNo
+      if (!Number.isInteger(no) || no === undefined || no < 1) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      if (body?.skeleton === undefined || (body.skeleton.beats ?? []).length === 0) {
+        writeJson(res, 400, { error: 'skeleton 不能为空，请先生成剧情骨架' })
+        return
+      }
+      try {
+        const table = await generateStoryboardTable(ctx, config, project, config.outputDir, no, body.skeleton, body?.styleId, body?.filterId)
+        writeJson(res, 200, { table } satisfies StoryboardTableResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `分镜表生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // ------------------------------------------------------ manhua plans
+  /** 漫剧方案管理：create / remove / activate。 */
+  const manhuaPlansRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.manhuaPlans,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<MangaPlansRequest>(req)
+      if (project.mangaPlans === undefined) project.mangaPlans = []
+      if (body?.op === 'create') {
+        const name = body.name?.trim()
+        const styleId = body.styleId?.trim()
+        if (name === undefined || name === '' || styleId === undefined || styleId === '') {
+          writeJson(res, 400, { error: 'name 与 styleId 不能为空' })
+          return
+        }
+        if (project.mangaPlans.some(p => p.name === name)) {
+          writeJson(res, 400, { error: `方案名「${name}」已存在` })
+          return
+        }
+        const id = `manga-${Date.now().toString(36)}`
+        project.mangaPlans.push({
+          id,
+          name: name.slice(0, 40),
+          styleId,
+          filterId: body.filterId?.trim() !== '' ? body.filterId?.trim() : undefined,
+          active: project.mangaPlans.length === 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })
+      } else if (body?.op === 'remove' && body.id !== undefined) {
+        const removed = project.mangaPlans.find(p => p.id === body.id)
+        project.mangaPlans = project.mangaPlans.filter(p => p.id !== body.id)
+        if (removed?.active === true && project.mangaPlans.length > 0) {
+          project.mangaPlans[0].active = true
+        }
+      } else if (body?.op === 'activate' && body.id !== undefined) {
+        project.mangaPlans.forEach(p => { p.active = p.id === body.id })
+      } else {
+        writeJson(res, 400, { error: 'op 须为 create/remove/activate' })
+        return
+      }
+      project.updatedAt = new Date().toISOString()
+      saveProject(config.outputDir, project)
+      writeJson(res, 200, { plans: project.mangaPlans } satisfies MangaPlansResponse)
+    },
+  }
+
+  // ------------------------------------------------------ style image
+  /** 风格库效果图：GET /styles/image?id=<styleId>，从 ~/.dsh/dsh-novel-forge-styles/<id>.png 读取。 */
+  const styleImageRoute: WebRoute = {
+    kind: 'exact',
+    path: '/api/dsh-novel-forge/styles/image',
+    handler: async (req, res) => {
+      if (!isLoopbackRequest(req)) {
+        writeJson(res, 403, { error: 'forbidden: loopback-only' })
+        return
+      }
+      const url = new URL(req.url ?? '', 'http://localhost')
+      const id = (url.searchParams.get('id') ?? '').replace(/[^a-z0-9-]/gi, '')
+      if (id === '') {
+        writeJson(res, 404, { error: 'style image not found' })
+        return
+      }
+      // 图片来源：用户数据目录缩略图（自定义覆盖）→ 原图 → 包内置缩略图（随插件分发）。
+      const base = join(homedir(), '.dsh', 'dsh-novel-forge-styles')
+      const candidates: Array<{ file: string; type: string }> = [
+        { file: join(base, 'thumbs', id + '.webp'), type: 'image/webp' },
+        { file: join(base, id + '.png'), type: 'image/png' },
+        { file: join(builtinStyleDir, id + '.webp'), type: 'image/webp' },
+      ]
+      for (const c of candidates) {
+        if (existsSync(c.file)) {
+          res.writeHead(200, { 'content-type': c.type, 'cache-control': 'public, max-age=86400' })
+          res.end(readFileSync(c.file))
+          return
+        }
+      }
+      writeJson(res, 404, { error: 'style image not found' })
+    },
+  }
+
+  // ------------------------------------------------------- storyboard
+  /** 分镜·编剧级：单章 → 剧情骨架（节拍链）。 */
+  const storyboardSkeletonRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.storyboardSkeleton,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<StoryboardSkeletonRequest>(req)
+      const no = body?.chapterNo
+      if (!Number.isInteger(no) || no === undefined || no < 1) {
+        writeJson(res, 400, { error: 'chapterNo 须为正整数' })
+        return
+      }
+      try {
+        const skeleton = await generateStoryboardSkeleton(ctx, config, project, config.outputDir, no)
+        writeJson(res, 200, { skeleton } satisfies StoryboardSkeletonResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `剧情骨架生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
   // ----------------------------------------------------------- breakdown
   /** 拆书分析：对已写章节做结构/人物/文风/卖点体检（两阶段：源笔记→分节分析）。 */
   const breakdownRoute: WebRoute = {
@@ -2388,6 +2573,11 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     openFolderRoute,
     outlineSuggestRoute,
     outlineReverseRoute,
+    manhuaPlansRoute,
+    styleImageRoute,
+    storyboardSkeletonRoute,
+    storyboardTableRoute,
+    storyboardPromptsRoute,
     breakdownRoute,
     runStartRoute,
     runControlRoute,

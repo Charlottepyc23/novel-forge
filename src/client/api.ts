@@ -80,6 +80,26 @@ export class NovelApi {
     await this.streamJob(NOVEL_API.outlineReverse, {}, onFrame)
   }
 
+  /** 分镜·导演级：骨架 → 分镜表（镜头级）。 */
+  async storyboardTable(chapterNo: number, skeleton: import('../protocol.ts').StoryboardSkeleton, styleId?: string, filterId?: string): Promise<import('../protocol.ts').StoryboardTableResponse> {
+    return postJson<import('../protocol.ts').StoryboardTableResponse>(NOVEL_API.storyboardTable, { chapterNo, skeleton, styleId, filterId })
+  }
+
+  /** 漫剧方案管理：create / remove / activate。 */
+  async manhuaPlans(req: import('../protocol.ts').MangaPlansRequest): Promise<import('../protocol.ts').MangaPlansResponse> {
+    return postJson<import('../protocol.ts').MangaPlansResponse>(NOVEL_API.manhuaPlans, req)
+  }
+
+  /** 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。 */
+  async storyboardPrompts(chapterNo: number, table: import('../protocol.ts').StoryboardTable, styleId?: string, filterId?: string): Promise<import('../protocol.ts').StoryboardPromptsResponse> {
+    return postJson<import('../protocol.ts').StoryboardPromptsResponse>(NOVEL_API.storyboardPrompts, { chapterNo, table, styleId, filterId })
+  }
+
+  /** 分镜·编剧级：单章 → 剧情骨架（节拍链）。 */
+  async storyboardSkeleton(chapterNo: number): Promise<import('../protocol.ts').StoryboardSkeletonResponse> {
+    return postJson<import('../protocol.ts').StoryboardSkeletonResponse>(NOVEL_API.storyboardSkeleton, { chapterNo })
+  }
+
   /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
   async outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse> {
     return postJson<import('../protocol.ts').OutlineSuggestResponse>(NOVEL_API.outlineSuggest, { idea, count, exclude })

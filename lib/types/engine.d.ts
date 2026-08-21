@@ -12,7 +12,7 @@
  */
 export declare const COMPLIANCE_REDLINES: ReadonlyArray<string>;
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, SceneCard, StoryBible, Volume, WorldState } from './protocol.ts';
+import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, SceneCard, StoryBible, StoryboardSkeleton, StoryboardTable, StoryboardPrompt, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -113,12 +113,12 @@ export interface RoleVisualPrompt {
  * 为单个角色提炼「动漫形象描述词」：扫描该角色出场的已写章节正文，
  * 截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
  */
-export declare function extractRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, roleName: string): Promise<RoleVisualPrompt>;
+export declare function extractRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, roleName: string, styleId?: string, filterId?: string): Promise<RoleVisualPrompt>;
 /**
  * 角色四类生图提示词精修包（promptKit）：以锚点 + 表情清单 + 视觉规则为输入，
  * LLM 产出 立绘/四视图/表情×N/细节 四套 zh+en 提示词（比前端拼装更精炼）。
  */
-export declare function generateRolePromptKit(ctx: Context, config: NovelConfig, project: ProjectState, roleName: string): Promise<RoleRecord['promptKit']>;
+export declare function generateRolePromptKit(ctx: Context, config: NovelConfig, project: ProjectState, roleName: string, styleId?: string, filterId?: string): Promise<RoleRecord['promptKit']>;
 /** ✨ 从道藏/红线提炼「视觉世界观规则」：生图/生视频必须遵守的设定纠偏（如"商品=人，禁止常规超市商品"）。 */
 export declare function extractVisualRules(ctx: Context, config: NovelConfig, project: ProjectState): Promise<string[]>;
 /**
@@ -182,6 +182,22 @@ export declare function generateChapterStream(ctx: Context, config: NovelConfig,
 }, void, unknown>;
 /** Generate a chapter summary (narrative memory). */
 export declare function summarizeChapter(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<string>;
+/**
+ * 分镜·导演级：剧情骨架 → 分镜表（镜头级）。
+ * 只做画面层：景别/机位运镜/时长/画面/台词/音效/光效 + 状态连续；禁止改剧情（骨架只读）。
+ */
+export declare function generateStoryboardTable(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number, skeleton: StoryboardSkeleton, styleId?: string, filterId?: string): Promise<StoryboardTable>;
+/**
+ * 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。
+ * 每镜头一段：风格词块（基底+滤镜）+ 画面内容（角色动作/服装标志物）+ 机位运镜 + 光效。
+ * 提示词聚焦画面与镜头（视频模型无音频，台词/音效不注入）。
+ */
+export declare function generateStoryboardPrompts(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number, table: StoryboardTable, styleId?: string, filterId?: string): Promise<StoryboardPrompt[]>;
+/**
+ * 分镜·编剧级：单章 → 剧情骨架（节拍链）。
+ * 只做故事层（事件/情绪/功能/因果），不做画面；导演级分镜在其上展开。
+ */
+export declare function generateStoryboardSkeleton(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<StoryboardSkeleton>;
 /**
  * 反向推大纲：从已写章节正文反推出全书总纲（分卷 + 章节要点 + 主线/人物弧线/伏笔清单）。
  * 两阶段：分批提取章节事件摘要 → 汇总生成大纲。不修改章节/设定，只返回大纲文本。

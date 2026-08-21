@@ -18,6 +18,14 @@ export declare class NovelApi {
     }>;
     /** 反推大纲：从已写章节正文反向生成全书总纲（NDJSON 流）。 */
     outlineReverse(onFrame: (frame: JobFrame) => void): Promise<void>;
+    /** 分镜·导演级：骨架 → 分镜表（镜头级）。 */
+    storyboardTable(chapterNo: number, skeleton: import('../protocol.ts').StoryboardSkeleton, styleId?: string, filterId?: string): Promise<import('../protocol.ts').StoryboardTableResponse>;
+    /** 漫剧方案管理：create / remove / activate。 */
+    manhuaPlans(req: import('../protocol.ts').MangaPlansRequest): Promise<import('../protocol.ts').MangaPlansResponse>;
+    /** 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。 */
+    storyboardPrompts(chapterNo: number, table: import('../protocol.ts').StoryboardTable, styleId?: string, filterId?: string): Promise<import('../protocol.ts').StoryboardPromptsResponse>;
+    /** 分镜·编剧级：单章 → 剧情骨架（节拍链）。 */
+    storyboardSkeleton(chapterNo: number): Promise<import('../protocol.ts').StoryboardSkeletonResponse>;
     /** 开书想法 → AI 大纲：生成 count 个方案（换批时传 exclude 避开已暂留方向）。 */
     outlineSuggest(idea: string, count?: number, exclude?: string[]): Promise<import('../protocol.ts').OutlineSuggestResponse>;
     /** 拆书分析：对已写章节做结构/人物/文风/卖点体检。 */

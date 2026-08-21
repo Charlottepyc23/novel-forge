@@ -29,6 +29,7 @@ import { createUserMessage, BlockAssembler, ReasoningEffortId, type GenerateOpti
 import type { Context } from '@deepseek-ai/cordis'
 import { emptyProjectAssets, renderAllAssets, styleEngineSystemPrompt } from './assets.ts'
 import { getComicStylePrompt } from './comic-presets.ts'
+import { findStyle, styleKeywords } from './style-library.ts'
 import type {
   AuditIssue,
   AuthorReview,
@@ -46,6 +47,12 @@ import type {
   RoleStatusCard,
   SceneCard,
   StoryBible,
+  StoryboardSkeleton,
+  StoryboardBeat,
+  StoryboardTable,
+  StoryboardShot,
+  StoryboardPrompt,
+  ChapterStoryboard,
   Volume,
   WorldState,
 } from './protocol.ts'
@@ -1448,6 +1455,8 @@ export async function extractRoleVisual(
   project: ProjectState,
   outputDir: string,
   roleName: string,
+  styleId?: string,
+  filterId?: string,
 ): Promise<RoleVisualPrompt> {
   const role = (project.roles ?? []).find(r => r.name === roleName)
   if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
@@ -1497,8 +1506,10 @@ export async function extractRoleVisual(
 
   // 2. LLM 提炼：一次输出 锚点 + 表情清单 + 四类精修提示词。
   const rules = project.visualRules ?? []
+  const styleWords = styleKeywords(styleId, filterId)
   const system = [
     '你是一位动漫角色设定师与 AI 绘图提示词工程师。根据网文正文中该角色的实际外貌描写，输出「形象锚点」与「四类生图提示词」——一次完成，用于 AI 绘图（NovelAI / Stable Diffusion / Midjourney / 豆包等）生成一致的角色立绘。',
+    '【当前视觉风格】（portrait 立绘的「风格」字段必须原样使用，sheet/expressions/details 同样内嵌）：' + styleWords,
     '硬性要求（依据优先）：',
     '1. 发色/发型/瞳色/服装/气质/标志物必须来自提供的正文段落，不得凭空发明。',
     '2. 正文未明确写到的项目（如瞳色没写、身高没写），用「未定」标注或直接不写，不要编造数值。',
@@ -1579,13 +1590,17 @@ export async function generateRolePromptKit(
   config: NovelConfig,
   project: ProjectState,
   roleName: string,
+  styleId?: string,
+  filterId?: string,
 ): Promise<RoleRecord['promptKit']> {
   const role = (project.roles ?? []).find(r => r.name === roleName)
   if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
   if (role.imagePrompt === undefined) throw new Error(`角色「${roleName}」还没有形象锚点，请先生成锚点`)
   const rules = project.visualRules ?? []
+  const styleWords = styleKeywords(styleId, filterId)
   const system = [
     '你是一位 AI 绘图提示词工程师。基于给定角色的形象锚点、表情清单与本书视觉规则，输出四类生图提示词（每类 zh+en 各一段）。',
+    '【当前视觉风格】（每类提示词必须内嵌）：' + styleWords,
     '四类：',
     '1. portrait 立绘：正面站立全身人像，3D动漫超精细建模，纯白纯色背景；按字段流组织：身份（男子，角色名，外表年龄）→ 发型发色 → 胡茬 → 眼眸 → 面部 → 气质 → 上身服装分件（含磨损）→ 下身 → 鞋 → 标志物（含细节）→ 收尾（角色设计稿，细节完整展示，无多余杂物，全身完整无裁切）。',
     '2. sheet 四视图：同一角色的 正面/左侧面/右侧面/背面 四视图设定表（character sheet），纯白背景，四个视角分别描述。',
@@ -2442,6 +2457,238 @@ export async function summarizeChapter(
   project.updatedAt = new Date().toISOString()
   saveProject(outputDir, project)
   return chapter.summary
+}
+
+/** 把分镜产出写入项目持久化（按章 upsert）。 */
+function saveChapterStoryboard(project: ProjectState, outputDir: string, entry: ChapterStoryboard): void {
+  if (project.storyboards === undefined) project.storyboards = []
+  const idx = project.storyboards.findIndex(e => e.chapterNo === entry.chapterNo)
+  if (idx === -1) project.storyboards.push(entry)
+  else project.storyboards[idx] = { ...project.storyboards[idx], ...entry }
+  project.updatedAt = new Date().toISOString()
+  saveProject(outputDir, project)
+}
+
+/**
+ * 分镜·导演级：剧情骨架 → 分镜表（镜头级）。
+ * 只做画面层：景别/机位运镜/时长/画面/台词/音效/光效 + 状态连续；禁止改剧情（骨架只读）。
+ */
+export async function generateStoryboardTable(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+  skeleton: StoryboardSkeleton,
+  styleId?: string,
+  filterId?: string,
+): Promise<StoryboardTable> {
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  if (chapter === undefined) throw new Error(`章节 ${chapterNo} 不在计划中`)
+  const body = readChapterFile(outputDir, chapter)
+  if (body === undefined) throw new Error(`章节 ${chapterNo} 的正文文件不存在`)
+  if ((skeleton.beats ?? []).length === 0) throw new Error('骨架为空，请先生成剧情骨架')
+
+
+  // 出场角色锚点：正文中出现过的角色名 + 身份（简短）。
+  const roles = (project.roles ?? [])
+    .filter(r => body.includes(r.name))
+    .slice(0, 8)
+    .map(r => `${r.name}（${r.roleLabel === 'protagonist' ? '主角' : r.roleLabel === 'antagonist' ? '反派' : r.roleLabel === 'female_lead' ? '女主' : '配角'}）：${r.identity ?? ''}`)
+  // 场景卡：仅列名称与定位（正文命中优先，至多 6 个）。
+  const scenes = (project.scenes ?? [])
+    .filter(s => body.includes(s.name))
+    .slice(0, 6)
+    .map(s => `${s.name}：${s.summary ?? ''}`)
+  const rules = (project.visualRules ?? []).map(r => '- ' + r)
+
+  const baseStyle = styleId !== undefined ? findStyle(styleId) : undefined
+  const filterStyle = filterId !== undefined ? findStyle(filterId) : undefined
+  const styleLines: string[] = []
+  if (baseStyle !== undefined) styleLines.push('- 基底风格「' + baseStyle.name + '」：' + baseStyle.keywords)
+  if (filterStyle !== undefined) styleLines.push('- 叠加滤镜「' + filterStyle.name + '」：' + filterStyle.keywords)
+  if (styleLines.length === 0) styleLines.push('- （未选择风格，默认 3D 动漫超精细建模质感）')
+
+  const system = [
+    '你是一位从业 10 年的电影导演兼分镜师，专长网文改编影视化。',
+    '任务：把「剧情骨架」的每一个节拍展开为 1-3 个电影镜头，输出分镜表——只做画面层，禁止新增或改变剧情（骨架是只读输入）。',
+    '输出合法 JSON 对象：{"shots": [{"beatId": "骨架节拍id", "shot": "景别", "camera": "机位与运镜", "duration": 秒数, "visual": "画面内容", "line": "台词/旁白", "sound": "音效", "light": "光效", "prevState": "承接上一镜头结尾状态", "nextState": "本镜头结束状态"}]}',
+    '景别取值：远景/全景/中景/近景/特写。',
+    '硬性要求：',
+    '【视觉风格】（必须内嵌进 visual/light 的画面措辞与光效描述）：',
+    ...styleLines,
+    '1. 按骨架节拍顺序输出镜头，每个节拍至少 1 个镜头，总镜头数 8-25。',
+    '2. 镜头间连续：下一镜头的 prevState 必须与上一镜头的 nextState 一致（人物位置/动作/情绪/服装），禁止瞬移、服装消失、情绪跳变。',
+    '3. visual 必须写明：角色动作 + 表情 + 服装/标志物（标志物来自下方视觉规则与角色锚点，逐镜头保持）。',
+    '4. 台词/音效/光效无则空字符串，不要编造。',
+    '5. duration 1-12 秒。',
+    '6. 所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束，不要输出其他文字。',
+  ].join('\n')
+  const user = [
+    `章节《${chapter.title}》（第 ${chapter.no} 章）`,
+    '==== 剧情骨架（只读，禁止改动） ====',
+    `弧线：${skeleton.arc}`,
+    skeleton.beats.map(b => `[${b.id}] [${b.function}] ${b.event}（情绪：${b.emotion}${b.cause !== undefined ? '；承接：' + b.cause : ''}）`).join('\n'),
+    roles.length > 0 ? '==== 出场角色锚点 ====\n' + roles.join('\n') : '',
+    scenes.length > 0 ? '==== 相关场景 ====\n' + scenes.join('\n') : '',
+    rules.length > 0 ? '==== 本书视觉规则（必须内嵌进 visual） ====\n' + rules.join('\n') : '',
+    '==== 章节正文（画面细节以此为准） ====',
+    body.replace(/^#\s+.*$/m, '').trim().slice(0, 3000),
+  ].filter(s => s !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
+  const raw = parseJsonObject<{ shots?: unknown }>(text)
+  const beatIds = new Set(skeleton.beats.map(b => b.id))
+  const shotKinds = new Set(['远景', '全景', '中景', '近景', '特写'])
+  const shots: StoryboardShot[] = Array.isArray(raw.shots)
+    ? raw.shots
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map((entry, i) => ({
+          id: 's' + (i + 1),
+          beatId: beatIds.has(entry.beatId as string) ? entry.beatId as string : skeleton.beats[0]!.id,
+          shot: shotKinds.has(entry.shot as string) ? entry.shot as string : '中景',
+          camera: typeof entry.camera === 'string' ? entry.camera.trim().slice(0, 80) : '',
+          duration: typeof entry.duration === 'number' && entry.duration >= 1 && entry.duration <= 12 ? Math.round(entry.duration) : 4,
+          visual: typeof entry.visual === 'string' ? entry.visual.trim().slice(0, 300) : '',
+          line: typeof entry.line === 'string' ? entry.line.trim().slice(0, 120) : '',
+          sound: typeof entry.sound === 'string' ? entry.sound.trim().slice(0, 80) : '',
+          light: typeof entry.light === 'string' ? entry.light.trim().slice(0, 80) : '',
+          prevState: typeof entry.prevState === 'string' ? entry.prevState.trim().slice(0, 150) : '',
+          nextState: typeof entry.nextState === 'string' ? entry.nextState.trim().slice(0, 150) : '',
+        }))
+        .filter(s => s.visual !== '')
+    : []
+  if (shots.length === 0) throw new Error('模型未输出有效镜头，请重试')
+  // 覆盖自检：每个节拍至少 1 个镜头（缺失节拍告警）。
+  const covered = new Set(shots.map(s => s.beatId))
+  const missing = skeleton.beats.filter(b => !covered.has(b.id)).map(b => b.id)
+  if (missing.length > 0) {
+    console.warn(`[dsh-novel-forge] storyboard: beat ${missing.join(',')} 无镜头覆盖`)
+  }
+  const table: StoryboardTable = { chapterNo, shots }
+  saveChapterStoryboard(project, outputDir, { chapterNo, table, updatedAt: new Date().toISOString() })
+  return table
+}
+
+/**
+ * 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。
+ * 每镜头一段：风格词块（基底+滤镜）+ 画面内容（角色动作/服装标志物）+ 机位运镜 + 光效。
+ * 提示词聚焦画面与镜头（视频模型无音频，台词/音效不注入）。
+ */
+export async function generateStoryboardPrompts(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+  table: StoryboardTable,
+  styleId?: string,
+  filterId?: string,
+): Promise<StoryboardPrompt[]> {
+  if ((table.shots ?? []).length === 0) throw new Error('分镜表为空，请先生成分镜表')
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  const baseStyle = styleId !== undefined ? findStyle(styleId) : undefined
+  const filterStyle = filterId !== undefined ? findStyle(filterId) : undefined
+  const stylePrefix = [
+    baseStyle?.keywords,
+    filterStyle?.keywords,
+  ].filter((v): v is string => v !== undefined && v !== '').join('，') || '3D动漫，超精细建模，电影光影'
+  const rules = (project.visualRules ?? []).map(r => '- ' + r)
+  const shotLines = table.shots.map(s =>
+    `[${s.id}] 节拍${s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s
+画面：${s.visual}
+台词：${s.line !== '' ? s.line : '（无）'}
+光效：${s.light !== '' ? s.light : '（无）'}
+承接：${s.prevState} → ${s.nextState}`
+  ).join('\n\n')
+  const system = [
+    '你是一位资深影视分镜提示词工程师，熟悉即梦 AI / Seedance 等视频生成模型的中文提示词写法。',
+    '任务：把分镜表的每个镜头写成一段可直接粘贴进视频生成工具的提示词。',
+    '提示词结构（按顺序）：风格词块 → 画面主体（人物动作+表情+服装标志物）→ 机位运镜（含时长感）→ 光效氛围。单段中文 60-140 字，逗号分隔，流畅自然。',
+    '风格词块（必须原样放在每段开头）：' + stylePrefix,
+    '硬性要求：',
+    '1. 只写画面与镜头，禁止写音频/台词配音说明（视频模型无音频）。',
+    '2. 服装/发色/标志物必须沿用镜头表与视觉规则，禁止自行更换。',
+    '3. 运镜用通俗电影词（推近/拉远/跟随/低机位仰拍/过肩/手持晃动/固定机位），不要用分镜术语缩写。',
+    '4. 输出合法 JSON 对象：{"prompts": [{"shotId": "s1", "text": "..."}]}，所有镜头都要有，顺序一致。',
+    '5. 字符串内不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const user = [
+    `章节《${chapter?.title ?? ''}》（第 ${chapterNo} 章）`,
+    rules.length > 0 ? '本书视觉规则（必须遵守）：\n' + rules.join('\n') : '',
+    '==== 分镜表 ====',
+    shotLines,
+    '只输出 JSON 对象。',
+  ].filter(x => x !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
+  const raw = parseJsonObject<{ prompts?: unknown }>(text)
+  const shotIds = new Set(table.shots.map(s => s.id))
+  const prompts: StoryboardPrompt[] = Array.isArray(raw.prompts)
+    ? raw.prompts
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map(entry => ({
+          shotId: shotIds.has(entry.shotId as string) ? entry.shotId as string : '',
+          text: typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '',
+        }))
+        .filter(x => x.shotId !== '' && x.text !== '')
+    : []
+  if (prompts.length === 0) throw new Error('模型未输出有效提示词，请重试')
+  saveChapterStoryboard(project, outputDir, { chapterNo, prompts, updatedAt: new Date().toISOString() })
+  return prompts
+}
+
+
+/**
+ * 分镜·编剧级：单章 → 剧情骨架（节拍链）。
+ * 只做故事层（事件/情绪/功能/因果），不做画面；导演级分镜在其上展开。
+ */
+export async function generateStoryboardSkeleton(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+): Promise<StoryboardSkeleton> {
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  if (chapter === undefined) throw new Error(`章节 ${chapterNo} 不在计划中`)
+  const body = readChapterFile(outputDir, chapter)
+  if (body === undefined) throw new Error(`章节 ${chapterNo} 的正文文件不存在`)
+  const system = [
+    '你是一位从业 15 年的电影编剧，专长网文改编影视化，深谙三幕结构与节拍（beat）写作。',
+    '任务：把这一章改编成影视化「剧情骨架」——只做故事层，不做画面。',
+    '输出合法 JSON 对象：{"arc": "本章弧线一句话（起承转合，20-60字）", "beats": [{"event": "事件一句话（发生了什么）", "emotion": "人物情绪走向（如 压抑→隐忍→惊惧）", "function": "铺垫|冲突|转折|高潮|收束|伏笔|人物塑造", "cause": "承接上一节拍的原因（可省略）"}]}',
+    '硬性要求：',
+    '1. beats 数量 4-9 个，严格按时间顺序，因果链完整：前一个 beat 的结果是后一个 beat 的原因。',
+    '2. 必须覆盖本章全部剧情要点与正文关键事件，遗漏关键事件视为失败。',
+    '3. 只输出剧情骨架，禁止写画面描写、机位运镜、台词细节、音效（那是导演阶段的事）。',
+    '4. 所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+    '5. 直接输出 JSON 本身，不要输出思考过程或其他文字。',
+  ].join('\n')
+  const user = [
+    `章节《${chapter.title}》（第 ${chapter.no} 章）`,
+    `剧情要点：${chapter.beats !== undefined && chapter.beats !== '' ? chapter.beats : '（未填写）'}`,
+    '==================== 章节正文 ====================',
+    body.replace(/^#\s+.*$/m, '').trim(),
+  ].join('\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
+  const raw = parseJsonObject<{ arc?: unknown; beats?: unknown }>(text)
+  const arc = typeof raw.arc === 'string' ? raw.arc.trim().slice(0, 200) : ''
+  const functions = new Set(['铺垫', '冲突', '转折', '高潮', '收束', '伏笔', '人物塑造'])
+  const beats: StoryboardBeat[] = Array.isArray(raw.beats)
+    ? raw.beats
+        .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
+        .map((entry, i) => ({
+          id: 'b' + (i + 1),
+          event: typeof entry.event === 'string' ? entry.event.trim().slice(0, 200) : '',
+          emotion: typeof entry.emotion === 'string' ? entry.emotion.trim().slice(0, 100) : '',
+          function: functions.has(entry.function as string) ? entry.function as string : '铺垫',
+          cause: typeof entry.cause === 'string' && entry.cause.trim() !== '' ? entry.cause.trim().slice(0, 150) : undefined,
+        }))
+        .filter(b => b.event !== '')
+    : []
+  if (beats.length === 0) throw new Error('模型未输出有效节拍链，请重试')
+  const skeleton: StoryboardSkeleton = { chapterNo, arc: arc !== '' ? arc : '（本章弧线未生成）', beats }
+  saveChapterStoryboard(project, outputDir, { chapterNo, skeleton, updatedAt: new Date().toISOString() })
+  return skeleton
 }
 
 /**
