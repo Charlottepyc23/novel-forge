@@ -98,6 +98,7 @@ export declare class NovelApi {
         no: number;
     }>;
     /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+    imageTest(req: import('../protocol.ts').ImageTestRequest): Promise<import('../protocol.ts').ImageTestResponse>;
     roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse>;
     /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
     scenes(req: import('../protocol.ts').ScenesRequest): Promise<import('../protocol.ts').ScenesResponse>;

@@ -8,7 +8,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import z from 'schemastery';
-import type { NovelConfig } from './protocol.ts';
+import type { ImageModelConfig, NovelConfig } from './protocol.ts';
 /** Stable cordis plugin name. */
 export declare const name = "novel-forge";
 /** Services required before the novel-forge surfaces can mount. */
@@ -49,11 +49,13 @@ export interface Config {
     autoAuthorReview?: boolean;
     /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
     autoReviewAfterRevise?: boolean;
-    /** 豆包/Seedream 生图 API Key。 */
+    /** 生图模型库（多套并存，启用一条生效）。 */
+    imageModels?: ImageModelConfig[];
+    /** 豆包/Seedream 生图 API Key（旧字段，兼容迁移用）。 */
     imageApiKey?: string;
-    /** 豆包/Seedream 生图模型 ID。 */
+    /** 豆包/Seedream 生图模型 ID（旧字段，兼容迁移用）。 */
     imageApiModel?: string;
-    /** 是否启用豆包生图（默认关）。 */
+    /** 是否启用豆包生图（旧字段，兼容迁移用）。 */
     imageApiEnabled?: boolean;
 }
 export declare const Config: z<Config>;

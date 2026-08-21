@@ -95,6 +95,8 @@ import {
   type StoryboardTableRequest,
   type StoryboardTableResponse,
   type StoryboardPromptsRequest,
+  type ImageTestRequest,
+  type ImageTestResponse,
   type StoryboardPromptsResponse,
   type StyleEngineRequest,
   type SummaryRequest,
@@ -146,6 +148,7 @@ import {
   reverseOutlineFromChapters,
   breakdownBook,
   generateRoleReferenceImage,
+  testImageEndpoint,
   generateStoryboardSkeleton,
   generateStoryboardTable,
   generateStoryboardPrompts,
@@ -1854,7 +1857,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
           return
         }
         try {
-          const imageUrl = await generateRoleReferenceImage(ctx, config, project, config.outputDir, name, body?.style ?? '')
+          const imageUrl = await generateRoleReferenceImage(ctx, config, project, config.outputDir, name, body?.style ?? '', body?.modelId)
           project.updatedAt = new Date().toISOString()
           saveProject(config.outputDir, project)
           writeJson(res, 200, { roles: project.roles, imageUrl } satisfies RolesResponse)
@@ -2188,6 +2191,27 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
         writeJson(res, 200, { prompts } satisfies StoryboardPromptsResponse)
       } catch (error) {
         writeJson(res, 500, { error: `视频提示词生成失败：${(error as Error).message}` })
+      }
+    },
+  }
+
+  // --------------------------------------------------------- image-test
+  /** 生图接口连通性测试：GET {baseURL}/models + 计时（设置页模型条目用）。 */
+  const imageTestRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.imageTest,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const body = await readJsonBody<ImageTestRequest>(req)
+      if (body?.baseURL === undefined || body?.apiKey === undefined) {
+        writeJson(res, 400, { error: 'baseURL 与 apiKey 必填' })
+        return
+      }
+      try {
+        const result = await testImageEndpoint(body.baseURL, body.apiKey, body.model)
+        writeJson(res, 200, result satisfies ImageTestResponse)
+      } catch (error) {
+        writeJson(res, 500, { error: `测试失败：${(error as Error).message}` })
       }
     },
   }
@@ -2576,6 +2600,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     manhuaPlansRoute,
     styleImageRoute,
     storyboardSkeletonRoute,
+    imageTestRoute,
     storyboardTableRoute,
     storyboardPromptsRoute,
     breakdownRoute,

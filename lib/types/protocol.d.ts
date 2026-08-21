@@ -49,6 +49,8 @@ export declare const NOVEL_API: {
     readonly storyboardTable: "/api/dsh-novel-forge/storyboard/table";
     /** 分镜·提示词级：分镜表 → 即梦可粘贴视频提示词。 */
     readonly storyboardPrompts: "/api/dsh-novel-forge/storyboard/prompts";
+    /** 生图接口连通性测试（设置页每个模型条目用）。 */
+    readonly imageTest: "/api/dsh-novel-forge/image-test";
     /** 重置项目（可选携带新大纲）：清空设定/卷/章节/伏笔/资产/事实库。 */
     readonly reset: "/api/dsh-novel-forge/reset";
     /** 全书一致性质检：LLM 扫描已生成章节，输出矛盾问题清单。 */
@@ -825,10 +827,31 @@ export interface RolesRequest {
     label?: string;
     /** op='imageGenerate' 时的漫画风格预设 id（用于统一角色图与漫画页风格）。 */
     style?: string;
+    /** op='imageGenerate' 时指定生图模型库条目 id（缺省用启用条目）。 */
+    modelId?: string;
     /** op='visual' / op='promptKit' 时的漫剧基底风格 id（角色图按方案风格重出）。 */
     styleId?: string;
     /** op='visual' / op='promptKit' 时的可选滤镜风格 id。 */
     filterId?: string;
+}
+/** POST /image-test 请求：测一个生图接口的连通性与延迟（不落盘）。 */
+export interface ImageTestRequest {
+    /** OpenAI 兼容生图接口地址。 */
+    baseURL: string;
+    /** API Key。 */
+    apiKey: string;
+    /** 模型 id（顺带校验是否在接口模型列表里，可选）。 */
+    model?: string;
+}
+/** POST /image-test 响应。 */
+export interface ImageTestResponse {
+    ok: boolean;
+    /** 连通延迟（毫秒）。 */
+    ms?: number;
+    /** 失败原因。 */
+    message?: string;
+    /** 模型 id 是否出现在接口的模型列表（探测成功时才有）。 */
+    modelFound?: boolean;
 }
 /** POST /roles 响应。 */
 export interface RolesResponse {
@@ -973,6 +996,21 @@ export interface ProjectState {
     createdAt: string;
     updatedAt: string;
 }
+/** 生图模型配置（模型库条目，可多套并存，启用一条生效）。 */
+export interface ImageModelConfig {
+    /** 条目 id（本地唯一）。 */
+    id: string;
+    /** 展示名（如「豆包 Seedream」「即梦」）。 */
+    name: string;
+    /** OpenAI 兼容生图接口地址（如 https://ark.cn-beijing.volces.com/api/v3）。 */
+    baseURL: string;
+    /** API Key。 */
+    apiKey: string;
+    /** 生图模型 id（如 doubao-seedream-5-0-pro-260628）。 */
+    model: string;
+    /** 是否启用（同时只启用一条）。 */
+    enabled: boolean;
+}
 /** Runtime config surface exposed to the panel (subset of plugin Config). */
 export interface NovelConfig {
     /** Absolute path of the default docx outline to load. */
@@ -999,11 +1037,15 @@ export interface NovelConfig {
     autoAuthorReview: boolean;
     /** 修订/润色产出草稿后是否自动附带一次 AI 审查（工作区显示新稿评分与剩余问题）。 */
     autoReviewAfterRevise: boolean;
-    /** 豆包/Seedream 生图 API Key（保存在服务端配置，不暴露给前端明文回显）。 */
+    /** 生图模型库（多套并存，启用一条生效；旧 imageApiKey/imageApiModel 自动迁移为一条）。 */
+    imageModels?: ImageModelConfig[];
+    /** 运行时生效的生图接口地址（= 启用条目，兼容旧代码读取）。 */
+    imageBaseUrl?: string;
+    /** 运行时生效的生图 API Key（= 启用条目，兼容旧代码读取）。 */
     imageApiKey?: string;
-    /** 豆包/Seedream 生图模型 ID（如 doubao-seedream-5-0-pro-260628）。 */
+    /** 运行时生效的生图模型 id（= 启用条目，兼容旧代码读取）。 */
     imageApiModel?: string;
-    /** 是否启用豆包生图（默认关，避免误调用付费 API）。 */
+    /** 是否启用生图（= 存在启用条目）。 */
     imageApiEnabled?: boolean;
 }
 /** GET /status response. */
@@ -1242,6 +1284,8 @@ export interface ConfigPatch {
     imageApiKey?: string;
     imageApiModel?: string;
     imageApiEnabled?: boolean;
+    /** 生图模型库（完整替换保存）。 */
+    imageModels?: ImageModelConfig[];
 }
 /** One assistant conversation message (persisted per project). */
 export interface AssistantMessage {

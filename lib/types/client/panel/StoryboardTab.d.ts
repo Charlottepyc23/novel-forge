@@ -10,6 +10,6 @@ export declare function StoryboardTab({ api, project, chapters, onProjectChanged
     styleId?: string;
     /** 可选滤镜风格 id。 */
     filterId?: string;
-    /** 上报到「工作进度」控制台（分镜三步生成）。 */
+    /** 上报到「AI进度」控制台（分镜三步生成）。 */
     onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void;
 }): import("react").JSX.Element;

@@ -136,7 +136,14 @@ export declare function suggestOutlines(ctx: Context, config: NovelConfig, idea:
  *  @param budgetTokens token 预算上限（超过即截断章节取样）。
  */
 export declare function breakdownBook(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, scope?: string, preset?: 'quick' | 'standard', budgetTokens?: number): Promise<BreakdownResponse>;
-export declare function generateRoleReferenceImage(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, name: string, style?: string): Promise<string>;
+/** 生图接口连通性测试（设置页模型条目用）：GET {baseURL}/models，计时返回延迟。 */
+export declare function testImageEndpoint(baseURL: string, apiKey: string, model?: string): Promise<{
+    ok: boolean;
+    ms: number;
+    message?: string;
+    modelFound?: boolean;
+}>;
+export declare function generateRoleReferenceImage(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, name: string, style?: string, modelId?: string): Promise<string>;
 /** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
 export declare function analyzePlotlineHealth(ctx: Context, config: NovelConfig, project: ProjectState): Promise<PlotlineHealthReport>;
 /** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */

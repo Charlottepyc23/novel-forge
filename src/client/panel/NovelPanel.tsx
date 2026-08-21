@@ -9,6 +9,7 @@ import type { ReactElement } from 'react'
 import type { NovelApi } from '../api.ts'
 import type { PanelController } from './controller.ts'
 import { tt } from './helpers.ts'
+import { BarChart3, Book, BookMarked, BookOpen, Brain, Clapperboard, Factory, FileText, Folder, GitBranch, Library, MessageSquare, Palette, PenLine, PlugZap, RotateCcw, ScrollText, Search, Settings, Sparkles, Wrench } from 'lucide-react'
 import { AssistantTab } from './AssistantTab.tsx'
 import { AssetsTab } from './AssetsTab.tsx'
 import { ShelfView } from './ShelfView.tsx'
@@ -26,6 +27,7 @@ import type {
   BookshelfSnapshot,
   ChapterPlan,
   Foreshadow,
+  ImageModelConfig,
   JobFrame,
   NovelConfig,
   Plotline,
@@ -67,45 +69,54 @@ interface ProgressLine {
 }
 
 /** The navigation groups (AI-Novel-Writing-Assistant style grouping). */
-const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArray<{ id: NovelTab; label: string; icon: string }> }> = [
+const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArray<{ id: NovelTab; label: string; icon: ReactElement }> }> = [
   {
     id: 'create',
     label: '创作',
     items: [
-      { id: 'workflow', label: tt('tab.workflow'), icon: '🛠️' },
-      { id: 'overview', label: tt('tab.overview'), icon: '📄' },
-      { id: 'blurb', label: '简介 / 封面', icon: '📖' },
-      { id: 'plan', label: tt('tab.plan'), icon: '📚' },
-      { id: 'plotlines', label: '长线管理', icon: '📜' },
-      { id: 'book', label: '本书设定', icon: '📚' },
+      { id: 'workflow', label: tt('tab.workflow'), icon: <Wrench size={16} /> },
+      { id: 'overview', label: tt('tab.overview'), icon: <FileText size={16} /> },
+      { id: 'blurb', label: '简介 / 封面', icon: <BookOpen size={16} /> },
+      { id: 'plan', label: tt('tab.plan'), icon: <BookMarked size={16} /> },
+      { id: 'plotlines', label: '长线管理', icon: <ScrollText size={16} /> },
+      { id: 'book', label: '本书设定', icon: <Library size={16} /> },
     ],
   },
   {
     id: 'tools',
     label: '工具',
     items: [
-      { id: 'assistant', label: tt('tab.assistant'), icon: '💬' },
-      { id: 'progress', label: '工作进度', icon: '📊' },
-      { id: 'breakdown', label: '拆书分析', icon: '🔍' },
-      { id: 'manhua', label: '漫剧工作台', icon: '🎬' },
-      { id: 'run', label: '生产单', icon: '🏭' },
+      { id: 'assistant', label: tt('tab.assistant'), icon: <MessageSquare size={16} /> },
+      { id: 'progress', label: 'AI进度', icon: <BarChart3 size={16} /> },
+      { id: 'breakdown', label: '拆书分析', icon: <Search size={16} /> },
+      { id: 'manhua', label: '漫剧工作台', icon: <Clapperboard size={16} /> },
+      { id: 'run', label: '生产单', icon: <Factory size={16} /> },
     ],
   },
   {
     id: 'assets',
     label: '资产',
     items: [
-      { id: 'assets', label: '创作资产', icon: '🧰' },
+      { id: 'assets', label: '创作资产', icon: <Wrench size={16} /> },
     ],
   },
 ]
 
 /** Settings tab — pinned to the bottom of the nav rail. */
-const SETTINGS_TAB: { id: NovelTab; label: string; icon: string } = { id: 'settings', label: tt('tab.settings'), icon: '⚙️' }
+const SETTINGS_TAB: { id: NovelTab; label: string; icon: ReactElement } = { id: 'settings', label: tt('tab.settings'), icon: <Settings size={16} /> }
 
 /** Common DeepSeek model presets shown in settings; users can also type any model id. */
 const MODEL_PRESETS = ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'] as const
 const REASONING_OPTIONS = ['off', 'low', 'high', 'max'] as const
+
+/** 设置页内子导航分组。 */
+const SETTINGS_SECTIONS: ReadonlyArray<{ id: 'model' | 'writing' | 'image' | 'files' | 'appearance'; label: string; icon: ReactElement }> = [
+  { id: 'model', label: '模型与推理', icon: <Brain size={16} /> },
+  { id: 'writing', label: '写作与审稿', icon: <PenLine size={16} /> },
+  { id: 'image', label: '生图模型', icon: <Palette size={16} /> },
+  { id: 'files', label: '路径与文件', icon: <Folder size={16} /> },
+  { id: 'appearance', label: '外观与主题', icon: <Sparkles size={16} /> },
+]
 
 /** 构建时注入的插件版本（tsdown define 替换为字符串字面量）。 */
 declare const __NOVEL_FORGE_VERSION__: string | undefined
@@ -382,6 +393,50 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setPanelTheme(next)
     try { window.localStorage.setItem('dsh-novel-forge.theme', next) } catch { /* ignore */ }
   }
+  /** 显示模式（跟随系统 / 强制浅色 / 强制深色），localStorage 记忆，只作用于小说工坊面板。 */
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.theme.mode')
+      return v === 'light' || v === 'dark' ? v : 'system'
+    } catch { return 'system' }
+  })
+  const changeThemeMode = (next: 'system' | 'light' | 'dark'): void => {
+    setThemeMode(next)
+    try { window.localStorage.setItem('dsh-novel-forge.theme.mode', next) } catch { /* ignore */ }
+  }
+  /** 界面密度（舒适 / 紧凑 / 宽松），localStorage 记忆。 */
+  const [themeDensity, setThemeDensity] = useState<'comfort' | 'compact' | 'spacious'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.theme.density')
+      return v === 'compact' || v === 'spacious' ? v : 'comfort'
+    } catch { return 'comfort' }
+  })
+  const changeThemeDensity = (next: 'comfort' | 'compact' | 'spacious'): void => {
+    setThemeDensity(next)
+    try { window.localStorage.setItem('dsh-novel-forge.theme.density', next) } catch { /* ignore */ }
+  }
+  /** 恢复默认主题：清掉主题/模式/密度记忆。 */
+  const resetTheme = (): void => {
+    try {
+      window.localStorage.removeItem('dsh-novel-forge.theme')
+      window.localStorage.removeItem('dsh-novel-forge.theme.mode')
+      window.localStorage.removeItem('dsh-novel-forge.theme.density')
+    } catch { /* ignore */ }
+    setPanelTheme('liquid')
+    setThemeMode('system')
+    setThemeDensity('comfort')
+  }
+  /** 设置页内子导航：当前分组（localStorage 记忆）。 */
+  const [settingsTab, setSettingsTab] = useState<'model' | 'writing' | 'image' | 'files' | 'appearance'>(() => {
+    try {
+      const v = window.localStorage.getItem('dsh-novel-forge.settings.tab')
+      return v === 'writing' || v === 'image' || v === 'files' || v === 'appearance' ? v : 'model'
+    } catch { return 'model' }
+  })
+  const changeSettingsTab = (next: 'model' | 'writing' | 'image' | 'files' | 'appearance'): void => {
+    setSettingsTab(next)
+    try { window.localStorage.setItem('dsh-novel-forge.settings.tab', next) } catch { /* ignore */ }
+  }
   /** 有未采纳草稿的章节号（refresh 后检测到遗留草稿时提示）。 */
   const [draftNo, setDraftNo] = useState<number | null>(null)
   /** 大纲页「更新大纲」编辑区是否展开。 */
@@ -509,9 +564,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   }, [])
   /** AI 助手悬浮窗：是否打开。 */
   const [assistantOpen, setAssistantOpen] = useState(false)
-  /** 工作进度悬浮窗：是否打开。 */
+  /** AI进度悬浮窗：是否打开。 */
   const [progressOpen, setProgressOpen] = useState(false)
-  /** 工作进度悬浮窗位置（localStorage 记忆）。 */
+  /** AI进度悬浮窗位置（localStorage 记忆）。 */
   const [progressPos, setProgressPos] = useState(() => {
     try {
       const raw = window.localStorage.getItem('dsh-novel-forge.progress.float')
@@ -522,7 +577,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } catch { /* ignore */ }
     return { x: 60, y: 120 }
   })
-  /** 工作进度悬浮窗尺寸（localStorage 记忆）。 */
+  /** AI进度悬浮窗尺寸（localStorage 记忆）。 */
   const [progressSize, setProgressSize] = useState(() => {
     try {
       const raw = window.localStorage.getItem('dsh-novel-forge.progress.size')
@@ -555,7 +610,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } catch { /* ignore */ }
     return { w: 420, h: 460 }
   })
-  /** 拖拽/缩放状态（target 区分 AI 助手 / 工作进度两个悬浮窗）。 */
+  /** 拖拽/缩放状态（target 区分 AI 助手 / AI进度两个悬浮窗）。 */
   const dragState = useRef<{ type: 'move' | 'resize'; target: 'assistant' | 'progress'; startX: number; startY: number; origX: number; origY: number; origW: number; origH: number } | null>(null)
 
   /** 悬浮窗位置/尺寸持久化。 */
@@ -1798,7 +1853,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
       lastDeltaChars.current = 0
       liveChars.current = 0
       currentJobNo.current = frame.no
-      // 任务开始：不自动弹出进度悬浮窗（导航「工作进度」显示呼吸绿点提示，
+      // 任务开始：不自动弹出进度悬浮窗（导航「AI进度」显示呼吸绿点提示，
       // 想看进度时手动点导航打开；liveBar 数据照常累积）。
       setProject(prev => prev === null ? prev : {
         ...prev,
@@ -2010,6 +2065,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         imageApiKey: configDraft.imageApiKey,
         imageApiModel: configDraft.imageApiModel,
         imageApiEnabled: configDraft.imageApiEnabled ?? false,
+        imageModels: configDraft.imageModels ?? [],
       })
       setConfig(result.config)
       setConfigDraft(result.config)
@@ -2021,6 +2077,42 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     } finally {
       setBusy(false)
     }
+  }
+
+  /** 生图接口测试状态（模型 id → 结果）。 */
+  const [imageTestState, setImageTestState] = useState<Record<string, { testing: boolean; ok?: boolean; ms?: number; message?: string; modelFound?: boolean }>>({})
+  /** 测试一条生图模型：连通 + 延迟。 */
+  const testImageModel = async (m: ImageModelConfig): Promise<void> => {
+    if (m.baseURL.trim() === '' || m.apiKey.trim() === '') {
+      setImageTestState(prev => ({ ...prev, [m.id]: { testing: false, ok: false, message: '请先填写接口地址和 API Key' } }))
+      return
+    }
+    setImageTestState(prev => ({ ...prev, [m.id]: { testing: true } }))
+    try {
+      const r = await api.imageTest({ baseURL: m.baseURL, apiKey: m.apiKey, model: m.model })
+      setImageTestState(prev => ({ ...prev, [m.id]: { testing: false, ok: r.ok, ms: r.ms, message: r.message } }))
+    } catch (err) {
+      setImageTestState(prev => ({ ...prev, [m.id]: { testing: false, ok: false, message: (err as Error).message } }))
+    }
+  }
+  /** 更新一条生图模型配置。 */
+  const updateImageModel = (id: string, patch: Partial<ImageModelConfig>): void => {
+    setConfigDraft(prev => prev === null ? prev : { ...prev, imageModels: (prev.imageModels ?? []).map(m => m.id === id ? { ...m, ...patch } : m) })
+  }
+  /** 新增一条生图模型（第一条默认启用）。 */
+  const addImageModel = (): void => {
+    setConfigDraft(prev => prev === null ? prev : {
+      ...prev,
+      imageModels: [...(prev.imageModels ?? []), { id: 'img-' + Date.now().toString(36), name: '', baseURL: '', apiKey: '', model: '', enabled: (prev.imageModels ?? []).length === 0 }],
+    })
+  }
+  /** 删除一条生图模型。 */
+  const removeImageModel = (id: string): void => {
+    setConfigDraft(prev => prev === null ? prev : { ...prev, imageModels: (prev.imageModels ?? []).filter(m => m.id !== id) })
+  }
+  /** 启用一条（其余自动停用）。 */
+  const enableImageModel = (id: string): void => {
+    setConfigDraft(prev => prev === null ? prev : { ...prev, imageModels: (prev.imageModels ?? []).map(m => ({ ...m, enabled: m.id === id })) })
   }
 
   /** Export the book. */
@@ -2274,7 +2366,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
   })()
 
   return (
-    <div className={css.panel} data-nf-theme={panelTheme}>
+    <div className={css.panel} data-nf-theme={panelTheme} data-nf-mode={themeMode === 'system' ? undefined : themeMode} data-nf-density={themeDensity}>
       {viewMode === 'shelf' ? (
         /* 书架首页：默认视图，选择一本书进入工作台或阅读页 */
         <ShelfView
@@ -2376,7 +2468,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   {tab.id === 'workflow' && chapters.length > 0 && (
                     <span className={`${css.navTabBadge} ${css.navTabBadgeDone}`}>{journeyPercent}%</span>
                   )}
-                  {/* 任务进行中：工作进度导航显示呼吸绿点（悬停看任务名），不自动弹窗 */}
+                  {/* 任务进行中：AI进度导航显示呼吸绿点（悬停看任务名），不自动弹窗 */}
                   {tab.id === 'progress' && busy && (
                     <span
                       className={`${css.navTabBadge} ${css.navTabBadgeLive}`}
@@ -2914,7 +3006,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
 
-            {/* 待办队列（活动输出已移入「工具 → 工作进度」悬浮窗） */}
+            {/* 待办队列（活动输出已移入「工具 → AI进度」悬浮窗） */}
             <div className={css.card}>
               <span className={css.cardTitle}>待办队列</span>
               {todos.length === 0 ? (
@@ -3690,236 +3782,302 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
 
         {activeTab === 'settings' && configDraft !== null && (
           <>
-            {/* ① 路径与输出 */}
-            <div className={`${css.card} ${css.settingsCard}`}>
-              <span className={css.cardTitle}>📁 路径与输出</span>
-              <div className={css.field}>
-                <label className={css.fieldLabel}>{tt('settings.outlinePath')}</label>
-                <input className={css.input} value={configDraft.outlinePath} onChange={e => { setConfigDraft({ ...configDraft, outlinePath: e.target.value }) }} />
-              </div>
-              <div className={css.field}>
-                <label className={css.fieldLabel}>{tt('settings.outputDir')}</label>
-                <input className={css.input} value={configDraft.outputDir} onChange={e => { setConfigDraft({ ...configDraft, outputDir: e.target.value }) }} />
-              </div>
-              <div className={css.row}>
-                <button type="button" className={css.button} onClick={() => { void api.openFolder() }}>{tt('settings.openFolder')}</button>
-              </div>
-            </div>
-
-            {/* ② 模型与推理 */}
-            <div className={`${css.card} ${css.settingsCard}`}>
-              <span className={css.cardTitle}>🤖 模型与推理</span>
-              <div className={css.row} style={{ alignItems: 'flex-start' }}>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.provider')}</label>
-                  <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
-                </div>
-                <div className={css.field} style={{ flex: 1.4 }}>
-                  <label className={css.fieldLabel}>{tt('settings.model')}</label>
-                  <select
-                    className={css.input}
-                    value={modelCustomMode ? '__custom__' : configDraft.model}
-                    onChange={e => {
-                      const v = e.target.value
-                      if (v === '__custom__') {
-                        setModelCustomMode(true)
-                      } else {
-                        setModelCustomMode(false)
-                        setConfigDraft({ ...configDraft, model: v })
-                      }
-                    }}
-                  >
-                    {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
-                    <option value="__custom__">{tt('settings.modelCustom')}</option>
-                  </select>
-                  {modelCustomMode && (
-                    <input
-                      className={css.input}
-                      style={{ marginTop: 6 }}
-                      value={configDraft.model}
-                      placeholder={tt('settings.modelCustomPlaceholder')}
-                      onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
-                    />
-                  )}
-                </div>
-              </div>
-              <div className={css.row} style={{ alignItems: 'flex-start' }}>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.reasoningEffort')}</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.reasoningEffort ?? 'off'}
-                    onChange={e => { setConfigDraft({ ...configDraft, reasoningEffort: e.target.value as NovelConfig['reasoningEffort'] }) }}
-                  >
-                    {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
-                  </select>
-                  <span className={css.meta}>{tt('settings.reasoningHint')}</span>
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.analysisReasoning')}</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.analysisReasoning ?? 'low'}
-                    onChange={e => { setConfigDraft({ ...configDraft, analysisReasoning: e.target.value as NovelConfig['analysisReasoning'] }) }}
-                  >
-                    {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
-                  </select>
-                  <span className={css.meta}>{tt('settings.analysisReasoningHint')}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* ③ 生图（豆包） */}
-            <div className={`${css.card} ${css.settingsCard}`}>
-              <span className={css.cardTitle}>🎨 生图（豆包）</span>
-              <div className={css.row}>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>豆包 API Key（生图）</label>
-                  <input className={css.input} type="password" placeholder="ark-..." value={configDraft.imageApiKey ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiKey: e.target.value }) }} />
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>豆包生图模型</label>
-                  <input className={css.input} placeholder="doubao-seedream-5-0-pro-260628" value={configDraft.imageApiModel ?? ''} onChange={e => { setConfigDraft({ ...configDraft, imageApiModel: e.target.value }) }} />
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>启用豆包生图</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.imageApiEnabled ? '1' : '0'}
-                    onChange={e => { setConfigDraft({ ...configDraft, imageApiEnabled: e.target.value === '1' }) }}
-                  >
-                    <option value="0">关（默认）</option>
-                    <option value="1">开</option>
-                  </select>
-                  <span className={css.meta}>开启后角色详情显示「豆包生成」参考图按钮</span>
-                </div>
-              </div>
-            </div>
-
-            {/* ④ 写作与审稿参数 */}
-            <div className={`${css.card} ${css.settingsCard}`}>
-              <span className={css.cardTitle}>✍️ 写作与审稿参数</span>
-              <div className={css.row}>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
-                  <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.maxTokens')}</label>
-                  <input className={css.input} type="number" min={2000} max={64000} value={configDraft.maxTokens} onChange={e => { setConfigDraft({ ...configDraft, maxTokens: Number(e.target.value) }) }} />
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.editorFontSize')}</label>
-                  <select
-                    className={css.input}
-                    value={editorFontSize}
-                    onChange={e => { changeEditorFontSize(Number(e.target.value)) }}
-                  >
-                    {[12, 13, 14, 15, 16, 18, 20, 22, 24].map(v => (
-                      <option key={v} value={v}>{v}px</option>
-                    ))}
-                  </select>
-                  <span className={css.meta}>{tt('settings.editorFontSizeHint')}</span>
-                </div>
-              </div>
-              <div className={css.row}>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.reviewPassScore')}</label>
-                  <input className={css.input} type="number" min={0} max={100} value={configDraft.reviewPassScore} onChange={e => { setConfigDraft({ ...configDraft, reviewPassScore: Number(e.target.value) }) }} />
-                  <span className={css.meta}>通过判定：综合评分 ≥ 此分数（默认 70），或无 high 级问题且评分 ≥ 60；建议设 60-80。</span>
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.autoReview')}</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.autoReview ? '1' : '0'}
-                    onChange={e => { setConfigDraft({ ...configDraft, autoReview: e.target.value === '1' }) }}
-                  >
-                    <option value="1">✓ 是</option>
-                    <option value="0">✗ 否</option>
-                  </select>
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.autoAuthorReview')}</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.autoAuthorReview ? '1' : '0'}
-                    onChange={e => { setConfigDraft({ ...configDraft, autoAuthorReview: e.target.value === '1' }) }}
-                  >
-                    <option value="1">✓ 是</option>
-                    <option value="0">✗ 否</option>
-                  </select>
-                  <span className={css.meta}>{tt('settings.autoAuthorReviewHint')}</span>
-                </div>
-                <div className={css.field} style={{ flex: 1 }}>
-                  <label className={css.fieldLabel}>{tt('settings.autoReviewAfterRevise')}</label>
-                  <select
-                    className={css.input}
-                    value={configDraft.autoReviewAfterRevise ? '1' : '0'}
-                    onChange={e => { setConfigDraft({ ...configDraft, autoReviewAfterRevise: e.target.value === '1' }) }}
-                  >
-                    <option value="1">✓ 是</option>
-                    <option value="0">✗ 否</option>
-                  </select>
-                  <span className={css.meta}>{tt('settings.autoReviewAfterReviseHint')}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* ⑤ 保存与导出 */}
-            <div className={`${css.card} ${css.settingsCard}`}>
-              <div className={css.row}>
-                <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
-                  {tt('settings.save')}
-                </button>
+            {/* 设置页内子导航（大容器） */}
+            <div className={`${css.card} ${css.settingsCard}`} style={{ padding: '20px 22px', gap: 14 }}>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                <span className={css.cardTitle} style={{ fontSize: 20, fontWeight: 700 }}>⚙️ 设置</span>
                 <span className={css.meta}>当前：{config?.provider} / {config?.model} · {config?.outputDir}</span>
               </div>
-              <div className={css.row}>
-                <span className={css.cardTitle}>{tt('settings.export')}</span>
-                <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('txt') }}>
-                  {tt('settings.exportTxt')}
-                </button>
-                <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('md') }}>
-                  {tt('settings.exportMd')}
-                </button>
+              <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
+                {SETTINGS_SECTIONS.map(s => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className={`${css.button} ${settingsTab === s.id ? css.buttonPrimary : ''}`}
+                    style={{ fontSize: 14, padding: '8px 12px', flex: 1, minWidth: 104, justifyContent: 'center' }}
+                    onClick={() => { changeSettingsTab(s.id) }}
+                  >
+                    {s.icon} {s.label}
+                  </button>
+                ))}
               </div>
             </div>
+
+            {settingsTab === 'model' && (
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 26 }}>
+                <span className={css.cardTitle}><Brain size={18} style={{ verticalAlign: -3 }} /> 模型与推理</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.provider')}</label>
+                    <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.model')}</label>
+                    <select
+                      className={css.input}
+                      value={modelCustomMode ? '__custom__' : configDraft.model}
+                      onChange={e => {
+                        const v = e.target.value
+                        if (v === '__custom__') {
+                          setModelCustomMode(true)
+                        } else {
+                          setModelCustomMode(false)
+                          setConfigDraft({ ...configDraft, model: v })
+                        }
+                      }}
+                    >
+                      {MODEL_PRESETS.map(m => <option key={m} value={m}>{m}</option>)}
+                      <option value="__custom__">{tt('settings.modelCustom')}</option>
+                    </select>
+                    {modelCustomMode && (
+                      <input
+                        className={css.input}
+                        style={{ marginTop: 6 }}
+                        value={configDraft.model}
+                        placeholder={tt('settings.modelCustomPlaceholder')}
+                        onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
+                      />
+                    )}
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.reasoningEffort')}</label>
+                    <select
+                      className={css.input}
+                      value={configDraft.reasoningEffort ?? 'off'}
+                      onChange={e => { setConfigDraft({ ...configDraft, reasoningEffort: e.target.value as NovelConfig['reasoningEffort'] }) }}
+                    >
+                      {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
+                    </select>
+                    <span className={css.meta}>{tt('settings.reasoningHint')}</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.analysisReasoning')}</label>
+                    <select
+                      className={css.input}
+                      value={configDraft.analysisReasoning ?? 'low'}
+                      onChange={e => { setConfigDraft({ ...configDraft, analysisReasoning: e.target.value as NovelConfig['analysisReasoning'] }) }}
+                    >
+                      {REASONING_OPTIONS.map(v => <option key={v} value={v}>{tt(`settings.reasoning.${v}`)}</option>)}
+                    </select>
+                    <span className={css.meta}>{tt('settings.analysisReasoningHint')}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'writing' && (
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 26 }}>
+                <span className={css.cardTitle}><PenLine size={18} style={{ verticalAlign: -3 }} /> 写作与审稿</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
+                    <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.maxTokens')}</label>
+                    <input className={css.input} type="number" min={2000} max={64000} value={configDraft.maxTokens} onChange={e => { setConfigDraft({ ...configDraft, maxTokens: Number(e.target.value) }) }} />
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.reviewPassScore')}</label>
+                    <input className={css.input} type="number" min={0} max={100} value={configDraft.reviewPassScore} onChange={e => { setConfigDraft({ ...configDraft, reviewPassScore: Number(e.target.value) }) }} />
+                    <span className={css.meta}>通过判定：综合评分 ≥ 此分数（默认 70），或无 high 级问题且评分 ≥ 60；建议设 60-80。</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.autoReview')}</label>
+                    <select
+                      className={css.input}
+                      value={configDraft.autoReview ? '1' : '0'}
+                      onChange={e => { setConfigDraft({ ...configDraft, autoReview: e.target.value === '1' }) }}
+                    >
+                      <option value="1">✓ 是</option>
+                      <option value="0">✗ 否</option>
+                    </select>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.autoAuthorReview')}</label>
+                    <select
+                      className={css.input}
+                      value={configDraft.autoAuthorReview ? '1' : '0'}
+                      onChange={e => { setConfigDraft({ ...configDraft, autoAuthorReview: e.target.value === '1' }) }}
+                    >
+                      <option value="1">✓ 是</option>
+                      <option value="0">✗ 否</option>
+                    </select>
+                    <span className={css.meta}>{tt('settings.autoAuthorReviewHint')}</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>{tt('settings.autoReviewAfterRevise')}</label>
+                    <select
+                      className={css.input}
+                      value={configDraft.autoReviewAfterRevise ? '1' : '0'}
+                      onChange={e => { setConfigDraft({ ...configDraft, autoReviewAfterRevise: e.target.value === '1' }) }}
+                    >
+                      <option value="1">✓ 是</option>
+                      <option value="0">✗ 否</option>
+                    </select>
+                    <span className={css.meta}>{tt('settings.autoReviewAfterReviseHint')}</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel}>编辑器字号（正文编辑 / 工作区）</label>
+                    <select
+                      className={css.input}
+                      value={editorFontSize}
+                      onChange={e => { changeEditorFontSize(Number(e.target.value)) }}
+                    >
+                      {[12, 13, 14, 15, 16, 18, 20, 22, 24].map(v => (
+                        <option key={v} value={v}>{v}px</option>
+                      ))}
+                    </select>
+                    <span className={css.meta}>更改的是章节正文编辑区与润色/修订工作区（原稿 / 草稿 / diff）的显示字号，不影响面板主题。</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'image' && (
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 24 }}>
+                <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className={css.cardTitle}><Palette size={18} style={{ verticalAlign: -3 }} /> 生图模型</span>
+                  <span className={css.row} style={{ gap: 8, alignItems: 'center' }}>
+                    <span className={css.meta}>启用生图功能</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={configDraft.imageApiEnabled === true}
+                      className={`${css.switch} ${configDraft.imageApiEnabled === true ? css.switchOn : ''}`}
+                      onClick={() => { setConfigDraft(prev => prev === null ? prev : { ...prev, imageApiEnabled: prev.imageApiEnabled !== true }) }}
+                    >
+                      <span className={css.switchKnob} />
+                    </button>
+                  </span>
+                </div>
+                <span className={css.meta}>支持多套 OpenAI 兼容生图接口（豆包 / 即梦 / 其他平台）；启用一条作为生成模型，保存后角色详情显示「AI 生图」按钮。</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                  {(configDraft.imageModels ?? []).map(m => (
+                    <div key={m.id} style={{ border: m.enabled ? '1px solid var(--nf-accent)' : '1px solid var(--nf-border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 12, background: m.enabled ? 'var(--nf-accent-soft)' : 'transparent' }}>
+                      <div className={css.row} style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div className={css.field} style={{ flex: 1, minWidth: 180 }}>
+                          <label className={css.fieldLabel}>名称</label>
+                          <input className={css.input} placeholder="如：豆包 Seedream" value={m.name} onChange={e => { updateImageModel(m.id, { name: e.target.value }) }} />
+                        </div>
+                        <div className={css.field} style={{ flex: 1, minWidth: 180 }}>
+                          <label className={css.fieldLabel}>模型 id</label>
+                          <input className={css.input} placeholder="doubao-seedream-5-0-pro-260628" value={m.model} onChange={e => { updateImageModel(m.id, { model: e.target.value }) }} />
+                        </div>
+                        <div className={css.field} style={{ flex: 1, minWidth: 200 }}>
+                          <label className={css.fieldLabel}>接口地址</label>
+                          <input className={css.input} placeholder="https://ark.cn-beijing.volces.com/api/v3" value={m.baseURL} onChange={e => { updateImageModel(m.id, { baseURL: e.target.value }) }} />
+                        </div>
+                      </div>
+                      <div className={css.field}>
+                        <label className={css.fieldLabel}>API Key</label>
+                        <input className={css.input} type="password" placeholder="ark-..." value={m.apiKey} onChange={e => { updateImageModel(m.id, { apiKey: e.target.value }) }} />
+                      </div>
+                      <div className={css.row} style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <button type="button" className={`${css.button} ${css.buttonSmall} ${m.enabled ? css.buttonPrimary : ''}`} onClick={() => { enableImageModel(m.id) }}>
+                          {m.enabled ? '✓ 已启用' : '设为启用'}
+                        </button>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={imageTestState[m.id]?.testing === true} onClick={() => { void testImageModel(m) }}>
+                          <PlugZap size={13} style={{ verticalAlign: -2 }} /> {imageTestState[m.id]?.testing === true ? '测试中…' : '测试'}
+                        </button>
+                        <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { removeImageModel(m.id) }}>🗑 删除</button>
+                        <span className={css.meta}>{m.enabled ? '当前生效' : '未启用'}</span>
+                        {(() => {
+                          const st = imageTestState[m.id]
+                          if (st === undefined || st.testing) return null
+                          return st.ok === true
+                            ? <span style={{ color: 'var(--nf-success)', fontSize: 12, fontWeight: 600 }}>✓ 连通 · {st.ms}ms{st.modelFound === true ? '' : st.modelFound === false ? '（模型未在列表）' : ''}</span>
+                            : <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>✗ {st.message ?? '失败'}</span>
+                        })()}
+                      </div>
+                    </div>
+                  ))}
+                  {(configDraft.imageModels ?? []).length === 0 && (
+                    <div className={css.meta}>还没有生图模型——点下方「＋ 添加生图模型」添加第一条（默认启用）。</div>
+                  )}
+                </div>
+                <div className={css.row}>
+                  <button type="button" className={css.button} onClick={addImageModel}>＋ 添加生图模型</button>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'files' && (
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 24 }}>
+                <span className={css.cardTitle}><Folder size={18} style={{ verticalAlign: -3 }} /> 路径与文件</span>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>{tt('settings.outlinePath')}</label>
+                  <input className={css.input} value={configDraft.outlinePath} onChange={e => { setConfigDraft({ ...configDraft, outlinePath: e.target.value }) }} />
+                </div>
+                <div className={css.field}>
+                  <label className={css.fieldLabel}>{tt('settings.outputDir')}</label>
+                  <input className={css.input} value={configDraft.outputDir} onChange={e => { setConfigDraft({ ...configDraft, outputDir: e.target.value }) }} />
+                </div>
+                <div className={css.row}>
+                  <button type="button" className={css.button} onClick={() => { void api.openFolder() }}>{tt('settings.openFolder')}</button>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--nf-border)', margin: '14px 0 12px' }} />
+
+                <span className={css.cardTitle} style={{ fontSize: 13 }}>💾 保存与导出</span>
+                <div className={css.row}>
+                  <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
+                    {tt('settings.save')}
+                  </button>
+                </div>
+                <div className={css.row}>
+                  <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('txt') }}>
+                    {tt('settings.exportTxt')}
+                  </button>
+                  <button type="button" className={css.button} disabled={busy || chapters.length === 0} onClick={() => { void handleExport('md') }}>
+                    {tt('settings.exportMd')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {settingsTab === 'appearance' && (
+              <div className={`${css.card} ${css.settingsCard}`}>
+                <span className={css.cardTitle}><Sparkles size={18} style={{ verticalAlign: -3 }} /> 外观与主题</span>
+                <span className={css.meta}>选择适合长时间创作的界面颜色和显示密度。主题只保存在当前设备，不影响小说内容和任务状态。</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>显示模式</label>
+                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={themeMode} onChange={e => { changeThemeMode(e.target.value as 'system' | 'light' | 'dark') }}>
+                      <option value="system">跟随系统</option>
+                      <option value="light">浅色</option>
+                      <option value="dark">深色</option>
+                    </select>
+                    <span className={css.meta}>强制浅色/深色只作用于小说工坊面板</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>主题风格</label>
+                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={panelTheme} onChange={e => { changePanelTheme(e.target.value as 'liquid' | 'classic' | 'neumorph') }}>
+                      <option value="liquid">液态玻璃 · 清新绿（默认）</option>
+                      <option value="classic">经典毛玻璃 · 沉静蓝</option>
+                      <option value="neumorph">新拟物 · 柔和浅色</option>
+                    </select>
+                    <span className={css.meta}>{tt('settings.themeHint')}</span>
+                  </div>
+                  <div className={css.field}>
+                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>界面密度</label>
+                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={themeDensity} onChange={e => { changeThemeDensity(e.target.value as 'comfort' | 'compact' | 'spacious') }}>
+                      <option value="comfort">舒适（默认）</option>
+                      <option value="compact">紧凑</option>
+                      <option value="spacious">宽松</option>
+                    </select>
+                    <span className={css.meta}>卡片 / 导航 / 内容的间距密度</span>
+                  </div>
+                </div>
+                <div className={css.row} style={{ justifyContent: 'flex-end' }}>
+                  <button type="button" className={css.button} style={{ padding: '9px 18px', fontSize: 13.5 }} onClick={resetTheme}>
+                    <RotateCcw size={14} style={{ verticalAlign: -2 }} /> 恢复默认主题
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
-
-        {activeTab === 'settings' && (
-          <div className={`${css.card} ${css.settingsCard}`}>
-            <span className={css.cardTitle}>{tt('settings.theme')}</span>
-            <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'liquid' ? css.buttonPrimary : ''}`}
-                onClick={() => { changePanelTheme('liquid') }}
-                title="iOS 液态玻璃质感 · 绿色强调（当前默认）"
-              >
-                🧊 {tt('settings.themeLiquid')}
-              </button>
-              <button
-                type="button"
-                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'classic' ? css.buttonPrimary : ''}`}
-                onClick={() => { changePanelTheme('classic') }}
-                title="经典 iOS 毛玻璃 · 蓝色强调"
-              >
-                💠 {tt('settings.themeClassic')}
-              </button>
-              <button
-                type="button"
-                className={`${css.button} ${css.buttonSmall} ${panelTheme === 'neumorph' ? css.buttonPrimary : ''}`}
-                onClick={() => { changePanelTheme('neumorph') }}
-                title="新拟物派 · 双阴影立体（仅浅色；深色下自动回退液态）"
-              >
-                🔘 {tt('settings.themeNeumorph')}
-              </button>
-              <span className={css.meta}>{tt('settings.themeHint')}</span>
-            </div>
-          </div>
-        )}
-
         {activeTab === 'book' && bookTab === 'facts' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
@@ -4307,7 +4465,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {activeTab === 'manhua' && (
-          <MangaWorkspace api={api} project={project} chapters={chapters} onProjectChanged={() => refresh(false)} imageApiEnabled={config?.imageApiEnabled === true} onProgress={(text, kind) => pushProgress(text, kind ?? 'info')} />
+          <MangaWorkspace api={api} project={project} chapters={chapters} onProjectChanged={() => refresh(false)} imageApiEnabled={config?.imageApiEnabled === true} imageModels={config?.imageModels} onProgress={(text, kind) => pushProgress(text, kind ?? 'info')} />
         )}
 
         {activeTab === 'breakdown' && (
@@ -4413,7 +4571,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         </div>
       )}
 
-      {/* 工作进度悬浮窗：可拖动、可拉大小（同 AI 助手），承接活动输出 + 当前任务进度 */}
+      {/* AI进度悬浮窗：可拖动、可拉大小（同 AI 助手），承接活动输出 + 当前任务进度 */}
       {progressOpen && (
         <div
           className={css.assistantFloat}
@@ -4427,7 +4585,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             }}
           >
             <span>
-              📊 工作进度
+              📊 AI进度
               {busy && <span style={{ color: 'var(--nf-accent)' }}> 🟢 任务进行中</span>}
               <span className={css.meta}>（拖动标题栏移动 · 右下角拉大小）</span>
             </span>
@@ -4437,7 +4595,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   清空
                 </button>
               )}
-              <button type="button" className={css.iconButton} title="关闭" aria-label="关闭工作进度" onClick={() => { setProgressOpen(false) }}>×</button>
+              <button type="button" className={css.iconButton} title="关闭" aria-label="关闭AI进度" onClick={() => { setProgressOpen(false) }}>×</button>
             </span>
           </div>
           <div className={css.assistantFloatBody} style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>

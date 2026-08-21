@@ -3,6 +3,7 @@
  * 进入小说工坊默认展示；点击书卡进入该书工作台，＋ 进入开书向导页。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { BookOpen, Download, Library, PenLine, Plus, Search } from 'lucide-react'
 import type { NovelApi } from '../api.ts'
 import type { BookshelfSnapshot } from '../../protocol.ts'
 import css from './panel.module.css'
@@ -94,7 +95,7 @@ function BookCard({
             onClick={onOpen}
             title="进入创作工作台（大纲/章节/审稿/设定）"
           >
-            📝 进入工作台
+            <PenLine size={13} style={{ verticalAlign: -2 }} /> 进入工作台
           </button>
           <button
             type="button"
@@ -103,7 +104,7 @@ function BookCard({
             onClick={onRead}
             title={book.hasProject && book.done > 0 ? '沉浸式阅读已写章节' : '尚无已写章节，先去工作台创作'}
           >
-            📖 阅读
+            <BookOpen size={13} style={{ verticalAlign: -2 }} /> 阅读
           </button>
         </div>
       </div>
@@ -155,25 +156,11 @@ export function ShelfView({
     })
   }, [shelf.books, query, filter])
 
-  const filters: Array<{ id: 'all' | 'active' | 'done' | 'none'; label: string; count: number }> = [
-    { id: 'all', label: '全部', count: shelf.books.length },
-    { id: 'active', label: '进行中', count: stats.active },
-    { id: 'done', label: '已完结', count: stats.done },
-    { id: 'none', label: '未开书', count: stats.none },
-  ]
-
   return (
     <div className={css.shelfView}>
-      <div className={css.shelfHeader}>
+      <div className={css.shelfHero}>
         <div className={css.shelfTitleRow}>
-          <h2 className={css.panelTitle} style={{ margin: 0 }}>📚 书架</h2>
-          {shelf.books.length > 0 && (
-            <span className={css.meta}>
-              {shelf.books.length} 本书 · {stats.active} 进行中 · {stats.done} 已完结 · {stats.none} 未开书
-            </span>
-          )}
-        </div>
-        <div className={css.shelfToolbar}>
+          <h2 className={css.panelTitle} style={{ margin: 0 }}><Library size={20} style={{ verticalAlign: -3 }} /> AI小说工坊 · 书架</h2>
           <input
             className={`${css.input} ${css.shelfSearch}`}
             type="search"
@@ -182,25 +169,31 @@ export function ShelfView({
             onChange={e => { setQuery(e.target.value) }}
           />
         </div>
-        <div className={css.shelfFilters} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {filters.map(f => (
-            <button
-              key={f.id}
-              type="button"
-              className={`${css.button} ${filter === f.id ? css.buttonPrimary : ''}`}
-              style={{ fontSize: 14, flex: 1 }}
-              onClick={() => { setFilter(f.id) }}
-            >
-              {f.label}{f.count > 0 ? `（${f.count}）` : ''}
-            </button>
-          ))}
-        </div>
+        {shelf.books.length > 0 && (
+          <div className={css.shelfStats}>
+            {[
+              { id: 'all' as const, label: '总书数', value: shelf.books.length },
+              { id: 'active' as const, label: '进行中', value: stats.active },
+              { id: 'done' as const, label: '已完结', value: stats.done },
+              { id: 'none' as const, label: '未开书', value: stats.none },
+            ].map(s => (
+              <div
+                key={s.id}
+                className={`${css.shelfStat} ${filter === s.id ? css.shelfStatActive : ''}`}
+                title={s.id === 'all' ? '显示全部书籍' : `只看「${s.label}」的书（再点一次取消筛选）`}
+                onClick={() => { setFilter(prev => prev === s.id ? 'all' : s.id) }}
+              >
+                <b>{s.value}</b><span>{s.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {shelf.books.length === 0 ? (
         /* 空书架引导卡 */
         <div className={css.shelfEmpty}>
-          <span className={css.shelfEmptyIcon}>📖</span>
+          <span className={css.shelfEmptyIcon}><BookOpen size={34} /></span>
           <span className={css.shelfEmptyTitle}>你的创作从这里开始</span>
           <span className={css.meta}>开一本书：粘贴大纲或导入 docx，书名自动识别，开书即建项目</span>
           <button type="button" className={`${css.button} ${css.buttonPrimary}`} onClick={onAddBook}>
@@ -212,7 +205,7 @@ export function ShelfView({
         </div>
       ) : visible.length === 0 ? (
         <div className={css.shelfEmpty} style={{ minHeight: 160 }}>
-          <span className={css.shelfEmptyIcon}>🔍</span>
+          <span className={css.shelfEmptyIcon}><Search size={34} /></span>
           <span className={css.shelfEmptyTitle}>没有符合条件的书</span>
           <span className={css.meta}>换个关键词或筛选条件试试</span>
         </div>
@@ -231,14 +224,14 @@ export function ShelfView({
 
           {/* 开书入口：进入独立向导页 */}
           <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onAddBook}>
-            <div className={css.bookAddIcon}>＋</div>
+            <div className={css.bookAddIcon}><Plus size={28} /></div>
             <span>开一本新书</span>
             <span className={css.meta}>书名 + 大纲，开书即建项目</span>
           </div>
 
           {/* 导入入口：已有项目目录 / txt/md 全本 */}
           <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onImportBook}>
-            <div className={css.bookAddIcon}>📥</div>
+            <div className={css.bookAddIcon}><Download size={28} /></div>
             <span>导入已有小说</span>
             <span className={css.meta}>项目目录或 txt/md 全本</span>
           </div>

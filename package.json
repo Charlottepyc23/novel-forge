@@ -1,7 +1,7 @@
 {
   "name": "@waterwx/dsh-novel-forge",
   "description": "AI 编译小说工作台 for the dsh web GUI: import a novel outline (docx/text), plan chapters with LLM, generate chapter by chapter (3000-4000 chars each), and save every chapter as Markdown into your chosen output folder.",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "type": "module",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "fflate": "^0.8.2",
+    "lucide-react": "^1.33.0",
     "schemastery": "^3.18.0"
   },
   "peerDependencies": {

@@ -25,7 +25,7 @@ export function StoryboardTab({
   styleId?: string
   /** 可选滤镜风格 id。 */
   filterId?: string
-  /** 上报到「工作进度」控制台（分镜三步生成）。 */
+  /** 上报到「AI进度」控制台（分镜三步生成）。 */
   onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void
 }) {
   const written = useMemo(() => chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error').sort((a, b) => a.no - b.no), [chapters])

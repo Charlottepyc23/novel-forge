@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { NovelApi } from '../api.ts'
-import type { ProjectState } from '../../protocol.ts'
+import type { ImageModelConfig, ProjectState } from '../../protocol.ts'
 import css from './panel.module.css'
 
 export function RoleVisualPanel({
@@ -13,6 +13,7 @@ export function RoleVisualPanel({
   styleId,
   filterId,
   imageApiEnabled,
+  imageModels,
   onGotoRoles,
   onProgress,
 }: {
@@ -22,8 +23,10 @@ export function RoleVisualPanel({
   styleId?: string
   filterId?: string
   imageApiEnabled?: boolean
+  /** 生图模型库（AI 生图时可选择用哪条）。 */
+  imageModels?: ImageModelConfig[]
   onGotoRoles?: () => void
-  /** 上报到「工作进度」控制台（角色形象页 / 漫剧工作台共用）。 */
+  /** 上报到「AI进度」控制台（角色形象页 / 漫剧工作台共用）。 */
   onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void
 }) {
   const [busy, setBusy] = useState(false)
@@ -33,6 +36,8 @@ export function RoleVisualPanel({
   const [roleImageLabel, setRoleImageLabel] = useState('立绘')
   const [detailRoleName, setDetailRoleName] = useState<string | null>(null)
   const [detailUploadLabel, setDetailUploadLabel] = useState('立绘')
+  /** AI 生图时选择的模型条目 id（'' = 用设置中启用的模型）。 */
+  const [imageModelId, setImageModelId] = useState('')
   /** 提示词包全局中英切换（浮窗内所有提示词块共用）。 */
   const [kitLang, setKitLang] = useState<'zh' | 'en'>('zh')
   const inputRef = useRef<HTMLInputElement | null>(null)
@@ -113,16 +118,16 @@ export function RoleVisualPanel({
 
   const handleImageGenerate = async (name: string): Promise<void> => {
     setBusy(true); setError('')
-    report('豆包生成「' + name + '」参考图…')
+    report('AI 生图「' + name + '」参考图…')
     try {
-      await api.roles({ op: 'imageGenerate', name })
+      await api.roles({ op: 'imageGenerate', name, modelId: imageModelId !== '' ? imageModelId : undefined })
       await refresh()
       notify('已生成「' + name + '」参考图')
       report('已生成「' + name + '」参考图', 'done')
     } catch (err) {
       const m = (err as Error).message
       setError(m)
-      report('豆包生成「' + name + '」参考图失败：' + m, 'error')
+      report('AI 生图「' + name + '」参考图失败：' + m, 'error')
     } finally { setBusy(false) }
   }
 
@@ -434,7 +439,19 @@ export function RoleVisualPanel({
                         <button type='button' className={css.button + ' ' + css.buttonSmall} disabled={busy} onClick={() => { void handleVisual(detailRole.name) }}>✨ 生成锚点</button>
                       )}
                       {anchor !== undefined && imageApiEnabled === true && (
-                        <button type='button' className={css.button + ' ' + css.buttonSmall} disabled={busy} onClick={() => { void handleImageGenerate(detailRole.name) }}>豆包生成</button>
+                        <span className={css.row} style={{ gap: 4 }}>
+                          <select
+                            className={css.input}
+                            style={{ width: 150, fontSize: 11, padding: '3px 6px' }}
+                            value={imageModelId}
+                            onChange={e => { setImageModelId(e.target.value) }}
+                            title="选择生图模型（缺省用设置中启用的模型）"
+                          >
+                            <option value="">默认（启用模型）</option>
+                            {(imageModels ?? []).map(m => <option key={m.id} value={m.id}>{m.name !== '' ? m.name : (m.model !== '' ? m.model : m.id)}{m.enabled ? ' ✓' : ''}</option>)}
+                          </select>
+                          <button type='button' className={css.button + ' ' + css.buttonSmall} disabled={busy} onClick={() => { void handleImageGenerate(detailRole.name) }}>AI 生图</button>
+                        </span>
                       )}
                       {anchor !== undefined && (
                         <button type='button' className={css.button + ' ' + css.buttonSmall} onClick={() => {

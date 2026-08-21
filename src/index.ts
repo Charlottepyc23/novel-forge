@@ -15,7 +15,7 @@ import z from 'schemastery'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
-import type { ConfigPatch, NovelConfig } from './protocol.ts'
+import type { ConfigPatch, ImageModelConfig, NovelConfig } from './protocol.ts'
 import { makeRoutes } from './routes.ts'
 import { activeBookOutputDir } from './bookshelf.ts'
 
@@ -62,11 +62,13 @@ export interface Config {
   autoAuthorReview?: boolean
   /** 修订/润色产出草稿后自动附带一次 AI 审查（默认开，可在设置页关闭省 token）。 */
   autoReviewAfterRevise?: boolean
-  /** 豆包/Seedream 生图 API Key。 */
+  /** 生图模型库（多套并存，启用一条生效）。 */
+  imageModels?: ImageModelConfig[]
+  /** 豆包/Seedream 生图 API Key（旧字段，兼容迁移用）。 */
   imageApiKey?: string
-  /** 豆包/Seedream 生图模型 ID。 */
+  /** 豆包/Seedream 生图模型 ID（旧字段，兼容迁移用）。 */
   imageApiModel?: string
-  /** 是否启用豆包生图（默认关）。 */
+  /** 是否启用豆包生图（旧字段，兼容迁移用）。 */
   imageApiEnabled?: boolean
 }
 
@@ -85,6 +87,14 @@ export const Config: z<Config> = z.object({
   autoReview: z.boolean().default(true),
   autoAuthorReview: z.boolean().default(true),
   autoReviewAfterRevise: z.boolean().default(true),
+  imageModels: z.array(z.object({
+    id: z.string().default(''),
+    name: z.string().default(''),
+    baseURL: z.string().default(''),
+    apiKey: z.string().default(''),
+    model: z.string().default(''),
+    enabled: z.boolean().default(false),
+  })).default([]),
   imageApiKey: z.string().default(''),
   imageApiModel: z.string().default(''),
   imageApiEnabled: z.boolean().default(false),
@@ -126,11 +136,32 @@ export function resolveConfig(value: Partial<Config> | undefined): NovelConfig {
     autoReview: value?.autoReview ?? DEFAULT_AUTO_REVIEW,
     autoAuthorReview: value?.autoAuthorReview ?? DEFAULT_AUTO_AUTHOR_REVIEW,
     autoReviewAfterRevise: value?.autoReviewAfterRevise ?? DEFAULT_AUTO_REVIEW_AFTER_REVISE,
-    imageApiKey: value?.imageApiKey,
-    imageApiModel: value?.imageApiModel,
+    // 生图模型库：只有「从未保存过 imageModels」时才用旧配置迁移一条（豆包默认地址）；
+    // 已保存为空数组 = 用户主动删光，保持空，不再复活。
+    imageModels: value?.imageModels !== undefined
+      ? value.imageModels
+      : (value?.imageApiKey !== undefined && value.imageApiKey !== ''
+          ? [{ id: 'img-legacy', name: '豆包（旧配置）', baseURL: DEFAULT_IMAGE_BASE, apiKey: value.imageApiKey, model: value.imageApiModel ?? '', enabled: true }]
+          : []),
+    // 运行时生效值 = 启用条目（兼容旧代码读取 imageApiKey/imageApiModel/imageApiEnabled）。
+    imageBaseUrl: (() => {
+      const active = (value?.imageModels ?? []).find(m => m.enabled) ?? (value?.imageModels ?? [])[0]
+      return active?.baseURL !== undefined && active.baseURL !== '' ? active.baseURL : (value?.imageApiKey !== undefined && value.imageApiKey !== '' ? DEFAULT_IMAGE_BASE : undefined)
+    })(),
+    imageApiKey: (() => {
+      const active = (value?.imageModels ?? []).find(m => m.enabled) ?? (value?.imageModels ?? [])[0]
+      return active?.apiKey ?? value?.imageApiKey
+    })(),
+    imageApiModel: (() => {
+      const active = (value?.imageModels ?? []).find(m => m.enabled) ?? (value?.imageModels ?? [])[0]
+      return active?.model ?? value?.imageApiModel
+    })(),
     imageApiEnabled: value?.imageApiEnabled ?? false,
   }
 }
+
+/** 生图默认接口地址（豆包 ark，OpenAI 兼容）。 */
+const DEFAULT_IMAGE_BASE = 'https://ark.cn-beijing.volces.com/api/v3'
 
 /**
  * Mount the routes and announcement.

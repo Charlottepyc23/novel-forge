@@ -2001,6 +2001,40 @@ export async function breakdownBook(
   }
 }
 
+/** 生图接口连通性测试（设置页模型条目用）：GET {baseURL}/models，计时返回延迟。 */
+export async function testImageEndpoint(baseURL: string, apiKey: string, model?: string): Promise<{ ok: boolean; ms: number; message?: string; modelFound?: boolean }> {
+  const trimmed = baseURL.trim()
+  if (trimmed === '') return { ok: false, ms: 0, message: '接口地址不能为空' }
+  const url = trimmed.replace(/\/+$/, '') + '/models'
+  const start = Date.now()
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
+    })
+    const ms = Date.now() - start
+    if (!res.ok) {
+      const text = (await res.text().catch(() => '')).slice(0, 200)
+      return { ok: false, ms, message: 'HTTP ' + res.status + (text !== '' ? '：' + text : '') }
+    }
+    let modelFound: boolean | undefined
+    if (model !== undefined && model !== '') {
+      const json = await res.json().catch(() => null)
+      const list = (json as { data?: unknown } | null)?.data
+      if (Array.isArray(list)) {
+        modelFound = list.some(m => {
+          if (typeof m !== 'object' || m === null) return false
+          const o = m as Record<string, unknown>
+          return o.id === model || o.model === model
+        })
+      }
+    }
+    return { ok: true, ms, modelFound }
+  } catch (err) {
+    return { ok: false, ms: Date.now() - start, message: (err as Error).message }
+  }
+}
+
 export async function generateRoleReferenceImage(
   ctx: Context,
   config: NovelConfig,
@@ -2008,15 +2042,21 @@ export async function generateRoleReferenceImage(
   outputDir: string,
   name: string,
   style = '',
+  modelId?: string,
 ): Promise<string> {
   const role = project.roles?.find(r => r.name === name)
   if (role === undefined) throw new Error(`角色 ${name} 不存在`)
   if (role.imagePrompt === undefined) throw new Error(`角色 ${name} 还没有形象锚点，请先生成锚点`)
-  if (config.imageApiEnabled !== true) throw new Error('豆包生图未启用，请在设置中开启')
-  const apiKey = config.imageApiKey
-  const model = config.imageApiModel
+  if (config.imageApiEnabled !== true) throw new Error('生图未启用，请在设置中启用一个生图模型')
+  const activeImage = (modelId !== undefined && modelId !== '' ? (config.imageModels ?? []).find(m => m.id === modelId) : undefined)
+    ?? (config.imageModels ?? []).find(m => m.enabled)
+    ?? (config.imageModels ?? [])[0]
+  const apiKey = activeImage?.apiKey ?? config.imageApiKey
+  const model = activeImage?.model ?? config.imageApiModel
+  const baseURL = (activeImage?.baseURL ?? config.imageBaseUrl ?? '').replace(/\/+$/, '')
+  if (baseURL === '') throw new Error('请先在设置中填写生图接口地址')
   if (apiKey === undefined || apiKey === '' || model === undefined || model === '') {
-    throw new Error('请先在设置中配置豆包 API Key 和生图模型')
+    throw new Error('请先在设置中配置生图模型的 API Key 和模型 id')
   }
   const stylePrompt = getComicStylePrompt(style)
   const prompt = [
@@ -2027,7 +2067,7 @@ export async function generateRoleReferenceImage(
     'character reference sheet, front view, clean background, consistent design',
   ].filter(Boolean).join(', ')
 
-  const res = await fetch('https://ark.cn-beijing.volces.com/api/v3/images/generations', {
+  const res = await fetch(baseURL + '/images/generations', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -2044,14 +2084,14 @@ export async function generateRoleReferenceImage(
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(`豆包生图失败（${res.status}）：${text}`)
+    throw new Error(`生图失败（${res.status}）：${text}`)
   }
   const json = (await res.json()) as { data?: Array<{ url?: string }> }
   const url = json.data?.[0]?.url
-  if (url === undefined || url === '') throw new Error('豆包生图未返回图片 URL')
+  if (url === undefined || url === '') throw new Error('生图接口未返回图片 URL')
 
   const imgRes = await fetch(url)
-  if (!imgRes.ok) throw new Error('下载豆包图片失败')
+  if (!imgRes.ok) throw new Error('下载生图结果失败')
   const buf = Buffer.from(await imgRes.arrayBuffer())
   const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
   const dataUrl = `data:${contentType};base64,${buf.toString('base64')}`

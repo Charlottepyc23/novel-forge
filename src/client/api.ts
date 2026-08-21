@@ -228,6 +228,10 @@ export class NovelApi {
   }
 
   /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
+  async imageTest(req: import('../protocol.ts').ImageTestRequest): Promise<import('../protocol.ts').ImageTestResponse> {
+    return postJson<import('../protocol.ts').ImageTestResponse>(NOVEL_API.imageTest, req)
+  }
+
   async roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse> {
     return postJson<import('../protocol.ts').RolesResponse>(NOVEL_API.roles, req)
   }

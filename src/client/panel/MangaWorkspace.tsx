@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from 'react'
 import type { NovelApi } from '../api.ts'
-import type { ChapterPlan, MangaPlan, ProjectState, RoleRecord } from '../../protocol.ts'
+import type { ChapterPlan, ImageModelConfig, MangaPlan, ProjectState, RoleRecord } from '../../protocol.ts'
 import { STYLE_CATEGORIES, STYLE_LIBRARY, findStyle, stylesByCategory, type StyleCategory } from '../../style-library.ts'
 import { StyleCard } from './StyleCard.tsx'
 import { StoryboardTab } from './StoryboardTab.tsx'
@@ -19,6 +19,7 @@ export function MangaWorkspace({
   chapters,
   onProjectChanged,
   imageApiEnabled,
+  imageModels,
   onProgress,
 }: {
   api: NovelApi
@@ -26,9 +27,11 @@ export function MangaWorkspace({
   chapters: ChapterPlan[]
   /** 方案/资产变更已持久化后触发（刷新项目）。 */
   onProjectChanged?: () => void | Promise<void>
-  /** 是否启用豆包生图。 */
+  /** 是否启用生图。 */
   imageApiEnabled?: boolean
-  /** 上报到「工作进度」控制台（漫剧工作台内所有 LLM/方案操作）。 */
+  /** 生图模型库（AI 生图可选模型）。 */
+  imageModels?: ImageModelConfig[]
+  /** 上报到「AI进度」控制台（漫剧工作台内所有 LLM/方案操作）。 */
   onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void
 }) {
   const plans = useMemo(() => project?.mangaPlans ?? [], [project?.mangaPlans])
@@ -260,6 +263,7 @@ export function MangaWorkspace({
           styleId={activePlan?.styleId}
           filterId={activePlan?.filterId}
           imageApiEnabled={imageApiEnabled}
+          imageModels={imageModels}
           onProgress={onProgress}
         />
       )}

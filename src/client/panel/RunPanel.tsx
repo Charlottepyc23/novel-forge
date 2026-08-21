@@ -1,6 +1,6 @@
 /**
  * 生产单面板：区间批量生产（计划补足 → 逐章生成 → 被拒分级处理 → 断点续跑）。
- * 与「工作进度」悬浮窗不同：这是标准流水线设备，一键下单、实时进度、日志可查。
+ * 与「AI进度」悬浮窗不同：这是标准流水线设备，一键下单、实时进度、日志可查。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { NovelApi } from '../api.ts'
