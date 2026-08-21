@@ -1133,8 +1133,9 @@ export async function extractRoles(
 ): Promise<RoleRecord[]> {
   const system = [
     '你是一位网文角色库管理员。请根据本书的大纲、设定、编年录与章节摘要，提炼完整的角色库。',
-    '覆盖原则：所有在编年录/章节中实际出场或有名有姓的角色都应收录；无名的功能性人物（如"矮胖姑娘"）用其身份简称收录并标注。',
-    '数量控制：最多输出 10 个角色，宁缺毋滥；路人级一次带过的不要收录。',
+    '覆盖原则：所有在编年录/章节中实际出场或有名有姓的角色都应收录；无名的功能性人物（如"矮胖姑娘"）用其身份简称收录并标注；反复出现且有剧情作用的身份型角色（站长、律师、警察、法官、店主等）必须收录。',
+    '数量控制：最多输出 10 个角色；覆盖优先——主角、主要反派、重要配角（女主/关键配角）必须全收，所有有名有姓者必收；只有真正一次性路人（无名字、无剧情作用）才可省略。',
+    '重要：正常一部完整故事应提炼 6-10 个角色；若少于 4 个通常说明漏提炼，必须重新核对正文摘录。',
     '重要：正文中若有明确的主角与主要反派，必须分别以 protagonist / antagonist 收录，禁止遗漏；反派确实未出场时才可省略。',
     '输出优先级：主角（protagonist）与主要反派（antagonist）必须优先输出并完整刻画，其次女主/重要配角；判断不出名字时用正文中的身份称呼。',
     '每个角色输出：',
@@ -1195,22 +1196,24 @@ export async function extractRoles(
   let text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000), reasoning: config.analysisReasoning ?? 'low' })
   let raw = parseJsonArray<Record<string, unknown>>(text)
   const hasProtagonist = raw.some(e => typeof e === 'object' && e !== null && e.roleLabel === 'protagonist')
-  if (raw.length === 0 || !hasProtagonist) {
-    // LLM 偶发输出非 JSON / 空数组 / 漏主角：重试一次（追加明确指令），避免静默返回空或缺主角的候选。
+  const tooFew = raw.length > 0 && raw.length < 4
+  if (raw.length === 0 || !hasProtagonist || tooFew) {
+    // LLM 偶发输出非 JSON / 空数组 / 漏主角 / 角色过少：重试一次（追加明确指令），避免静默返回空或缺角色的候选。
     const hint = raw.length === 0
       ? '\n上一次输出为空或格式不正确。请直接输出 JSON 数组（即使只有一个角色也要输出），不要输出其他文字。'
-      : '\n上一次输出中缺少主角（roleLabel 为 protagonist 的角色）。请重新输出完整 JSON 数组，务必包含正文中的主角。'
+      : tooFew
+        ? '\n上一次输出角色过少（不足 4 个）。这是一部完整故事，请重新核对正文摘录：主角、主要反派、重要配角与所有有名有姓的角色都要收录（宁多勿漏），输出 6-10 个。'
+        : '\n上一次输出中缺少主角（roleLabel 为 protagonist 的角色）。请重新输出完整 JSON 数组，务必包含正文中的主角。'
     text = await complete(ctx, config, { system: system + hint, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 24000), reasoning: config.analysisReasoning ?? 'low' })
     raw = parseJsonArray<Record<string, unknown>>(text)
   }
   const labels = new Set(['protagonist', 'female_lead', 'female_support', 'support', 'antagonist', 'extra'])
   const strArr = (v: unknown): string[] => Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : []
-  const roles: RoleRecord[] = []
-  for (const entry of raw) {
-    if (typeof entry !== 'object' || entry === null) continue
+  const toRole = (entry: Record<string, unknown>): RoleRecord | undefined => {
+    if (typeof entry !== 'object' || entry === null) return undefined
     const name = typeof entry.name === 'string' ? entry.name.trim().slice(0, 30) : ''
-    if (name === '') continue
-    roles.push({
+    if (name === '') return undefined
+    return {
       name,
       roleLabel: labels.has(entry.roleLabel as string) ? entry.roleLabel as RoleRecord['roleLabel'] : 'support',
       identity: typeof entry.identity === 'string' ? entry.identity.slice(0, 100) : '',
@@ -1219,7 +1222,54 @@ export async function extractRoles(
       relations: strArr(entry.relations).map(r => r.slice(0, 60)).slice(0, 10),
       arc: strArr(entry.arc).map(a => a.slice(0, 120)).slice(0, 10),
       knowledge: strArr(entry.knowledge).map(k => k.slice(0, 120)).slice(0, 12),
-    })
+    }
+  }
+  const roles: RoleRecord[] = []
+  for (const entry of raw) {
+    const role = toRole(entry)
+    if (role !== undefined) roles.push(role)
+  }
+  // 完整性补漏：通用第二轮——检查是否遗漏「身份型/功能性角色」（站长/律师/警察等反复出现者），不依赖任何名单。
+  if (roles.length > 0) {
+    const names = roles.map(r => r.name).join('、')
+    const patchSystem = system + '\n上一次已提炼角色：' + names + '。\n现在只输出「遗漏的角色」JSON 数组：检查正文摘录中反复出现、有固定身份称呼（如站长、律师、警察、法官、店主、老师）且对剧情有作用的角色；一次性路人不要输出。没有遗漏就输出 []。字段与上面相同。'
+    try {
+      const patchText = await complete(ctx, config, { system: patchSystem, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 12000), reasoning: config.analysisReasoning ?? 'low' })
+      const patchRaw = parseJsonArray<Record<string, unknown>>(patchText)
+      const existing = new Set(roles.map(r => r.name))
+      for (const entry of patchRaw) {
+        const role = toRole(entry)
+        if (role === undefined || existing.has(role.name)) continue
+        existing.add(role.name)
+        roles.push(role)
+        if (roles.length >= 10) break
+      }
+    } catch { /* 补漏失败不阻塞主结果 */ }
+  }
+  // 确定性兜底：正文中反复出现的身份型称呼（站长/律师/警察等）若 LLM 仍漏掉，按出现次数直接补条（通用、不依赖名单）。
+  const ROLE_TITLE_HINTS = ['站长', '律师', '检察官', '法官', '警察', '店主', '老板', '经理', '局长', '医生', '老师', '护士', '房东', '司机', '保安', '主管', '队长', '厂长', '董事长', '总裁', '市长', '道长', '掌门', '师父', '师傅', '管家']
+  const existingNames = new Set(roles.map(r => r.name))
+  const titleCount = new Map<string, number>()
+  for (const chapter of written) {
+    const body = readChapterFile(config.outputDir, chapter)
+    if (body === undefined) continue
+    for (const t of ROLE_TITLE_HINTS) {
+      let idx = 0
+      let n = 0
+      while ((idx = body.indexOf(t, idx)) !== -1) {
+        n++
+        idx += t.length
+      }
+      titleCount.set(t, (titleCount.get(t) ?? 0) + n)
+    }
+  }
+  for (const t of ROLE_TITLE_HINTS) {
+    if (roles.length >= 10) break
+    const covered = existingNames.has(t) || [...existingNames].some(n => n.includes(t))
+    if (!covered && (titleCount.get(t) ?? 0) >= 3) {
+      existingNames.add(t)
+      roles.push({ name: t, roleLabel: 'support', identity: '身份型角色（正文反复出现）', traits: [], goals: '', relations: [], arc: [], knowledge: [] })
+    }
   }
   return roles
 }
@@ -1599,6 +1649,7 @@ export async function extractRoleVisual(
     '2. 正文未明确写到的项目（如瞳色没写、身高没写），用「未定」标注或直接不写，不要编造数值。',
     '3. 服装优先取正文明确出现的（颜色+款式），多次出现取最常穿的组合；服装按分件组织（上身/下身/鞋/配饰）。',
     '4. 标志物（标签/印记/饰品）必须出现在每段提示词中——它们是一致性的命根子。',
+    '5. 立绘/四视图/细节是「角色设定稿」：禁止写瞬间动作与道具使用状态（握手机、看屏幕、未接来电、走路、回头等），禁止写剧情状态与场景背景；只保留可长期存在的外貌、服装与常驻标志物（工牌、饰品等）。',
     '【本书视觉规则】（必须内嵌进每段提示词，保证设定不跑偏）：',
     ...rules.map(r => '- ' + r),
     '输出六部分：',
@@ -1703,6 +1754,7 @@ export async function generateRolePromptKit(
     '2. sheet 四视图：同一角色的 正面/左侧面/右侧面/背面 四视图设定表（character sheet），纯白背景，四个视角分别描述。',
     '3. expressions 表情：每个表情一段，脸部特写（头部到锁骨），纯白背景，五官与角色定稿完全一致，只换情绪表达（眼神/嘴角/眉），皮肤纹理细节完整，无多余杂物。',
     '4. details 细节：多组局部细节集合参考图（一张图多个局部框），纯白背景；把该角色全部标志物逐项列出，每项一句特写描述；细节清晰锐利，角色细节参考稿，无多余杂物。',
+    '5. 立绘/四视图/细节为「角色设定稿」：禁止瞬间动作、道具使用状态与剧情状态（握手机、看屏幕、未接来电等），只保留可长期存在的外貌、服装与常驻标志物（工牌、饰品等）。',
     '【本书视觉规则】（必须内嵌进每段提示词，保证设定不跑偏）：',
     ...rules.map(r => '- ' + r),
     'zh 要求：连贯中文，写实电影感，60-150 字/段；en 要求：booru 风格逗号分隔标签，30-50 个/段。',
