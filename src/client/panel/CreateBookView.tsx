@@ -161,14 +161,14 @@ export function CreateBookView({
         <span className={css.meta}>把一份大纲「编译」成一本完整的小说</span>
 
         {error !== '' && (
-          <div className={css.card} style={{ borderColor: 'var(--nf-error)', padding: '8px 12px' }}>
-            <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>{error}</span>
+          <div className={css.card} style={{ borderColor: 'var(--nf-error)', padding: 'var(--nf-space-8) var(--nf-space-12)' }}>
+            <span style={{ color: 'var(--nf-error)', fontSize: 'var(--nf-fs-12)' }}>{error}</span>
           </div>
         )}
 
         {fillNotice !== '' && (
-          <div className={css.card} style={{ borderColor: 'var(--nf-success)', padding: '8px 12px' }}>
-            <span style={{ color: 'var(--nf-success)', fontSize: 12 }}>✅ {fillNotice}</span>
+          <div className={css.card} style={{ borderColor: 'var(--nf-success)', padding: 'var(--nf-space-8) var(--nf-space-12)' }}>
+            <span style={{ color: 'var(--nf-success)', fontSize: 'var(--nf-fs-12)' }}>✅ {fillNotice}</span>
           </div>
         )}
 
@@ -240,7 +240,7 @@ export function CreateBookView({
             ✨ {ideaOpen ? '▾' : '▸'} 没有大纲？用一句话想法让 AI 生成
           </button>
           {ideaOpen && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)' }}>
               <textarea
                 className={css.textarea}
                 style={{ minHeight: 60 }}
@@ -268,7 +268,7 @@ export function CreateBookView({
 
               {/* 方案卡 */}
               {candidates.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)' }}>
                   {candidates.map(candidate => {
                     const isPinned = pinned.includes(candidate.id)
                     return (
@@ -277,13 +277,13 @@ export function CreateBookView({
                         className={css.ideaCandidate}
                         style={isPinned ? { borderColor: 'var(--nf-accent)', boxShadow: '0 0 0 2px var(--nf-accent-soft)' } : undefined}
                       >
-                        <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
-                          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--nf-space-8)', flexWrap: 'wrap' }}>
                             <b>《{candidate.bookName}》</b>
                             {candidate.genre !== '' && <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>{candidate.genre}</span>}
                             {isPinned && <span className={css.badge} style={{ borderColor: 'var(--nf-warn)', color: 'var(--nf-warn)' }}>★ 已暂留</span>}
                           </span>
-                          <span style={{ display: 'flex', gap: 6 }}>
+                          <span style={{ display: 'flex', gap: 'var(--nf-space-6)' }}>
                             <button
                               type="button"
                               className={`${css.button} ${css.buttonSmall} ${isPinned ? '' : css.buttonPrimary}`}
@@ -333,7 +333,7 @@ export function CreateBookView({
         <button
           type="button"
           className={`${css.button} ${css.buttonPrimary}`}
-          style={{ width: '100%', padding: '10px 0', fontSize: 14 }}
+          style={{ width: '100%', padding: 'var(--nf-space-10) 0', fontSize: 'var(--nf-fs-14)' }}
           disabled={busy || effectiveName === ''}
           onClick={() => { void handleCreate() }}
         >

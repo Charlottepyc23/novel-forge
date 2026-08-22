@@ -28,7 +28,7 @@ function EditableRow({
   detailPlaceholder: string
 }) {
   return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+    <div style={{ display: 'flex', gap: 'var(--nf-space-6)', alignItems: 'flex-start' }}>
       <input className={css.input} style={{ flex: 2, minWidth: 0 }} placeholder={namePlaceholder} value={name} onChange={e => { onName(e.target.value) }} />
       <input className={css.input} style={{ flex: 3, minWidth: 0 }} placeholder={detailPlaceholder} value={detail} onChange={e => { onDetail(e.target.value) }} />
       <button type="button" className={`${css.button} ${css.buttonSmall}`} title="删除" onClick={onRemove}>×</button>
@@ -89,7 +89,7 @@ export function WorldTab({
   const setFactions = (factions: WorldFaction[]): void => setDraft(prev => ({ ...prev, factions }))
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-12)' }}>
       {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{error}</span></div>}
 
       <div className={css.card}>
@@ -120,7 +120,7 @@ export function WorldTab({
         {draft.realms.length === 0 ? (
           <span className={css.meta}>暂无境界体系 — 点击 ✨AI 提炼 或手动添加（由低到高）。</span>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
             {draft.realms.map((realm, i) => (
               <EditableRow
                 key={i}
@@ -148,7 +148,7 @@ export function WorldTab({
         {draft.regions.length === 0 ? (
           <span className={css.meta}>暂无地理区域 — 大陆 / 海域 / 秘境 / 遗迹…</span>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
             {draft.regions.map((region, i) => (
               <EditableRow
                 key={i}
@@ -176,7 +176,7 @@ export function WorldTab({
         {draft.factions.length === 0 ? (
           <span className={css.meta}>暂无势力 — 宗门 / 家族 / 王朝 / 组织…</span>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
             {draft.factions.map((faction, i) => (
               <EditableRow
                 key={i}

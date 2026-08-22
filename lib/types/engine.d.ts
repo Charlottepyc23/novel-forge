@@ -12,7 +12,7 @@
  */
 export declare const COMPLIANCE_REDLINES: ReadonlyArray<string>;
 import type { Context } from '@deepseek-ai/cordis';
-import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, SceneCard, StoryBible, StoryboardSkeleton, StoryboardTable, StoryboardPrompt, Volume, WorldState } from './protocol.ts';
+import type { AuditIssue, AuthorReview, BreakdownResponse, ChapterPlan, Foreshadow, NovelConfig, OutlineCandidate, Plotline, PlotlineHealthReport, PlotlinePlan, ProjectState, ReviewReport, RoleRecord, RoleStatusCard, SceneCard, StoryBible, StoryboardSkeleton, StoryboardTable, StoryboardPrompt, MangaRoleCandidate, Volume, WorldState } from './protocol.ts';
 /** Project state file name inside the output dir. */
 export declare const PROJECT_FILE = "novel-project.json";
 /** Chapter output file name, e.g. 第001章_开篇.md */
@@ -109,16 +109,20 @@ export interface RoleVisualPrompt {
     /** 四类精修提示词（立绘/四视图/表情/细节，一次提炼直接产出）。 */
     promptKit?: RoleRecord['promptKit'];
 }
-/**
- * 为单个角色提炼「动漫形象描述词」：扫描该角色出场的已写章节正文，
- * 截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
- */
+/** 小说角色库：提炼单个角色的形象锚点并写回角色卡。 */
 export declare function extractRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, roleName: string, styleId?: string, filterId?: string): Promise<RoleVisualPrompt>;
-/**
- * 角色四类生图提示词精修包（promptKit）：以锚点 + 表情清单 + 视觉规则为输入，
- * LLM 产出 立绘/四视图/表情×N/细节 四套 zh+en 提示词（比前端拼装更精炼）。
- */
+/** 漫剧角色卡：提炼形象锚点并写回漫剧卡（status → anchored）。 */
+export declare function extractMangaRoleVisual(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, cardId: string, styleId?: string, filterId?: string): Promise<RoleVisualPrompt>;
+/** 小说角色库：角色四类生图提示词精修包（写回角色卡）。 */
 export declare function generateRolePromptKit(ctx: Context, config: NovelConfig, project: ProjectState, roleName: string, styleId?: string, filterId?: string): Promise<RoleRecord['promptKit']>;
+/** 漫剧角色卡：四类生图提示词精修包（写回漫剧卡，status → anchored）。 */
+export declare function generateMangaRolePromptKit(ctx: Context, config: NovelConfig, project: ProjectState, cardId: string, styleId?: string, filterId?: string): Promise<RoleRecord['promptKit']>;
+/**
+ * 漫剧角色库·提名（两段式）：从某章分镜的 characters 提名候选角色名 →
+ * 规则过滤（精确名 + 身份/简称匹配，短名单 ≤5）→ LLM 确认（是/否 + 选哪个，不做开放检索）→
+ * 返回带漫剧卡建议的候选（未匹配时给出「回小说库补提炼 / 漫剧直接创建」判定）。
+ */
+export declare function nominateMangaRoles(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, chapterNo: number): Promise<MangaRoleCandidate[]>;
 /** ✨ 从道藏/红线提炼「视觉世界观规则」：生图/生视频必须遵守的设定纠偏（如"商品=人，禁止常规超市商品"）。 */
 export declare function extractVisualRules(ctx: Context, config: NovelConfig, project: ProjectState): Promise<string[]>;
 /**
@@ -143,7 +147,10 @@ export declare function testImageEndpoint(baseURL: string, apiKey: string, model
     message?: string;
     modelFound?: boolean;
 }>;
+/** 小说角色库：生成角色定妆图并写回角色卡（imageUrl）。 */
 export declare function generateRoleReferenceImage(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, name: string, style?: string, modelId?: string): Promise<string>;
+/** 漫剧角色卡：生成定妆图并写回漫剧卡（imageUrl）。 */
+export declare function generateMangaRoleReferenceImage(ctx: Context, config: NovelConfig, project: ProjectState, outputDir: string, cardId: string, style?: string, modelId?: string): Promise<string>;
 /** 🩺 剧情健康检查：基于已写章节数/各线状态/编年录，判断是否需要新线及添加时机。 */
 export declare function analyzePlotlineHealth(ctx: Context, config: NovelConfig, project: ProjectState): Promise<PlotlineHealthReport>;
 /** ✨ AI 剧情方案：基于健康检查结果设计下一阶段方向与建议新线。 */

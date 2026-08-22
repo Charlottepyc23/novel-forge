@@ -18,7 +18,6 @@ import { RunPanel } from './RunPanel.tsx'
 import { CreateBookView } from './CreateBookView.tsx'
 import { ImportModal } from './ImportModal.tsx'
 import { WorldTab } from './WorldTab.tsx'
-import { StoryboardTab } from './StoryboardTab.tsx'
 import { MangaWorkspace } from './MangaWorkspace.tsx'
 import { AuditIssueRow, PlotlineCard, PlotlineHealthPanel, PlotlinePlanPanel, PlotlineSuggestionPanel, RoleCandidateRow, RoleCard, StatCell, TodoRow } from './views.tsx'
 import { extractDocxTextFromBuffer } from '../docx.ts'
@@ -87,7 +86,7 @@ const NAV_GROUPS: ReadonlyArray<{ id: string; label: string; items: ReadonlyArra
     label: '工具',
     items: [
       { id: 'assistant', label: tt('tab.assistant'), icon: <MessageSquare size={16} /> },
-      { id: 'progress', label: 'AI进度', icon: <BarChart3 size={16} /> },
+      { id: 'progress', label: 'AI 进度', icon: <BarChart3 size={16} /> },
       { id: 'breakdown', label: '拆书分析', icon: <Search size={16} /> },
       { id: 'manhua', label: '漫剧工作台', icon: <Clapperboard size={16} /> },
       { id: 'run', label: '生产单', icon: <Factory size={16} /> },
@@ -226,7 +225,7 @@ function paragraphDiff(oldText: string, newText: string): DiffRow[] {
 function renderBeats(beats: string): ReactElement {
   const lines = beats.split('\n')
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-2)' }}>
       {lines.map((line, i) => {
         const trimmed = line.trim()
         const match = /^([^：:]{2,14})[：:]/.exec(trimmed)
@@ -382,14 +381,14 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
     setEditorFontSize(v)
     try { window.localStorage.setItem('dsh-novel-forge.editor.fontSize', String(v)) } catch { /* ignore */ }
   }
-  /** 面板主题（localStorage 记忆）：'liquid'=iOS 液态玻璃（绿） / 'classic'=经典毛玻璃（蓝） / 'neumorph'=新拟物（浅色）。 */
-  const [panelTheme, setPanelTheme] = useState<'liquid' | 'classic' | 'neumorph'>(() => {
+  /** 面板主题（localStorage 记忆）：'liquid'=iOS 液态玻璃（绿） / 'neumorph'=新拟物（浅色） / 'macos'=macOS 玻璃（蓝，随外观自动浅深） / 'clay'=粘土拟态。 */
+  const [panelTheme, setPanelTheme] = useState<'liquid' | 'neumorph' | 'macos' | 'clay'>(() => {
     try {
       const v = window.localStorage.getItem('dsh-novel-forge.theme')
-      return v === 'classic' || v === 'neumorph' ? v : 'liquid'
+      return v === 'neumorph' || v === 'macos' || v === 'clay' ? v : 'liquid'
     } catch { return 'liquid' }
   })
-  const changePanelTheme = (next: 'liquid' | 'classic' | 'neumorph'): void => {
+  const changePanelTheme = (next: 'liquid' | 'neumorph' | 'macos' | 'clay'): void => {
     setPanelTheme(next)
     try { window.localStorage.setItem('dsh-novel-forge.theme', next) } catch { /* ignore */ }
   }
@@ -2575,7 +2574,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
           <div className={css.card} style={{ borderColor: 'var(--nf-info)' }}>
             <div className={css.busyRow}>
               <span style={{ color: 'var(--nf-info)' }}>第 {draftNo} 章有未采纳的润色/修订草稿（原稿未被改动）</span>
-              <span style={{ display: 'flex', gap: 8 }}>
+              <span style={{ display: 'flex', gap: 'var(--nf-space-8)' }}>
                 <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void openWorkspace(draftNo) }}>
                   打开工作区
                 </button>
@@ -2602,7 +2601,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               )}
               <span className={css.cardTitle}>第 {workspace.no} 章《{workspace.title}》</span>
               <span className={css.meta}>{workspace.original.length} 字</span>
-              <span style={{ display: 'flex', gap: 4, alignItems: 'center', marginLeft: 'auto' }}>
+              <span style={{ display: 'flex', gap: 'var(--nf-space-4)', alignItems: 'center', marginLeft: 'auto' }}>
                 <button type="button" className={css.iconButton} title="减小字号" aria-label="减小字号" onClick={() => { changeEditorFontSize(editorFontSize - 1) }}>A−</button>
                 <span className={css.meta}>{editorFontSize}px</span>
                 <button type="button" className={css.iconButton} title="增大字号" aria-label="增大字号" onClick={() => { changeEditorFontSize(editorFontSize + 1) }}>A＋</button>
@@ -2717,12 +2716,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                     </div>
                     <div className={css.meta}><b>总评：</b>{wsCheckReport.verdict}</div>
                     {wsCheckReport.issues.length > 0 && (
-                      <ul style={{ margin: 0, paddingLeft: 16, display: 'flex', flexDirection: 'column', gap: 3, fontSize: editorFontSize - 1, maxHeight: '45vh', overflowY: 'auto' }}>
+                      <ul style={{ margin: 0, paddingLeft: 'var(--nf-space-16)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', fontSize: editorFontSize - 1, maxHeight: '45vh', overflowY: 'auto' }}>
                         {wsCheckReport.issues.map((issue, i) => (
-                          <li key={i} style={{ color: severityColor(issue.severity), display: 'flex', gap: 6, alignItems: 'flex-start' }}>
+                          <li key={i} style={{ color: severityColor(issue.severity), display: 'flex', gap: 'var(--nf-space-6)', alignItems: 'flex-start' }}>
                             <input
                               type="checkbox"
-                              style={{ marginTop: 1 }}
+                              style={{ marginTop: 'var(--nf-space-2)' }}
                               checked={wsChecked.includes(i)}
                               onChange={e => {
                                 setWsChecked(prev => e.target.checked ? [...prev, i] : prev.filter(x => x !== i))
@@ -2748,7 +2747,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <div className={css.wsPreview} style={{ flex: 1, minHeight: 0 }}>
                     <div className={css.busyRow}>
                       <span className={css.meta}>优化预览（{workspace.draft.length} 字）</span>
-                      <span style={{ display: 'flex', gap: 8 }}>
+                      <span style={{ display: 'flex', gap: 'var(--nf-space-8)' }}>
                         <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWsShowDiff(v => !v) }}>
                           {wsShowDiff ? '显示文本' : '查看对比'}
                         </button>
@@ -2871,17 +2870,17 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </button>
               </div>
               {auditStatus?.status === 'running' && (
-                <div className={css.meta} style={{ marginTop: 8 }}>
+                <div className={css.meta} style={{ marginTop: 'var(--nf-space-8)' }}>
                   🔍 全书质检中：{auditStatus.completedBatches}/{auditStatus.totalBatches > 0 ? auditStatus.totalBatches : '…'} 批
                   {auditStatus.totalBatches > 0 && (
-                    <div className={css.dashJourneyBar} style={{ marginTop: 4 }}>
+                    <div className={css.dashJourneyBar} style={{ marginTop: 'var(--nf-space-4)' }}>
                       <div className={css.dashJourneyFill} style={{ width: `${Math.round((auditStatus.completedBatches / auditStatus.totalBatches) * 100)}%` }} />
                     </div>
                   )}
                 </div>
               )}
               {auditStatus?.status === 'error' && auditStatus.error !== undefined && (
-                <div className={css.meta} style={{ color: 'var(--nf-error)', marginTop: 8 }}>全书质检失败：{auditStatus.error}</div>
+                <div className={css.meta} style={{ color: 'var(--nf-error)', marginTop: 'var(--nf-space-8)' }}>全书质检失败：{auditStatus.error}</div>
               )}
               <div className={css.assetGrid}>
                 <StatCell
@@ -2913,7 +2912,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             </div>
 
             {/* 剧情线进度 | 作者复盘趋势：精简摘要卡，并排（点击跳转详情页） */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'stretch' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 'var(--nf-space-14)', alignItems: 'stretch' }}>
               <div className={css.card}>
                 <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
                   <span className={css.cardTitle}>🧵 {tt('plotlines.workflowTitle')}（{(project?.plotlines ?? []).length} 条）</span>
@@ -2992,7 +2991,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   </button>
                 </div>
                 {auditIssues.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
                     {auditIssues.map((issue, i) => (
                       <AuditIssueRow
                         key={i}
@@ -3124,7 +3123,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               ) : (
                 /* 只读展示：大纲是开书时的出生证明 */
                 <>
-                <div className={css.meta} style={{ marginBottom: 6 }}>
+                <div className={css.meta} style={{ marginBottom: 'var(--nf-space-6)' }}>
                   大纲是本书的「出生证明」；已写章节可点右上角「🔄 反推大纲」从正文反推，或「更新大纲」手动修订。
                 </div>
                 <pre className={css.outlineReadonly}>{project.outline}</pre>
@@ -3187,7 +3186,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </button>
             </div>
             {/* 封面 */}
-            <div className={css.row} style={{ alignItems: 'flex-start', gap: 14 }}>
+            <div className={css.row} style={{ alignItems: 'flex-start', gap: 'var(--nf-space-14)' }}>
               <div className={css.coverPreview}>
                 {coverDataUrl !== null ? (
                   <img src={coverDataUrl} alt="封面" />
@@ -3195,7 +3194,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <span className={css.coverPlaceholder}>暂无封面</span>
                 )}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)' }}>
                 <div className={css.row}>
                   <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy || project === null} onClick={() => { coverFileRef.current?.click() }}>
                     📤 上传封面
@@ -3286,9 +3285,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </div>
                 <span className={css.meta}>{tt('sensitive.hint')}</span>
                 {sensHits.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', maxHeight: 300, overflowY: 'auto', fontSize: 'var(--nf-fs-12)' }}>
                     {sensHits.map((hit, i) => (
-                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', border: '1px solid var(--nf-border)', borderRadius: 6, padding: '4px 8px' }}>
+                      <div key={i} style={{ display: 'flex', gap: 'var(--nf-space-8)', alignItems: 'flex-start', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-4) var(--nf-space-8)' }}>
                         <span className={css.badge} style={{ borderColor: 'var(--nf-warn)', color: 'var(--nf-warn)', flex: 'none' }}>
                           {hit.chapterNo > 0 ? `第${hit.chapterNo}章` : '文本'}
                         </span>
@@ -3315,7 +3314,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             {chapters.length > 0 && (
               <div className={css.card}>
                 <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                  <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+                  <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
                     {(volumes !== undefined && volumes.length > 0) && (
                       <>
                         <button
@@ -3372,7 +3371,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                         <span className={css.chapterNum}>{chapter.no}</span>
                         <div className={css.chapterMain}>
                           <div className={css.chapterTitle}>
-                            <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ padding: '1px 6px' }} onClick={() => { void handleToggleChapter(chapter.no) }}>
+                            <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ padding: 'var(--nf-space-2) var(--nf-space-6)' }} onClick={() => { void handleToggleChapter(chapter.no) }}>
                               {expanded ? '−' : '+'}
                             </button>
                             <span>{chapter.title}</span>
@@ -3383,7 +3382,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                           </div>
                           {!expanded && <div className={css.chapterBeats} title={chapter.beats}>{chapter.beats}</div>}
                           {expanded && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
                               <div className={css.meta}><b>{tt('plan.beats')}:</b></div>
                               <div className={css.meta}>{renderBeats(chapter.beats)}</div>
                               {chapter.summary !== undefined && chapter.summary !== '' && (
@@ -3400,7 +3399,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                   </div>
                                   <div className={css.meta}><b>{tt('plan.reviewVerdict')}:</b> {review.verdict}</div>
                                   {review.issues.length > 0 && (
-                                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+                                    <ul style={{ margin: 0, paddingLeft: 'var(--nf-space-18)', fontSize: 'var(--nf-fs-12)' }}>
                                       {review.issues.map((issue, i) => (
                                         <li key={i} style={{ color: severityColor(issue.severity) }}>
                                           [{issue.severity}] {issue.item} → {issue.suggestion}
@@ -3446,7 +3445,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                                 </div>
                               )}
                               {(chapter.status === 'rejected' || chapter.status === 'written' || chapter.status === 'approved') && (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
                                   <div className={css.meta} style={{ fontWeight: 600 }}>
                                     润色 / 修订 — 在右上角打开工作区：左栏原文可直接选中文字做局部修订，右栏输入指令后预览，确认后再应用（未应用不改动原稿）
                                   </div>
@@ -3527,16 +3526,16 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         )}
 
         {activeTab === 'book' && (
-          <div className={css.card} style={{ gap: 12 }}>
+          <div className={css.card} style={{ gap: 'var(--nf-space-12)' }}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📚 本书设定</span>
+              <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-16)', fontWeight: 700 }}>📚 本书设定</span>
               <span className={css.meta}>当前书的知识与资料（参考 AI-Novel-Writing-Assistant：世界观/角色准备收进书内）</span>
             </div>
-            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
               <button
                 type="button"
                 className={`${css.button} ${bookTab === 'bible' ? css.buttonPrimary : ''}`}
-                style={{ fontSize: 14, flex: 1 }}
+                style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                 onClick={() => { changeBookTab('bible') }}
                 title="设定库：题材 / 世界观规则 / 人物摘要 / 红线 / 文风"
               >
@@ -3545,7 +3544,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <button
                 type="button"
                 className={`${css.button} ${bookTab === 'world' ? css.buttonPrimary : ''}`}
-                style={{ fontSize: 14, flex: 1 }}
+                style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                 onClick={() => { changeBookTab('world') }}
                 title="大世界：境界体系 / 地理区域 / 势力分布（注入生成与审稿提示词）"
               >
@@ -3554,7 +3553,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <button
                 type="button"
                 className={`${css.button} ${bookTab === 'roles' ? css.buttonPrimary : ''}`}
-                style={{ fontSize: 14, flex: 1 }}
+                style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                 onClick={() => { changeBookTab('roles') }}
                 title="角色库：全书角色主表（定位 / 关系网 / 成长线 / 知情度）"
               >
@@ -3563,7 +3562,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <button
                 type="button"
                 className={`${css.button} ${bookTab === 'facts' ? css.buttonPrimary : ''}`}
-                style={{ fontSize: 14, flex: 1 }}
+                style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                 onClick={() => { changeBookTab('facts') }}
                 title="编年录与复盘记录"
               >
@@ -3584,13 +3583,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             {bible === undefined ? (
               <span className={css.meta}>{tt('bible.none')}</span>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-10)' }}>
                 {bible.genre !== '' && (
                   <div><b>{tt('bible.genre')}:</b> <span className={css.meta}>{bible.genre}</span></div>
                 )}
                 {/* 世界观规则独立卡片（可编辑，每行一条） */}
                 {bible.worldRules.length > 0 && (
-                  <div style={{ border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px' }}>
+                  <div style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
                     <div className={css.row} style={{ justifyContent: 'space-between' }}>
                       <b>{tt('bible.worldRules')}（{bible.worldRules.length}）</b>
                       <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setWorldRulesDraft(bible.worldRules.join('\n')) }}>
@@ -3598,7 +3597,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       </button>
                     </div>
                     {worldRulesDraft !== '' && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', marginTop: 'var(--nf-space-6)' }}>
                         <textarea
                           className={css.textarea}
                           style={{ minHeight: 120 }}
@@ -3617,7 +3616,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       </div>
                     )}
                     {worldRulesDraft === '' && (
-                      <ul style={{ margin: '4px 0 0', paddingLeft: 18, fontSize: 12 }}>{bible.worldRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                      <ul style={{ margin: '4px 0 0', paddingLeft: 'var(--nf-space-18)', fontSize: 'var(--nf-fs-12)' }}>{bible.worldRules.map((r, i) => <li key={i}>{r}</li>)}</ul>
                     )}
                   </div>
                 )}
@@ -3625,7 +3624,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   <div>
                     <b>{tt('bible.characters')}（{bible.characters.length}）</b>
                     {bible.characters.map(card => (
-                      <div key={card.name} style={{ marginTop: 4, fontSize: 12 }}>
+                      <div key={card.name} style={{ marginTop: 'var(--nf-space-4)', fontSize: 'var(--nf-fs-12)' }}>
                         <b>{card.name}</b> <span className={css.meta}>[{card.role}] {card.traits.join('、')}</span>
                         {card.goals !== '' && <div className={css.meta}>目标：{card.goals}</div>}
                         {card.relations !== '' && <div className={css.meta}>关系：{card.relations}</div>}
@@ -3636,13 +3635,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 {bible.redLines.length > 0 && (
                   <div>
                     <b>{tt('bible.redLines')}（{bible.redLines.length}）</b>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--nf-error)' }}>{bible.redLines.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    <ul style={{ margin: 0, paddingLeft: 'var(--nf-space-18)', fontSize: 'var(--nf-fs-12)', color: 'var(--nf-error)' }}>{bible.redLines.map((r, i) => <li key={i}>{r}</li>)}</ul>
                   </div>
                 )}
                 {bible.style.length > 0 && (
                   <div>
                     <b>{tt('bible.style')}（{bible.style.length}）</b>
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>{bible.style.map((r, i) => <li key={i}>{r}</li>)}</ul>
+                    <ul style={{ margin: 0, paddingLeft: 'var(--nf-space-18)', fontSize: 'var(--nf-fs-12)' }}>{bible.style.map((r, i) => <li key={i}>{r}</li>)}</ul>
                   </div>
                 )}
               </div>
@@ -3692,7 +3691,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             <span className={css.meta}>角色库是全书角色主表：定位（女主/女配/配角/反派）、身份、关系网、成长线、知情度——生成与审稿都会按定位规格刻画互动。点「从编年录刷新状态」可在每张卡上显示角色当前状态。</span>
 
             {roleCandidates !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, border: '1px solid var(--nf-info)', borderRadius: 12, padding: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', border: '1px solid var(--nf-info)', borderRadius: 'var(--nf-radius-12)', padding: 'var(--nf-space-10)' }}>
                 <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
                   <b>✨ AI 提炼候选（{roleCandidates.length}）</b>
                   <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setRoleCandidates(null) }}>收起</button>
@@ -3711,7 +3710,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
 
             {roleDraft !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--nf-accent)', borderRadius: 12, padding: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-12)', padding: 'var(--nf-space-10)' }}>
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <div className={css.field} style={{ flex: 1, minWidth: 140 }}>
                     <label className={css.fieldLabel}>角色名</label>
@@ -3761,7 +3760,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             {(project?.roles ?? []).length === 0 ? (
               <span className={css.meta}>角色库为空——点「✨ 从全书提炼角色」自动建立，或手动新增。</span>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
                 {(project?.roles ?? []).map(r => (
                   <RoleCard
                     key={r.name}
@@ -3783,18 +3782,18 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'settings' && configDraft !== null && (
           <>
             {/* 设置页内子导航（大容器） */}
-            <div className={`${css.card} ${css.settingsCard}`} style={{ padding: '20px 22px', gap: 14 }}>
-              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
-                <span className={css.cardTitle} style={{ fontSize: 20, fontWeight: 700 }}>⚙️ 设置</span>
+            <div className={`${css.card} ${css.settingsCard}`}>
+              <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--nf-space-8)' }}>
+                <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-20)', fontWeight: 700 }}>⚙️ 设置</span>
                 <span className={css.meta}>当前：{config?.provider} / {config?.model} · {config?.outputDir}</span>
               </div>
-              <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
+              <div className={css.row} style={{ gap: 'var(--nf-space-8)', flexWrap: 'wrap' }}>
                 {SETTINGS_SECTIONS.map(s => (
                   <button
                     key={s.id}
                     type="button"
                     className={`${css.button} ${settingsTab === s.id ? css.buttonPrimary : ''}`}
-                    style={{ fontSize: 14, padding: '8px 12px', flex: 1, minWidth: 104, justifyContent: 'center' }}
+                    style={{ fontSize: 'var(--nf-fs-14)', padding: 'var(--nf-space-8) var(--nf-space-12)', flex: 1, minWidth: 104, justifyContent: 'center' }}
                     onClick={() => { changeSettingsTab(s.id) }}
                   >
                     {s.icon} {s.label}
@@ -3804,9 +3803,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             </div>
 
             {settingsTab === 'model' && (
-              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 26 }}>
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 'var(--nf-space-24)' }}>
                 <span className={css.cardTitle}><Brain size={18} style={{ verticalAlign: -3 }} /> 模型与推理</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-24)' }}>
                   <div className={css.field}>
                     <label className={css.fieldLabel}>{tt('settings.provider')}</label>
                     <input className={css.input} value={configDraft.provider} onChange={e => { setConfigDraft({ ...configDraft, provider: e.target.value }) }} />
@@ -3832,7 +3831,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                     {modelCustomMode && (
                       <input
                         className={css.input}
-                        style={{ marginTop: 6 }}
+                        style={{ marginTop: 'var(--nf-space-6)' }}
                         value={configDraft.model}
                         placeholder={tt('settings.modelCustomPlaceholder')}
                         onChange={e => { setConfigDraft({ ...configDraft, model: e.target.value }) }}
@@ -3866,9 +3865,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
 
             {settingsTab === 'writing' && (
-              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 26 }}>
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 'var(--nf-space-24)' }}>
                 <span className={css.cardTitle}><PenLine size={18} style={{ verticalAlign: -3 }} /> 写作与审稿</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-24)' }}>
                   <div className={css.field}>
                     <label className={css.fieldLabel}>{tt('settings.chapterChars')}</label>
                     <input className={css.input} type="number" min={1000} max={20000} value={configDraft.chapterChars} onChange={e => { setConfigDraft({ ...configDraft, chapterChars: Number(e.target.value) }) }} />
@@ -3935,10 +3934,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
 
             {settingsTab === 'image' && (
-              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 24 }}>
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 'var(--nf-space-24)' }}>
                 <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap', alignItems: 'center' }}>
                   <span className={css.cardTitle}><Palette size={18} style={{ verticalAlign: -3 }} /> 生图模型</span>
-                  <span className={css.row} style={{ gap: 8, alignItems: 'center' }}>
+                  <span className={css.row} style={{ gap: 'var(--nf-space-8)', alignItems: 'center' }}>
                     <span className={css.meta}>启用生图功能</span>
                     <button
                       type="button"
@@ -3952,9 +3951,9 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   </span>
                 </div>
                 <span className={css.meta}>支持多套 OpenAI 兼容生图接口（豆包 / 即梦 / 其他平台）；启用一条作为生成模型，保存后角色详情显示「AI 生图」按钮。</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-20)' }}>
                   {(configDraft.imageModels ?? []).map(m => (
-                    <div key={m.id} style={{ border: m.enabled ? '1px solid var(--nf-accent)' : '1px solid var(--nf-border)', borderRadius: 12, padding: 14, display: 'flex', flexDirection: 'column', gap: 12, background: m.enabled ? 'var(--nf-accent-soft)' : 'transparent' }}>
+                    <div key={m.id} style={{ border: m.enabled ? '1px solid var(--nf-accent)' : '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-12)', padding: 'var(--nf-space-14)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-12)', background: m.enabled ? 'var(--nf-accent-soft)' : 'transparent' }}>
                       <div className={css.row} style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
                         <div className={css.field} style={{ flex: 1, minWidth: 180 }}>
                           <label className={css.fieldLabel}>名称</label>
@@ -3973,7 +3972,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                         <label className={css.fieldLabel}>API Key</label>
                         <input className={css.input} type="password" placeholder="ark-..." value={m.apiKey} onChange={e => { updateImageModel(m.id, { apiKey: e.target.value }) }} />
                       </div>
-                      <div className={css.row} style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <div className={css.row} style={{ gap: 'var(--nf-space-8)', flexWrap: 'wrap', alignItems: 'center' }}>
                         <button type="button" className={`${css.button} ${css.buttonSmall} ${m.enabled ? css.buttonPrimary : ''}`} onClick={() => { enableImageModel(m.id) }}>
                           {m.enabled ? '✓ 已启用' : '设为启用'}
                         </button>
@@ -3986,8 +3985,8 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                           const st = imageTestState[m.id]
                           if (st === undefined || st.testing) return null
                           return st.ok === true
-                            ? <span style={{ color: 'var(--nf-success)', fontSize: 12, fontWeight: 600 }}>✓ 连通 · {st.ms}ms{st.modelFound === true ? '' : st.modelFound === false ? '（模型未在列表）' : ''}</span>
-                            : <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>✗ {st.message ?? '失败'}</span>
+                            ? <span style={{ color: 'var(--nf-success)', fontSize: 'var(--nf-fs-12)', fontWeight: 600 }}>✓ 连通 · {st.ms}ms{st.modelFound === true ? '' : st.modelFound === false ? '（模型未在列表）' : ''}</span>
+                            : <span style={{ color: 'var(--nf-error)', fontSize: 'var(--nf-fs-12)' }}>✗ {st.message ?? '失败'}</span>
                         })()}
                       </div>
                     </div>
@@ -4003,7 +4002,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
 
             {settingsTab === 'files' && (
-              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 24 }}>
+              <div className={`${css.card} ${css.settingsCard}`} style={{ gap: 'var(--nf-space-24)' }}>
                 <span className={css.cardTitle}><Folder size={18} style={{ verticalAlign: -3 }} /> 路径与文件</span>
                 <div className={css.field}>
                   <label className={css.fieldLabel}>{tt('settings.outlinePath')}</label>
@@ -4019,7 +4018,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
 
                 <div style={{ borderTop: '1px solid var(--nf-border)', margin: '14px 0 12px' }} />
 
-                <span className={css.cardTitle} style={{ fontSize: 13 }}>💾 保存与导出</span>
+                <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-14)' }}>💾 保存与导出</span>
                 <div className={css.row}>
                   <button type="button" className={`${css.button} ${css.buttonPrimary}`} disabled={busy} onClick={() => { void handleSaveConfig() }}>
                     {tt('settings.save')}
@@ -4040,10 +4039,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <div className={`${css.card} ${css.settingsCard}`}>
                 <span className={css.cardTitle}><Sparkles size={18} style={{ verticalAlign: -3 }} /> 外观与主题</span>
                 <span className={css.meta}>选择适合长时间创作的界面颜色和显示密度。主题只保存在当前设备，不影响小说内容和任务状态。</span>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-24)' }}>
                   <div className={css.field}>
-                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>显示模式</label>
-                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={themeMode} onChange={e => { changeThemeMode(e.target.value as 'system' | 'light' | 'dark') }}>
+                    <label className={css.fieldLabel} style={{ fontSize: 'var(--nf-fs-14)' }}>显示模式</label>
+                    <select className={css.input} style={{ padding: 'var(--nf-space-10) var(--nf-space-12)', fontSize: 'var(--nf-fs-14)' }} value={themeMode} onChange={e => { changeThemeMode(e.target.value as 'system' | 'light' | 'dark') }}>
                       <option value="system">跟随系统</option>
                       <option value="light">浅色</option>
                       <option value="dark">深色</option>
@@ -4051,17 +4050,18 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                     <span className={css.meta}>强制浅色/深色只作用于小说工坊面板</span>
                   </div>
                   <div className={css.field}>
-                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>主题风格</label>
-                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={panelTheme} onChange={e => { changePanelTheme(e.target.value as 'liquid' | 'classic' | 'neumorph') }}>
+                    <label className={css.fieldLabel} style={{ fontSize: 'var(--nf-fs-14)' }}>主题风格</label>
+                    <select className={css.input} style={{ padding: 'var(--nf-space-10) var(--nf-space-12)', fontSize: 'var(--nf-fs-14)' }} value={panelTheme} onChange={e => { changePanelTheme(e.target.value as 'liquid' | 'neumorph' | 'macos' | 'clay') }}>
                       <option value="liquid">液态玻璃 · 清新绿（默认）</option>
-                      <option value="classic">经典毛玻璃 · 沉静蓝</option>
                       <option value="neumorph">新拟物 · 柔和浅色</option>
+                      <option value="macos">macOS · 玻璃（蓝，随外观浅/深）</option>
+                      <option value="clay">粘土拟态 · 柔和黏土</option>
                     </select>
                     <span className={css.meta}>{tt('settings.themeHint')}</span>
                   </div>
                   <div className={css.field}>
-                    <label className={css.fieldLabel} style={{ fontSize: 13 }}>界面密度</label>
-                    <select className={css.input} style={{ padding: '10px 12px', fontSize: 14 }} value={themeDensity} onChange={e => { changeThemeDensity(e.target.value as 'comfort' | 'compact' | 'spacious') }}>
+                    <label className={css.fieldLabel} style={{ fontSize: 'var(--nf-fs-14)' }}>界面密度</label>
+                    <select className={css.input} style={{ padding: 'var(--nf-space-10) var(--nf-space-12)', fontSize: 'var(--nf-fs-14)' }} value={themeDensity} onChange={e => { changeThemeDensity(e.target.value as 'comfort' | 'compact' | 'spacious') }}>
                       <option value="comfort">舒适（默认）</option>
                       <option value="compact">紧凑</option>
                       <option value="spacious">宽松</option>
@@ -4070,7 +4070,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                   </div>
                 </div>
                 <div className={css.row} style={{ justifyContent: 'flex-end' }}>
-                  <button type="button" className={css.button} style={{ padding: '9px 18px', fontSize: 13.5 }} onClick={resetTheme}>
+                  <button type="button" className={css.button} style={{ padding: 'var(--nf-space-10) var(--nf-space-18)', fontSize: 'var(--nf-fs-14)' }} onClick={resetTheme}>
                     <RotateCcw size={14} style={{ verticalAlign: -2 }} /> 恢复默认主题
                   </button>
                 </div>
@@ -4081,13 +4081,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'book' && bookTab === 'facts' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📚 编年 / 复盘</span>
+              <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-16)', fontWeight: 700 }}>📚 编年 / 复盘</span>
             </div>
-            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
                 <button
                   type="button"
                   className={`${css.button} ${archiveTab === 'facts' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
+                  style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                   onClick={() => { changeArchiveTab('facts') }}
                   title="编年录：客观事实流水（第 N 章 · 事件），生成/审稿查证用"
                 >
@@ -4096,7 +4096,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <button
                   type="button"
                   className={`${css.button} ${archiveTab === 'reviews' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
+                  style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                   onClick={() => { changeArchiveTab('reviews') }}
                   title="复盘记录：每章作者复盘（钩子 / 推进 / 衔接 / 趋势）"
                 >
@@ -4138,12 +4138,12 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 </span>
               )
             })()}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-10)', overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {(() => {
                 const groupsWithReviews = chapterGroups.filter(group => group.chapters.some(c => c.authorReview !== undefined))
                 if (groupsWithReviews.length === 0) return null
                 return (
-                  <div className={css.row} style={{ justifyContent: 'flex-end', gap: 6 }}>
+                  <div className={css.row} style={{ justifyContent: 'flex-end', gap: 'var(--nf-space-6)' }}>
                     <button
                       type="button"
                       className={`${css.button} ${css.buttonSmall}`}
@@ -4166,10 +4166,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 if (groupReviewed.length === 0) return null
                 const volumeExpanded = expandedVolumes[group.no] === true
                 return (
-                  <div key={group.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 10, overflow: 'hidden' }}>
+                  <div key={group.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', overflow: 'hidden' }}>
                     <button
                       type="button"
-                      style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}
+                      style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 'var(--nf-space-8) var(--nf-space-12)', fontSize: 'var(--nf-fs-14)', display: 'flex', alignItems: 'center', gap: 'var(--nf-space-8)', flexWrap: 'wrap' }}
                       onClick={() => { setExpandedVolumes(prev => ({ ...prev, [group.no]: !volumeExpanded })) }}
                     >
                       <span style={{ color: 'var(--nf-text-3)' }}>{volumeExpanded ? '▾' : '▸'}</span>
@@ -4177,25 +4177,25 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       <span className={css.meta}>已复盘 {groupReviewed.length}/{group.chapters.length} 章</span>
                     </button>
                     {volumeExpanded && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '4px 8px 8px', borderTop: '1px solid var(--nf-border)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', padding: 'var(--nf-space-4) var(--nf-space-8) var(--nf-space-8)', borderTop: '1px solid var(--nf-border)' }}>
                         {[...groupReviewed].reverse().map(c => {
                           const ar = c.authorReview!
                           const expanded = expandedReviewChapter === c.no
                           return (
-                            <div key={c.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 8, overflow: 'hidden' }}>
+                            <div key={c.no} style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-8)', overflow: 'hidden' }}>
                               <button
                                 type="button"
-                                style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: '6px 10px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}
+                                style={{ width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)', display: 'flex', alignItems: 'center', gap: 'var(--nf-space-6)', flexWrap: 'wrap' }}
                                 onClick={() => { setExpandedReviewChapter(expanded ? null : c.no) }}
                               >
                                 <span style={{ color: 'var(--nf-text-3)' }}>{expanded ? '▾' : '▸'}</span>
                                 <b>第{c.no}章《{c.title}》</b>
                                 <span style={{ color: ar.hookHonored ? 'var(--nf-success)' : 'var(--nf-warn)' }}>钩子{ar.hookHonored ? '✓' : '✗'}</span>
                                 <span style={{ color: ar.endingHook >= 6 ? 'var(--nf-success)' : 'var(--nf-error)' }}>结尾钩子 {ar.endingHook}/10</span>
-                                {ar.plotlineProgress !== '' && <span className={css.meta} style={{ marginLeft: 4 }}>{ar.plotlineProgress.slice(0, 40)}{ar.plotlineProgress.length > 40 ? '…' : ''}</span>}
+                                {ar.plotlineProgress !== '' && <span className={css.meta} style={{ marginLeft: 'var(--nf-space-4)' }}>{ar.plotlineProgress.slice(0, 40)}{ar.plotlineProgress.length > 40 ? '…' : ''}</span>}
                               </button>
                               {expanded && (
-                                <div style={{ padding: '4px 10px 8px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 3, borderTop: '1px solid var(--nf-border)' }}>
+                                <div style={{ padding: 'var(--nf-space-4) var(--nf-space-10) var(--nf-space-8)', fontSize: 'var(--nf-fs-12)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', borderTop: '1px solid var(--nf-border)' }}>
                                   {ar.hookNote !== '' && <span className={css.meta}><b>钩子：</b>{ar.hookNote}</span>}
                                   {ar.plotlineProgress !== '' && <span className={css.meta}><b>推进：</b>{ar.plotlineProgress}</span>}
                                   {ar.continuity !== '' && <span className={css.meta}><b>衔接：</b>{ar.continuity}</span>}
@@ -4228,10 +4228,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             </div>
             <span className={css.meta}>{tt('facts.hint')}</span>
             {(project?.facts ?? []).length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: '60vh', overflowY: 'auto', fontSize: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', maxHeight: '60vh', overflowY: 'auto', fontSize: 'var(--nf-fs-12)' }}>
                 {[...(project?.facts ?? [])].reverse().map((fact, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                    <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)', flex: 'none', marginTop: 1 }}>
+                  <div key={i} style={{ display: 'flex', gap: 'var(--nf-space-8)', alignItems: 'flex-start' }}>
+                    <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)', flex: 'none', marginTop: 'var(--nf-space-2)' }}>
                       第 {fact.chapterNo} 章
                     </span>
                     <span className={css.meta}>{fact.text}</span>
@@ -4249,13 +4249,13 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
         {activeTab === 'plotlines' && (
           <div className={css.card}>
             <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-              <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>📜 长线管理</span>
+              <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-16)', fontWeight: 700 }}>📜 长线管理</span>
             </div>
-            <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+            <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
                 <button
                   type="button"
                   className={`${css.button} ${longlineTab === 'plotlines' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
+                  style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                   onClick={() => { changeLonglineTab('plotlines') }}
                   title="剧情线：故事明线（主线 / 支线 / 人物 / 悬念）"
                 >
@@ -4264,7 +4264,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <button
                   type="button"
                   className={`${css.button} ${longlineTab === 'foreshadow' ? css.buttonPrimary : ''}`}
-                  style={{ fontSize: 14, flex: 1 }}
+                  style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
                   onClick={() => { changeLonglineTab('foreshadow') }}
                   title="伏笔：道具 / 事件级暗线（埋设 → 回收）"
                 >
@@ -4300,7 +4300,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                           </div>
                         </div>
                         <span className={css.badge} style={{ borderColor: statusColor, color: statusColor }}>{statusLabel}</span>
-                        <div className={css.row} style={{ gap: 4 }}>
+                        <div className={css.row} style={{ gap: 'var(--nf-space-4)' }}>
                           {f.status === 'planned' && (
                             <button type="button" className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => {
                               void api.foreshadow({ id: f.id, status: 'planted', plantedChapter: doneCount + 1 }).then(r => setProject(prev => prev === null ? prev : { ...prev, foreshadows: r.foreshadows }))
@@ -4395,7 +4395,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             )}
 
             {plotlineDraft !== null && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, border: '1px solid var(--nf-accent)', borderRadius: 12, padding: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-12)', padding: 'var(--nf-space-10)' }}>
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <div className={css.field} style={{ flex: 2, minWidth: 160 }}>
                     <label className={css.fieldLabel}>{tt('plotlines.name')}</label>
@@ -4442,7 +4442,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             {(project?.plotlines ?? []).length === 0 ? (
               <span className={css.meta}>{tt('plotlines.empty')}</span>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', overflowY: 'auto', flex: 1, minHeight: 0 }}>
                 {(project?.plotlines ?? []).map(line => (
                   <PlotlineCard
                     key={line.id}
@@ -4510,7 +4510,7 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                 <span className={css.meta}>选择范围与档位，点「开始拆书」对已写章节做整卷体检</span>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-10)' }}>
                 <span className={css.meta}>
                   分析 {breakdownResult.chaptersScanned} 章 · {breakdownResult.sections.length} 个小节 · 约 {breakdownResult.usedTokens} token
                 </span>
@@ -4520,14 +4520,14 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
                       <b>{sec.title}</b>
                     </div>
                     {Object.keys(sec.structured).length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, marginBottom: 6 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-2)', fontSize: 'var(--nf-fs-12)', marginBottom: 'var(--nf-space-6)' }}>
                         {Object.entries(sec.structured).map(([k, v]) => {
                           const label = (typeof v === 'string') ? v : Array.isArray(v) ? (v as string[]).join('、') : JSON.stringify(v)
                           return <div key={k} className={css.meta}><b>{k}：</b>{label}</div>
                         })}
                       </div>
                     )}
-                    <div className={css.meta} style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{sec.markdown}</div>
+                    <div className={css.meta} style={{ whiteSpace: 'pre-wrap', fontSize: 'var(--nf-fs-12)' }}>{sec.markdown}</div>
                   </div>
                 ))}
               </div>
@@ -4585,11 +4585,11 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
             }}
           >
             <span>
-              📊 AI进度
+              📊 AI 进度
               {busy && <span style={{ color: 'var(--nf-accent)' }}> 🟢 任务进行中</span>}
               <span className={css.meta}>（拖动标题栏移动 · 右下角拉大小）</span>
             </span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--nf-space-4)' }}>
               {progress.length > 0 && (
                 <button type="button" className={`${css.button} ${css.buttonSmall}`} onClick={() => { setProgress([]) }} title="清空活动记录">
                   清空
@@ -4598,11 +4598,11 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               <button type="button" className={css.iconButton} title="关闭" aria-label="关闭AI进度" onClick={() => { setProgressOpen(false) }}>×</button>
             </span>
           </div>
-          <div className={css.assistantFloatBody} style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8, overflow: 'hidden' }}>
+          <div className={css.assistantFloatBody} style={{ padding: 'var(--nf-space-10)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', overflow: 'hidden' }}>
             {/* 当前任务大进度条：进行中显示 */}
             {(busy && (busyLabel !== '' || liveBar !== null)) && (
-              <div style={{ border: '1px solid var(--nf-accent)', borderRadius: 10, padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5, background: 'color-mix(in srgb, var(--nf-accent) 6%, transparent)' }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--nf-accent)' }}>
+              <div style={{ border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-12)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', background: 'color-mix(in srgb, var(--nf-accent) 6%, transparent)' }}>
+                <span style={{ fontSize: 'var(--nf-fs-12)', fontWeight: 600, color: 'var(--nf-accent)' }}>
                   ✍ {busyLabel !== '' ? busyLabel : (liveBar?.text ?? '任务进行中')}…
                 </span>
                 {liveBar?.ratio !== undefined && (
@@ -4614,10 +4614,10 @@ export function NovelPanel({ controller, api }: NovelPanelProps) {
               </div>
             )}
             {/* 活动记录列表（标题行已并入窗口标题栏，清空按钮在右上角） */}
-            <div className={css.progress} style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid var(--nf-border)', borderRadius: 10, background: 'var(--nf-bg-inset)', padding: 8, display: 'flex', flexDirection: 'column' }}>
+            <div className={css.progress} style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', background: 'var(--nf-bg-inset)', padding: 'var(--nf-space-8)', display: 'flex', flexDirection: 'column' }}>
               {progress.length === 0 ? (
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, color: 'var(--nf-text-3)', fontSize: 12, minHeight: 120 }}>
-                  <span style={{ fontSize: 22 }}>📭</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 'var(--nf-space-4)', color: 'var(--nf-text-3)', fontSize: 'var(--nf-fs-12)', minHeight: 120 }}>
+                  <span style={{ fontSize: 'var(--nf-fs-22)' }}>📭</span>
                   <span>暂无活动记录</span>
                   <span>生成、审稿等操作会显示在这里</span>
                 </div>

@@ -14,6 +14,8 @@ export function StoryboardTab({
   onProjectChanged,
   styleId,
   filterId,
+  mode,
+  onGoStep,
   onProgress,
 }: {
   api: NovelApi
@@ -25,10 +27,21 @@ export function StoryboardTab({
   styleId?: string
   /** 可选滤镜风格 id。 */
   filterId?: string
+  /** 页面模式：auto=按本章实际进度显示；skeleton/table/prompts=固定显示该步骤（前置不足显示提示，不降级）。 */
+  mode?: 'auto' | 'skeleton' | 'table' | 'prompts'
+  /** 「下一步」按钮回调（1=骨架→2=分镜表→3=提示词），供外层切步骤页。 */
+  onGoStep?: (n: 1 | 2 | 3) => void
   /** 上报到「AI进度」控制台（分镜三步生成）。 */
   onProgress?: (text: string, kind?: 'info' | 'done' | 'error') => void
 }) {
   const written = useMemo(() => chapters.filter(c => c.status !== 'pending' && c.status !== 'generating' && c.status !== 'error').sort((a, b) => a.no - b.no), [chapters])
+  /** 漫剧卡 id → 卡名/参考图（定妆绑定展示）。 */
+  const mangaById = useMemo(() => {
+    const m = new Map<string, { name: string; imageUrl?: string }>()
+    for (const c of project?.mangaRoles ?? []) m.set(c.id, { name: c.name, imageUrl: c.imageUrl })
+    return m
+  }, [project?.mangaRoles])
+  const bindingNames = (ids: string[] | undefined): string => (ids ?? []).map(id => mangaById.get(id)?.name ?? id).join('、')
   const [chapterNo, setChapterNo] = useState<number | null>(written[0]?.no ?? null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -149,7 +162,9 @@ export function StoryboardTab({
     return <div className={css.card}><span className={css.meta}>请先开书或选择一本书，再进入分镜工作台。</span></div>
   }
   const maxStep = prompts !== null ? 3 : table !== null ? 2 : skeleton !== null ? 1 : 0
-  const step = Math.min(stepState, Math.max(maxStep, 1))
+  // 固定模式：只显示指定步骤（前置不足由黄条提示，不降级）；auto：按本章实际进度显示。
+  const modeStep = mode === 'skeleton' ? 1 : mode === 'table' ? 2 : mode === 'prompts' ? 3 : null
+  const step = modeStep !== null ? modeStep : Math.min(stepState, Math.max(maxStep, 1))
 
   return (
     <div className={css.card}>
@@ -158,21 +173,13 @@ export function StoryboardTab({
         <span className={css.meta}>三步向导 · {styleId !== undefined ? '按当前方案风格生成' : '未选方案风格'}</span>
       </div>
 
-      {/* 步骤条 */}
-      <div className={css.row} style={{ gap: 6, margin: '8px 0', flexWrap: 'wrap' }}>
-        {[1, 2, 3].map(n => (
-          <button
-            key={n}
-            type="button"
-            className={`${css.button} ${css.buttonSmall} ${step === n ? css.buttonPrimary : ''}`}
-            disabled={n > maxStep}
-            onClick={() => { setStepState(n) }}
-          >
-            {n === 1 ? '① 剧情骨架' : n === 2 ? '② 分镜表' : '③ 视频提示词'}
-            {n <= maxStep && step !== n ? ' ✓' : ''}
-          </button>
-        ))}
-      </div>
+      <span className={css.meta} style={{ display: 'block', marginBottom: 'var(--nf-space-6)' }}>
+        {step === 1
+          ? '这步：从章节正文提炼剧情骨架（弧线/节拍/出场角色）· 前置：已写章节 · 下一步：生成分镜表'
+          : step === 2
+            ? '这步：骨架展开为镜头级分镜表（景别/机位/台词/每镜头角色+定妆绑定）· 前置：剧情骨架 · 下一步：视频提示词'
+            : '这步：分镜表 → 即梦可粘贴视频提示词（带风格词块与定妆绑定）· 前置：分镜表（建议先完成角色定妆）· 下一步：复制到即梦/豆包'}
+      </span>
 
       <div className={css.row} style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <div className={css.field} style={{ flex: 1, minWidth: 200 }}>
@@ -188,35 +195,77 @@ export function StoryboardTab({
             ))}
           </select>
         </div>
-        <button
-          type="button"
-          className={`${css.button} ${css.buttonPrimary}`}
-          disabled={busy || chapterNo === null}
-          onClick={() => { void generate(false) }}
-        >
-          {busy ? '编剧分析中…' : '✍️ 生成剧情骨架'}
-        </button>
-        {skeleton !== null && (
-          <button type="button" className={css.button} disabled={busy} onClick={() => { void generate(true) }}>
-            🔄 重新生成（并继续生成分镜表）
-          </button>
+        {/* 生成/重新生成骨架只属于骨架页（③）；分镜表/提示词页由各自内容区的按钮负责 */}
+        {mode !== 'table' && mode !== 'prompts' && (
+          <>
+            <button
+              type="button"
+              className={`${css.button} ${css.buttonPrimary}`}
+              disabled={busy || chapterNo === null}
+              onClick={() => { void generate(false) }}
+            >
+              {busy ? '编剧分析中…' : '✍️ 生成剧情骨架'}
+            </button>
+            {skeleton !== null && (
+              <button type="button" className={css.button} disabled={busy} onClick={() => { void generate(true) }}>
+                🔄 重新生成（并继续生成分镜表）
+              </button>
+            )}
+          </>
         )}
       </div>
 
       {error !== '' && <div className={css.importError}>{error}</div>}
 
+      {/* 固定模式下的前置不足提示（不静默降级） */}
+      {mode === 'table' && skeleton === null && (
+        <div style={{ border: '1px solid var(--nf-warn, #b8860b)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)', marginTop: 'var(--nf-space-6)' }}>
+          <span className={css.meta}>⚠ 本章还没有剧情骨架——请先到「③ 剧情骨架」页生成骨架，再回来生成分镜表。</span>
+        </div>
+      )}
+      {mode === 'prompts' && table === null && (
+        <div style={{ border: '1px solid var(--nf-warn, #b8860b)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)', marginTop: 'var(--nf-space-6)' }}>
+          <span className={css.meta}>⚠ 本章还没有分镜表——请先完成「③ 剧情骨架」「④ 分镜表」，再回来生成视频提示词。</span>
+        </div>
+      )}
+      {/* 固定模式：前置已满足但本步产物缺失 → 直接给生成按钮 */}
+      {mode === 'table' && skeleton !== null && table === null && (
+        <div className={css.row} style={{ marginTop: 'var(--nf-space-8)', flexWrap: 'wrap' }}>
+          <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={tableBusy} onClick={() => { void generateTable() }}>
+            {tableBusy ? '生成中…' : '🎬 生成分镜表'}
+          </button>
+          <span className={css.meta}>骨架已就绪，本章还没有分镜表——点按钮生成。</span>
+        </div>
+      )}
+      {mode === 'prompts' && table !== null && prompts === null && (
+        <div className={css.row} style={{ marginTop: 'var(--nf-space-8)', flexWrap: 'wrap' }}>
+          <button type="button" className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`} disabled={promptsBusy} onClick={() => { void generatePrompts() }}>
+            {promptsBusy ? '生成中…' : '🎬 生成视频提示词'}
+          </button>
+          <span className={css.meta}>分镜表已就绪，本章还没有视频提示词——点按钮生成。</span>
+        </div>
+      )}
+
       {step === 1 && (skeleton === null ? (
-        <div className={css.meta} style={{ marginTop: 8 }}>
+        <div className={css.meta} style={{ marginTop: 'var(--nf-space-8)' }}>
           生成后这里显示本章剧情骨架：弧线 + 节拍链（事件 / 情绪走向 / 叙事功能 / 因果）。
           骨架是「完整剧情」的根——确认骨架没问题后，进入下一步展开为分镜表。
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', marginTop: 'var(--nf-space-8)' }}>
           <div className={css.importPreview}>
             <span>📖 本章弧线：{skeleton.arc}</span>
           </div>
+          {skeleton.characters !== undefined && skeleton.characters.length > 0 && (
+            <div className={css.row} style={{ flexWrap: 'wrap' }}>
+              <span className={css.meta}>👥 出场角色：</span>
+              {skeleton.characters.map(c => (
+                <span key={c} className={css.badge}>{c}</span>
+              ))}
+            </div>
+          )}
           {skeleton.beats.map((b, i) => (
-            <div key={b.id} style={{ display: 'flex', flexDirection: 'column', gap: 3, border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px' }}>
+            <div key={b.id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
               <div className={css.row} style={{ flexWrap: 'wrap' }}>
                 <b>节拍 {i + 1}</b>
                 <span className={`${css.badge} ${b.function === '高潮' ? css.badgeDone : b.function === '转折' ? css.badgeWritten : css.badgePending}`}>{b.function}</span>
@@ -231,7 +280,7 @@ export function StoryboardTab({
               type="button"
               className={`${css.button} ${css.buttonSmall}`}
               onClick={() => {
-                const text = `第${skeleton.chapterNo}章 弧线：${skeleton.arc}\n\n` + skeleton.beats.map((b, i) => `${i + 1}. [${b.function}] ${b.event}（情绪：${b.emotion}）${b.cause !== undefined ? `［承接：${b.cause}］` : ''}`).join('\n')
+                const text = `第${skeleton.chapterNo}章 弧线：${skeleton.arc}\n出场角色：${skeleton.characters !== undefined && skeleton.characters.length > 0 ? skeleton.characters.join('、') : '（未标注）'}\n\n` + skeleton.beats.map((b, i) => `${i + 1}. [${b.function}] ${b.event}（情绪：${b.emotion}）${b.cause !== undefined ? `［承接：${b.cause}］` : ''}`).join('\n')
                 void navigator.clipboard?.writeText(text)
               }}
             >
@@ -240,7 +289,7 @@ export function StoryboardTab({
             <button
               type="button"
               className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
-              onClick={() => { setStepState(2); if (table === null) void generateTable() }}
+              onClick={() => { if (table === null) void generateTable(); onGoStep?.(2) }}
             >
               🎬 下一步：生成分镜表
             </button>
@@ -250,7 +299,7 @@ export function StoryboardTab({
       ))}
 
       {step === 2 && table !== null && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-10)', marginTop: 'var(--nf-space-10)' }}>
           <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <b>🎬 分镜表（{table.shots.length} 个镜头）</b>
             <button
@@ -269,7 +318,7 @@ export function StoryboardTab({
               onClick={() => {
                 const text = table.shots.map(s => {
                   const beat = skeleton?.beats.find(b => b.id === s.beatId)
-                  return `镜头 ${s.id}（节拍 ${beat?.id ?? s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s）\n画面：${s.visual}\n台词：${s.line !== '' ? s.line : '（无）'}\n音效：${s.sound !== '' ? s.sound : '（无）'}\n光效：${s.light !== '' ? s.light : '（无）'}\n承接：${s.prevState} → ${s.nextState}`
+                  return `镜头 ${s.id}（节拍 ${beat?.id ?? s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s）\n出场：${s.characters !== undefined && s.characters.length > 0 ? s.characters.join('、') : '（未标注）'}\n定妆：${s.mangaRoleIds !== undefined && s.mangaRoleIds.length > 0 ? bindingNames(s.mangaRoleIds) : '（未绑定漫剧卡）'}\n画面：${s.visual}\n台词：${s.line !== '' ? s.line : '（无）'}\n音效：${s.sound !== '' ? s.sound : '（无）'}\n光效：${s.light !== '' ? s.light : '（无）'}\n承接：${s.prevState} → ${s.nextState}`
                 }).join('\n\n')
                 void navigator.clipboard?.writeText(`第${table.chapterNo}章分镜表\n\n` + text)
               }}
@@ -277,6 +326,12 @@ export function StoryboardTab({
               📋 复制分镜表
             </button>
             <span className={css.meta}>按骨架节拍展开 · 镜头间状态连续</span>
+            {table.characters !== undefined && table.characters.length > 0 && (
+              <span className={css.meta}>👥 出场角色：{table.characters.join('、')}</span>
+            )}
+            {table.mangaRoleIds !== undefined && table.mangaRoleIds.length > 0 && (
+              <span className={css.meta}>🎨 定妆绑定：{bindingNames(table.mangaRoleIds)}</span>
+            )}
             {table.usedScenes !== undefined && table.usedScenes.length > 0 && (
               <span className={css.meta}>🏞️ 使用场景：{table.usedScenes.join('、')}</span>
             )}
@@ -291,7 +346,7 @@ export function StoryboardTab({
             <button
               type="button"
               className={`${css.button} ${css.buttonSmall} ${css.buttonPrimary}`}
-              onClick={() => { setStepState(3); if (prompts === null) void generatePrompts() }}
+              onClick={() => { if (prompts === null) void generatePrompts(); onGoStep?.(3) }}
             >
               🎬 下一步：生成视频提示词
             </button>
@@ -299,12 +354,18 @@ export function StoryboardTab({
           {table.shots.map(s => {
             const beat = skeleton?.beats.find(b => b.id === s.beatId)
             return (
-              <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 3, border: '1px solid var(--nf-border)', borderRadius: 10, padding: '8px 10px' }}>
+              <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <b>镜头 {s.id}</b>
                   <span className={css.badge}>{s.shot}</span>
                   <span className={css.meta}>{s.camera} · {s.duration}s</span>
                   {beat !== undefined && <span className={css.meta}>节拍 {beat.id}「{beat.function}」</span>}
+                  {s.characters !== undefined && s.characters.length > 0 && (
+                    <span className={css.meta}>👥 {s.characters.join('、')}</span>
+                  )}
+                  {s.mangaRoleIds !== undefined && s.mangaRoleIds.length > 0 && (
+                    <span className={css.badge + ' ' + css.badgeDone}>🎨 定妆 {bindingNames(s.mangaRoleIds)}</span>
+                  )}
                 </div>
                 <span>🎞️ {s.visual}</span>
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
@@ -320,7 +381,7 @@ export function StoryboardTab({
       )}
 
       {step === 3 && prompts !== null && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', marginTop: 'var(--nf-space-10)' }}>
           <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
             <b>🎬 视频提示词（{prompts.length} 个镜头）</b>
             <button
@@ -335,7 +396,7 @@ export function StoryboardTab({
               type="button"
               className={`${css.button} ${css.buttonSmall}`}
               onClick={() => {
-                const text = prompts.map(x => `【镜头 ${x.shotId}】${x.text}`).join('\n\n')
+                const text = prompts.map(x => `【镜头 ${x.shotId}】${x.mangaRoleIds !== undefined && x.mangaRoleIds.length > 0 ? '定妆：' + bindingNames(x.mangaRoleIds) + ' ' : ''}${x.text}`).join('\n\n')
                 void navigator.clipboard?.writeText(`第${table?.chapterNo ?? ''}章视频提示词\n\n` + text)
               }}
             >
@@ -343,10 +404,13 @@ export function StoryboardTab({
             </button>
           </div>
           {prompts.map(x => (
-            <div key={x.shotId} style={{ display: 'flex', flexDirection: 'column', gap: 3, border: '1px solid var(--nf-accent)', borderRadius: 10, padding: '8px 10px' }}>
+            <div key={x.shotId} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
               <div className={css.row} style={{ flexWrap: 'wrap' }}>
                 <b>镜头 {x.shotId}</b>
                 <span className={css.meta}>即梦/Seedance 提示词</span>
+                {x.mangaRoleIds !== undefined && x.mangaRoleIds.length > 0 && (
+                  <span className={css.badge + ' ' + css.badgeDone}>🎨 定妆 {bindingNames(x.mangaRoleIds)}</span>
+                )}
                 <div style={{ flex: 1 }} />
                 <button
                   type="button"
@@ -360,7 +424,7 @@ export function StoryboardTab({
                   {copied === x.shotId ? '✅ 已复制' : '📋 复制'}
                 </button>
               </div>
-              <span style={{ fontSize: 13, lineHeight: 1.7 }}>{x.text}</span>
+              <span style={{ fontSize: 'var(--nf-fs-14)', lineHeight: 1.7 }}>{x.text}</span>
             </div>
           ))}
         </div>

@@ -89,7 +89,7 @@ export function RunPanel({ api, totalChapters }: { api: NovelApi; totalChapters:
     : 0
 
   return (
-    <div className={css.card} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div className={css.card} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-10)' }}>
       <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <span className={css.cardTitle}>🏭 生产单（标准流水线：计划 → 生成 → 审稿 → 分级处理）</span>
         <span className={`${css.badge} ${run?.status === 'running' ? css.badgeWritten : run?.status === 'done' ? css.badgeDone : css.badgePending}`}>{statusLabel}</span>
@@ -100,8 +100,8 @@ export function RunPanel({ api, totalChapters }: { api: NovelApi; totalChapters:
       </div>
 
       {/* 下单区 */}
-      <div className={css.row} style={{ flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' }}>
-        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-8)', alignItems: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 'var(--nf-space-4)', alignItems: 'center' }}>
           <button
             type="button"
             className={`${css.button} ${css.buttonSmall} ${mode === 'count' ? css.buttonPrimary : ''}`}
@@ -162,12 +162,12 @@ export function RunPanel({ api, totalChapters }: { api: NovelApi; totalChapters:
         )}
       </div>
 
-      {err !== '' && <div style={{ color: 'var(--nf-error)', fontSize: 12 }}>{err}</div>}
+      {err !== '' && <div style={{ color: 'var(--nf-error)', fontSize: 'var(--nf-fs-12)' }}>{err}</div>}
 
       {/* 进度区 */}
       {run !== null && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div className={css.row} style={{ flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
+          <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-8)' }}>
             <span className={css.meta}>范围：第 {run.startNo} - {run.endNo} 章 · 当前：第 {run.currentNo} 章</span>
             <span className={css.meta}>新生成 {run.stats.generated} · 修订通过 {run.stats.revised} · 豁免 {run.stats.exempted} · 重生成 {run.stats.regenerated} · 失败 {run.stats.error}</span>
           </div>
@@ -188,12 +188,12 @@ export function RunPanel({ api, totalChapters }: { api: NovelApi; totalChapters:
       <div className={css.meta} style={{ fontWeight: 600 }}>运行日志（{run?.log.length ?? 0}）</div>
       <div
         ref={logRef}
-        style={{ flex: 1, minHeight: 120, overflowY: 'auto', border: '1px solid var(--nf-border)', borderRadius: 10, background: 'var(--nf-bg-inset)', padding: 8, display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}
+        style={{ flex: 1, minHeight: 120, overflowY: 'auto', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', background: 'var(--nf-bg-inset)', padding: 'var(--nf-space-8)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-2)', fontSize: 'var(--nf-fs-12)' }}
       >
         {run === null || run.log.length === 0 ? (
           <span className={css.meta}>尚无日志——下单后这里会实时显示每章进度。</span>
         ) : run.log.map((l, i) => (
-          <div key={i} style={{ display: 'flex', gap: 6, opacity: 0.85 }}>
+          <div key={i} style={{ display: 'flex', gap: 'var(--nf-space-6)', opacity: 0.85 }}>
             <span style={{ color: 'var(--nf-text-3)', flex: 'none' }}>{new Date(l.at).toLocaleTimeString('zh-CN', { hour12: false })}</span>
             <span>{l.text}</span>
           </div>

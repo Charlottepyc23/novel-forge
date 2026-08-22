@@ -30,7 +30,7 @@ export function StyleGallery() {
       </div>
 
       {/* 分类标签 */}
-      <div className={css.row} style={{ gap: 8, flexWrap: 'wrap' }}>
+      <div className={css.row} style={{ gap: 'var(--nf-space-8)', flexWrap: 'wrap' }}>
         {STYLE_CATEGORIES.map(cat => (
           <button
             key={cat.id}
@@ -48,7 +48,7 @@ export function StyleGallery() {
       </div>
 
       {/* 风格卡片网格 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12, marginTop: 6 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 'var(--nf-space-12)', marginTop: 'var(--nf-space-6)' }}>
                 {list.map(style => (
           <StyleCard key={style.id} style={style} />
         ))}

@@ -53,6 +53,8 @@ import type {
   StoryboardShot,
   StoryboardPrompt,
   ChapterStoryboard,
+  MangaRoleCandidate,
+  MangaRoleCard,
   Volume,
   WorldState,
 } from './protocol.ts'
@@ -151,6 +153,7 @@ export function mergeVolatileFromDisk(outputDir: string, project: ProjectState):
     if (disk === undefined) return
     project.bible = disk.bible
     project.roles = disk.roles
+    project.mangaRoles = disk.mangaRoles
     project.plotlines = disk.plotlines
     project.roleStatus = disk.roleStatus
     project.blurb = disk.blurb
@@ -1561,22 +1564,28 @@ export interface RoleVisualPrompt {
   promptKit?: RoleRecord['promptKit']
 }
 
+/** 可提炼形象的「角色源」：小说角色卡或漫剧角色卡的最小公共面。 */
+interface RoleVisualSource {
+  name: string
+  identity?: string
+  traits?: string[]
+}
+
 /**
- * 为单个角色提炼「动漫形象描述词」：扫描该角色出场的已写章节正文，
- * 截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
+ * 底层实现：为任意角色源提炼「动漫形象描述词」（不写库，写库由上层调用方负责）。
+ * 扫描该角色出场的已写章节正文，截取含外貌描写的段落，交给 LLM 提炼中文描述 + 英文绘图标签。
  */
-export async function extractRoleVisual(
+async function extractRoleVisualFrom(
   ctx: Context,
   config: NovelConfig,
   project: ProjectState,
   outputDir: string,
-  roleName: string,
+  role: RoleVisualSource,
   styleId?: string,
   filterId?: string,
+  shortDrama = false,
 ): Promise<RoleVisualPrompt> {
-  const role = (project.roles ?? []).find(r => r.name === roleName)
-  if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
-  role.promptStyleId = styleId
+  const roleName = role.name
 
   // 1. 扫描正文：收集该角色出场且可能含外貌描写的段落（最近 60 章内，每章最多 2 段，共 12 段）。
   // 支持“描述型角色名”（如「灰蓝工装女人」）：先精确匹配，匹配不到时用角色名拆分出的关键词兜底。
@@ -1650,6 +1659,7 @@ export async function extractRoleVisual(
     '3. 服装优先取正文明确出现的（颜色+款式），多次出现取最常穿的组合；服装按分件组织（上身/下身/鞋/配饰）。',
     '4. 标志物（标签/印记/饰品）必须出现在每段提示词中——它们是一致性的命根子。',
     '5. 立绘/四视图/细节是「角色设定稿」：禁止写瞬间动作与道具使用状态（握手机、看屏幕、未接来电、走路、回头等），禁止写剧情状态与场景背景；只保留可长期存在的外貌、服装与常驻标志物（工牌、饰品等）。',
+    ...(shortDrama ? ['6. 短剧精简模式·人设极致化：性格标签必须极致化（如「极端偏执」「绝对冷血」，单一维度拉到最满）；外貌只保留 1-2 个最强辨识度点，弱化平凡细节；服装/标志物更夸张醒目。'] : []),
     '【本书视觉规则】（必须内嵌进每段提示词，保证设定不跑偏）：',
     ...rules.map(r => '- ' + r),
     '输出六部分：',
@@ -1671,7 +1681,7 @@ export async function extractRoleVisual(
   const user = [
     `书名：《${project.bookName}》`,
     `目标角色：${role.name}（${role.identity}）`,
-    role.traits.length > 0 ? `性格标签：${role.traits.join('、')}` : '',
+    (role.traits ?? []).length > 0 ? `性格标签：${role.traits!.join('、')}` : '',
     `正文出场描写（含外貌线索的段落）：`,
     ...excerpts.map(e => `[第${e.no}章] ${e.text}`),
     '只输出 JSON 对象。',
@@ -1727,22 +1737,65 @@ export async function extractRoleVisual(
   return { zh, en, tags, source, expressions, promptKit }
 }
 
-/**
- * 角色四类生图提示词精修包（promptKit）：以锚点 + 表情清单 + 视觉规则为输入，
- * LLM 产出 立绘/四视图/表情×N/细节 四套 zh+en 提示词（比前端拼装更精炼）。
- */
-export async function generateRolePromptKit(
+/** 小说角色库：提炼单个角色的形象锚点并写回角色卡。 */
+export async function extractRoleVisual(
   ctx: Context,
   config: NovelConfig,
   project: ProjectState,
+  outputDir: string,
   roleName: string,
   styleId?: string,
   filterId?: string,
-): Promise<RoleRecord['promptKit']> {
+): Promise<RoleVisualPrompt> {
   const role = (project.roles ?? []).find(r => r.name === roleName)
   if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
-  if (role.imagePrompt === undefined) throw new Error(`角色「${roleName}」还没有形象锚点，请先生成锚点`)
   role.promptStyleId = styleId
+  return extractRoleVisualFrom(ctx, config, project, outputDir, role, styleId, filterId)
+}
+
+/** 漫剧角色卡：提炼形象锚点并写回漫剧卡（status → anchored）。 */
+export async function extractMangaRoleVisual(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  cardId: string,
+  styleId?: string,
+  filterId?: string,
+): Promise<RoleVisualPrompt> {
+  const card = (project.mangaRoles ?? []).find(c => c.id === cardId)
+  if (card === undefined) throw new Error(`漫剧角色卡 ${cardId} 不存在`)
+  const visual = await extractRoleVisualFrom(ctx, config, project, outputDir, { name: card.name, identity: card.identity, traits: card.traits }, styleId, filterId, project.shortDramaMode === true)
+  card.promptStyleId = styleId
+  card.imagePrompt = visual
+  if ((visual.expressions ?? []).length > 0) card.expressions = visual.expressions
+  if (visual.promptKit !== undefined) card.promptKit = visual.promptKit
+  if (card.status === 'imported' || card.status === 'pending_confirm') card.status = 'anchored'
+  card.updatedAt = new Date().toISOString()
+  return visual
+}
+
+/** 可精修提示词包的「角色源」：小说角色卡或漫剧角色卡的最小公共面。 */
+interface RoleKitSource {
+  name: string
+  identity?: string
+  imagePrompt: NonNullable<RoleRecord['imagePrompt']>
+  expressions?: string[]
+}
+
+/**
+ * 底层实现：基于角色源的形象锚点 + 表情清单 + 视觉规则产出四类生图提示词（不写库）。
+ */
+async function generateRolePromptKitFrom(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  role: RoleKitSource,
+  styleId?: string,
+  filterId?: string,
+  shortDrama = false,
+): Promise<RoleRecord['promptKit']> {
+  const roleName = role.name
   const rules = project.visualRules ?? []
   const styleWords = styleKeywords(styleId, filterId)
   const system = [
@@ -1755,6 +1808,7 @@ export async function generateRolePromptKit(
     '3. expressions 表情：每个表情一段，脸部特写（头部到锁骨），纯白背景，五官与角色定稿完全一致，只换情绪表达（眼神/嘴角/眉），皮肤纹理细节完整，无多余杂物。',
     '4. details 细节：多组局部细节集合参考图（一张图多个局部框），纯白背景；把该角色全部标志物逐项列出，每项一句特写描述；细节清晰锐利，角色细节参考稿，无多余杂物。',
     '5. 立绘/四视图/细节为「角色设定稿」：禁止瞬间动作、道具使用状态与剧情状态（握手机、看屏幕、未接来电等），只保留可长期存在的外貌、服装与常驻标志物（工牌、饰品等）。',
+    ...(shortDrama ? ['6. 短剧精简模式·人设极致化：性格标签必须极致化（单一维度拉到最满）；外貌只保留 1-2 个最强辨识度点；服装/标志物更夸张醒目，一眼可认。'] : []),
     '【本书视觉规则】（必须内嵌进每段提示词，保证设定不跑偏）：',
     ...rules.map(r => '- ' + r),
     'zh 要求：连贯中文，写实电影感，60-150 字/段；en 要求：booru 风格逗号分隔标签，30-50 个/段。',
@@ -1790,6 +1844,186 @@ export async function generateRolePromptKit(
     throw new Error('提示词精修失败：LLM 未返回有效 JSON')
   }
   return kit
+}
+
+/** 小说角色库：角色四类生图提示词精修包（写回角色卡）。 */
+export async function generateRolePromptKit(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  roleName: string,
+  styleId?: string,
+  filterId?: string,
+): Promise<RoleRecord['promptKit']> {
+  const role = (project.roles ?? []).find(r => r.name === roleName)
+  if (role === undefined) throw new Error(`角色「${roleName}」不在角色库中`)
+  if (role.imagePrompt === undefined) throw new Error(`角色「${roleName}」还没有形象锚点，请先生成锚点`)
+  role.promptStyleId = styleId
+  return generateRolePromptKitFrom(ctx, config, project, { name: role.name, identity: role.identity, imagePrompt: role.imagePrompt, expressions: role.expressions }, styleId, filterId)
+}
+
+/** 漫剧角色卡：四类生图提示词精修包（写回漫剧卡，status → anchored）。 */
+export async function generateMangaRolePromptKit(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  cardId: string,
+  styleId?: string,
+  filterId?: string,
+): Promise<RoleRecord['promptKit']> {
+  const card = (project.mangaRoles ?? []).find(c => c.id === cardId)
+  if (card === undefined) throw new Error(`漫剧角色卡 ${cardId} 不存在`)
+  if (card.imagePrompt === undefined) throw new Error(`「${card.name}」还没有形象锚点，请先生成锚点`)
+  const kit = await generateRolePromptKitFrom(ctx, config, project, { name: card.name, identity: card.identity, imagePrompt: card.imagePrompt, expressions: card.expressions }, styleId, filterId, project.shortDramaMode === true)
+  card.promptStyleId = styleId
+  card.promptKit = kit
+  if (card.status === 'imported' || card.status === 'pending_confirm') card.status = 'anchored'
+  card.updatedAt = new Date().toISOString()
+  return kit
+}
+
+/**
+ * 漫剧角色库·提名（两段式）：从某章分镜的 characters 提名候选角色名 →
+ * 规则过滤（精确名 + 身份/简称匹配，短名单 ≤5）→ LLM 确认（是/否 + 选哪个，不做开放检索）→
+ * 返回带漫剧卡建议的候选（未匹配时给出「回小说库补提炼 / 漫剧直接创建」判定）。
+ */
+export async function nominateMangaRoles(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  chapterNo: number,
+): Promise<MangaRoleCandidate[]> {
+  const entry = (project.storyboards ?? []).find(e => e.chapterNo === chapterNo)
+  if (entry === undefined) throw new Error(`第 ${chapterNo} 章还没有分镜产出，请先在「分镜」页生成剧情骨架/分镜表`)
+
+  // 收集该章分镜的结构化角色引用（骨架 + 表级 + 镜头级，去重）。
+  const names: string[] = []
+  const pushNames = (list: string[] | undefined): void => {
+    for (const n of list ?? []) {
+      const t = n.trim().slice(0, 20)
+      if (t !== '' && !names.includes(t)) names.push(t)
+    }
+  }
+  pushNames(entry.skeleton?.characters)
+  pushNames(entry.table?.characters)
+  for (const s of entry.table?.shots ?? []) pushNames(s.characters)
+  if (names.length === 0) throw new Error(`第 ${chapterNo} 章的分镜还没有结构化角色（characters 为空），请重新生成剧情骨架/分镜表`)
+
+  // 已建漫剧卡的直接标 already_imported（按漫剧名或来源名匹配）。
+  const imported = new Set<string>()
+  for (const c of project.mangaRoles ?? []) {
+    imported.add(c.name)
+    if (c.sourceRoleName !== undefined && c.sourceRoleName !== '') imported.add(c.sourceRoleName)
+  }
+  const already: MangaRoleCandidate[] = names.filter(n => imported.has(n)).map(n => ({
+    rawName: n,
+    verdict: 'already_imported' as const,
+    matches: [],
+    suggested: emptyCandidateSuggestion(n),
+  }))
+  const fresh = names.filter(n => !imported.has(n))
+  if (fresh.length === 0) return already
+
+  const chapter = project.chapters.find(c => c.no === chapterNo)
+  const body = chapter !== undefined ? readChapterFile(outputDir, chapter) : undefined
+  const roles = project.roles ?? []
+
+  // 规则阶段：精确名 + 身份/简称匹配，短名单 ≤5。
+  const shortlists: Array<{ rawName: string; roleNames: string[] }> = fresh.map(rawName => {
+    const shortlist: string[] = []
+    const push = (n: string): void => { if (!shortlist.includes(n)) shortlist.push(n) }
+    for (const r of roles) {
+      if (shortlist.length >= 5) break
+      const n = r.name
+      if (n === rawName) { push(n); continue }
+      if (n.includes(rawName) || rawName.includes(n)) { push(n); continue }
+      const ident = r.identity ?? ''
+      if (ident !== '' && (ident === rawName || ident.includes(rawName) || rawName.includes(ident))) push(n)
+    }
+    return { rawName, roleNames: shortlist }
+  })
+
+  // LLM 阶段：确认是/否 + 选哪个 + 漫剧卡建议（只能从短名单里选，不做开放检索）。
+  const beats = (entry.skeleton?.beats ?? []).map(b => `[${b.id}] ${b.event}`).join('\n')
+  const system = [
+    '你是一位漫剧选角导演。下面给出「分镜角色提名」与「小说角色库候选名单」。',
+    '任务：为每个提名判定它对应小说角色库中的哪一个候选（或判定小说库没有对应角色），并预填一张「漫剧角色卡」的建议信息。',
+    '规则：',
+    '1. roleName 只能从该提名的候选名单中选，禁止输出名单之外的名字（不做开放检索）。',
+    '2. verdict：matched=候选名单里确实有对应角色（选最像的那个）；ambiguous=名单里有多个候选且无法确定（此时 roleName 可留空或选最可能的一个）；not_in_library=候选名单为空或都不对应。',
+    '3. matched/ambiguous 时给出漫剧卡建议：name（漫剧用名，默认与角色名一致）、identity（身份一句话，30 字内）、coreFunction（protagonist=主角/mentor=导师/love_interest=感情线/antagonist=反派/sidekick=搭档/informant=线人/functional=功能性）、protagonistRelation（enemy/friend/mentor/lover/exploit=利用/neutral）、speechStyle（口头禅或说话方式）、traits（不超过 3 个极致性格标签）、appearance（1-2 个辨识度外貌点）、keyScenes（本章该角色 1-2 个关键剧情节点，格式「第N章 xxx」）。',
+    '4. 身份型提名（如「持枪者」「围观群众」）：候选名单有则匹配；名单没有且正文确有该称谓 → not_in_library；正文也没有 → not_in_library。',
+    ...(project.shortDramaMode === true
+      ? ['5. 短剧精简模式（本书已开启）：只保留 5-8 个上镜角色——主角/反派/感情线/关键配角；功能性路人不上卡（此类提名直接 not_in_library）。每个角色必须给出明确的 coreFunction 与 protagonistRelation；性格标签极致化；候选超过 8 个时按戏份重要性裁剪到最核心 8 个。']
+      : []),
+    '输出必须是合法 JSON 数组：[{"rawName": "...", "verdict": "...", "roleName": "...或省略", "suggested": {...}}]，每个提名都要有，数组长度必须等于提名数。',
+    '重要：所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
+  ].join('\n')
+  const user = [
+    `章节：第 ${chapterNo} 章《${chapter?.title ?? ''}》`,
+    '==== 剧情骨架（节拍） ====',
+    beats !== '' ? beats : '（无骨架节拍）',
+    '==== 角色提名与候选名单 ====',
+    shortlists.map(s => s.roleNames.length > 0 ? `[提名] ${s.rawName} → 候选：${s.roleNames.join('、')}` : `[提名] ${s.rawName} → 候选：（无）`).join('\n'),
+    body !== undefined ? '==== 章节正文（前 2500 字，判断称谓归属用） ====\n' + body.replace(/^#.*$/gm, '').trim().slice(0, 2500) : '',
+    '只输出 JSON 数组。',
+  ].filter(x => x !== '').join('\n\n')
+  const text = await complete(ctx, config, { system, user, temperature: 0.2, maxTokens: Math.max(config.maxTokens, 8000), reasoning: config.analysisReasoning ?? 'low' })
+  const raw = parseJsonArray<Record<string, unknown>>(text)
+
+  const verdicts = new Set(['matched', 'ambiguous', 'not_in_library'])
+  const fnMap: Record<string, MangaRoleCard['coreFunction']> = { protagonist: 'protagonist', mentor: 'mentor', love_interest: 'love_interest', antagonist: 'antagonist', sidekick: 'sidekick', informant: 'informant', functional: 'functional' }
+  const relMap: Record<string, MangaRoleCard['protagonistRelation']> = { enemy: 'enemy', friend: 'friend', mentor: 'mentor', lover: 'lover', exploit: 'exploit', neutral: 'neutral' }
+  const byName = new Map<string, Record<string, unknown>>()
+  for (const e of raw) {
+    if (typeof e === 'object' && e !== null && typeof e.rawName === 'string') byName.set(e.rawName.trim(), e)
+  }
+  const str = (v: unknown): string => typeof v === 'string' ? v.trim().slice(0, 100) : ''
+  const strArr = (v: unknown, n: number): string[] => Array.isArray(v)
+    ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map(x => x.trim().slice(0, 20)).slice(0, n)
+    : []
+
+  const out: MangaRoleCandidate[] = []
+  for (const item of shortlists) {
+    const judge = byName.get(item.rawName)
+    const judgeVerdict = judge !== undefined ? str(judge.verdict) : ''
+    const verdict = verdicts.has(judgeVerdict) ? judgeVerdict as MangaRoleCandidate['verdict'] : (item.roleNames.length > 0 ? 'ambiguous' : 'not_in_library')
+    let roleName: string | undefined
+    if (judge !== undefined) {
+      const chosen = str(judge.roleName)
+      if (chosen !== '' && item.roleNames.includes(chosen)) roleName = chosen
+    }
+    if (verdict === 'matched' && roleName === undefined && item.roleNames.length === 1) roleName = item.roleNames[0]
+    const sug = (typeof judge?.suggested === 'object' && judge?.suggested !== null) ? judge.suggested as Record<string, unknown> : {}
+    const novelHint: MangaRoleCandidate['novelHint'] = verdict === 'not_in_library' && body !== undefined
+      ? (body.includes(item.rawName) ? 'backfill' : 'manga_new')
+      : undefined
+    const suggested = {
+      name: (str(sug.name) !== '' ? str(sug.name) : (roleName ?? item.rawName)).slice(0, 30),
+      identity: str(sug.identity).slice(0, 60),
+      coreFunction: fnMap[str(sug.coreFunction)] ?? 'functional',
+      protagonistRelation: relMap[str(sug.protagonistRelation)] ?? 'neutral',
+      speechStyle: str(sug.speechStyle).slice(0, 60),
+      traits: strArr(sug.traits, 3),
+      appearance: str(sug.appearance).slice(0, 100),
+      keyScenes: strArr(sug.keyScenes, 3),
+    }
+    out.push({
+      rawName: item.rawName,
+      verdict,
+      matches: item.roleNames.map(n => ({ roleName: n, reason: roleName === n ? 'LLM 确认' : '规则候选' })),
+      matchedRoleName: roleName,
+      novelHint,
+      suggested,
+    })
+  }
+  return [...already, ...out]
+}
+
+/** 空建议（already_imported 等无需 LLM 的候选用）。 */
+function emptyCandidateSuggestion(name: string): MangaRoleCandidate['suggested'] {
+  return { name, identity: '', coreFunction: 'functional', protagonistRelation: 'neutral', speechStyle: '', traits: [], appearance: '', keyScenes: [] }
 }
 
 /** ✨ 从道藏/红线提炼「视觉世界观规则」：生图/生视频必须遵守的设定纠偏（如"商品=人，禁止常规超市商品"）。 */
@@ -2087,18 +2321,13 @@ export async function testImageEndpoint(baseURL: string, apiKey: string, model?:
   }
 }
 
-export async function generateRoleReferenceImage(
-  ctx: Context,
+/** 底层：按形象锚点调用生图接口生成定妆图（不写库；写库由上层调用方负责）。 */
+async function generateReferenceImageFrom(
   config: NovelConfig,
-  project: ProjectState,
-  outputDir: string,
-  name: string,
+  anchor: NonNullable<RoleRecord['imagePrompt']>,
   style = '',
   modelId?: string,
 ): Promise<string> {
-  const role = project.roles?.find(r => r.name === name)
-  if (role === undefined) throw new Error(`角色 ${name} 不存在`)
-  if (role.imagePrompt === undefined) throw new Error(`角色 ${name} 还没有形象锚点，请先生成锚点`)
   if (config.imageApiEnabled !== true) throw new Error('生图未启用，请在设置中启用一个生图模型')
   const activeImage = (modelId !== undefined && modelId !== '' ? (config.imageModels ?? []).find(m => m.id === modelId) : undefined)
     ?? (config.imageModels ?? []).find(m => m.enabled)
@@ -2112,9 +2341,9 @@ export async function generateRoleReferenceImage(
   }
   const stylePrompt = getComicStylePrompt(style)
   const prompt = [
-    role.imagePrompt.zh,
-    role.imagePrompt.en,
-    role.imagePrompt.tags.join(', '),
+    anchor.zh,
+    anchor.en,
+    anchor.tags.join(', '),
     stylePrompt,
     'character reference sheet, front view, clean background, consistent design',
   ].filter(Boolean).join(', ')
@@ -2146,8 +2375,43 @@ export async function generateRoleReferenceImage(
   if (!imgRes.ok) throw new Error('下载生图结果失败')
   const buf = Buffer.from(await imgRes.arrayBuffer())
   const contentType = imgRes.headers.get('content-type') || 'image/jpeg'
-  const dataUrl = `data:${contentType};base64,${buf.toString('base64')}`
+  return `data:${contentType};base64,${buf.toString('base64')}`
+}
+
+/** 小说角色库：生成角色定妆图并写回角色卡（imageUrl）。 */
+export async function generateRoleReferenceImage(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  name: string,
+  style = '',
+  modelId?: string,
+): Promise<string> {
+  const role = project.roles?.find(r => r.name === name)
+  if (role === undefined) throw new Error(`角色 ${name} 不存在`)
+  if (role.imagePrompt === undefined) throw new Error(`角色 ${name} 还没有形象锚点，请先生成锚点`)
+  const dataUrl = await generateReferenceImageFrom(config, role.imagePrompt, style, modelId)
   role.imageUrl = dataUrl
+  return dataUrl
+}
+
+/** 漫剧角色卡：生成定妆图并写回漫剧卡（imageUrl）。 */
+export async function generateMangaRoleReferenceImage(
+  ctx: Context,
+  config: NovelConfig,
+  project: ProjectState,
+  outputDir: string,
+  cardId: string,
+  style = '',
+  modelId?: string,
+): Promise<string> {
+  const card = (project.mangaRoles ?? []).find(c => c.id === cardId)
+  if (card === undefined) throw new Error(`漫剧角色卡 ${cardId} 不存在`)
+  if (card.imagePrompt === undefined) throw new Error(`「${card.name}」还没有形象锚点，请先生成锚点`)
+  const dataUrl = await generateReferenceImageFrom(config, card.imagePrompt, style, modelId)
+  card.imageUrl = dataUrl
+  card.updatedAt = new Date().toISOString()
   return dataUrl
 }
 
@@ -2667,6 +2931,57 @@ function saveChapterStoryboard(project: ProjectState, outputDir: string, entry: 
   saveProject(outputDir, project)
 }
 
+/** 确定性兜底：正文中出现的角色库角色名（LLM 漏填 characters 时使用）。 */
+function guessCharactersFromRoles(project: ProjectState, body: string, limit = 12): string[] {
+  const out: string[] = []
+  for (const r of project.roles ?? []) {
+    if (out.length >= limit) break
+    if (r.name !== '' && !out.includes(r.name) && body.includes(r.name)) out.push(r.name)
+  }
+  return out
+}
+
+/** 清洗 LLM 输出的角色名数组：去空 / 去重 / 限长 / 限字数。 */
+function sanitizeCharacters(raw: unknown, limit: number): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const v of raw) {
+    if (typeof v !== 'string') continue
+    const name = v.trim().slice(0, 20)
+    if (name === '' || out.includes(name)) continue
+    out.push(name)
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+/** 漫剧卡绑定索引：按分镜称谓（正文确切名）解析漫剧卡（卡名/来源名精确优先，包含兜底）。 */
+interface MangaRoleBindingIndex {
+  byId: Map<string, MangaRoleCard>
+  resolve: (name: string) => MangaRoleCard | undefined
+}
+function buildMangaRoleBindings(project: ProjectState): MangaRoleBindingIndex {
+  const cards = project.mangaRoles ?? []
+  const byName = new Map<string, MangaRoleCard>()
+  for (const c of cards) {
+    if (c.name !== '') byName.set(c.name, c)
+    if (c.sourceRoleName !== undefined && c.sourceRoleName !== '') byName.set(c.sourceRoleName, c)
+  }
+  const byId = new Map<string, MangaRoleCard>(cards.map(c => [c.id, c]))
+  return {
+    byId,
+    resolve: (name: string): MangaRoleCard | undefined => {
+      const exact = byName.get(name)
+      if (exact !== undefined) return exact
+      for (const c of cards) {
+        if (c.name !== '' && (c.name.includes(name) || name.includes(c.name))) return c
+        if (c.sourceRoleName !== undefined && c.sourceRoleName !== '' && (c.sourceRoleName.includes(name) || name.includes(c.sourceRoleName))) return c
+      }
+      return undefined
+    },
+  }
+}
+
 /**
  * 分镜·导演级：剧情骨架 → 分镜表（镜头级）。
  * 只做画面层：景别/机位运镜/时长/画面/台词/音效/光效 + 状态连续；禁止改剧情（骨架只读）。
@@ -2696,6 +3011,16 @@ export async function generateStoryboardTable(
   // 场景卡：仅列名称与定位（正文命中优先，至多 6 个）。
   const usedScenes = (project.scenes ?? []).filter(s => body.includes(s.name)).slice(0, 6)
   const scenes = usedScenes.map(s => `${s.name}：${s.summary ?? ''}`)
+  // 漫剧定妆卡：本章正文命中漫剧卡（卡名或来源名），注入定妆锚点供画面遵守。
+  const bindings = buildMangaRoleBindings(project)
+  const mangaCardsInBody = bindings.byId.size > 0
+    ? [...bindings.byId.values()].filter(c => body.includes(c.name) || (c.sourceRoleName !== undefined && body.includes(c.sourceRoleName))).slice(0, 8)
+    : []
+  const mangaLines = mangaCardsInBody.map(c => {
+    const anchor = c.imagePrompt !== undefined ? c.imagePrompt.zh.slice(0, 90) : (c.appearance !== '' ? c.appearance : '')
+    const ref = c.imageUrl !== undefined ? '；参考图：有' : (c.gallery ?? []).some(g => g.label.includes('立绘')) ? '；参考图：有（立绘）' : ''
+    return `${c.name}（${c.identity ?? ''}）：定妆${anchor !== '' ? '「' + anchor + '」' : '（锚点未生成）'}${ref}`
+  })
   const rules = (project.visualRules ?? []).map(r => '- ' + r)
 
   const baseStyle = styleId !== undefined ? findStyle(styleId) : undefined
@@ -2708,7 +3033,7 @@ export async function generateStoryboardTable(
   const system = [
     '你是一位从业 10 年的电影导演兼分镜师，专长网文改编影视化。',
     '任务：把「剧情骨架」的每一个节拍展开为 1-3 个电影镜头，输出分镜表——只做画面层，禁止新增或改变剧情（骨架是只读输入）。',
-    '输出合法 JSON 对象：{"shots": [{"beatId": "骨架节拍id", "shot": "景别", "camera": "机位与运镜", "duration": 秒数, "visual": "画面内容", "line": "台词/旁白", "sound": "音效", "light": "光效", "prevState": "承接上一镜头结尾状态", "nextState": "本镜头结束状态"}]}',
+    '输出合法 JSON 对象：{"shots": [{"beatId": "骨架节拍id", "shot": "景别", "camera": "机位与运镜", "duration": 秒数, "visual": "画面内容", "line": "台词/旁白", "sound": "音效", "light": "光效", "prevState": "承接上一镜头结尾状态", "nextState": "本镜头结束状态", "characters": ["出镜角色名"]}]}',
     '景别取值：远景/全景/中景/近景/特写。',
     '硬性要求：',
     '【视觉风格】（必须内嵌进 visual/light 的画面措辞与光效描述）：',
@@ -2719,6 +3044,8 @@ export async function generateStoryboardTable(
     '4. 台词/音效/光效无则空字符串，不要编造。',
     '5. duration 1-12 秒。',
     '6. 所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束，不要输出其他文字。',
+    '7. 每个镜头必须输出 characters：本镜头出镜角色名数组（1-4 个），从「出场角色锚点」或正文中选取，使用正文里的确切称谓（如「周野」「周野的律师」），禁止自造名/缩写；路人或群像可用身份词（如「围观群众」）。',
+    '8. 人物外观/服装/标志物必须遵守「漫剧定妆卡」与「出场角色锚点」：同一角色逐镜头保持完全一致（服装、发色、标志物禁止更换）；定妆卡未覆盖的路人可用通用描述。',
   ].join('\n')
   const user = [
     `章节《${chapter.title}》（第 ${chapter.no} 章）`,
@@ -2726,6 +3053,7 @@ export async function generateStoryboardTable(
     `弧线：${skeleton.arc}`,
     skeleton.beats.map(b => `[${b.id}] [${b.function}] ${b.event}（情绪：${b.emotion}${b.cause !== undefined ? '；承接：' + b.cause : ''}）`).join('\n'),
     roles.length > 0 ? '==== 出场角色锚点 ====\n' + roles.join('\n') : '',
+    mangaLines.length > 0 ? '==== 漫剧定妆卡（角色外观以此为准，禁止改换服装/发色/标志物） ====\n' + mangaLines.join('\n') : '',
     scenes.length > 0 ? '==== 相关场景 ====\n' + scenes.join('\n') : '',
     rules.length > 0 ? '==== 本书视觉规则（必须内嵌进 visual） ====\n' + rules.join('\n') : '',
     '==== 章节正文（画面细节以此为准） ====',
@@ -2750,6 +3078,7 @@ export async function generateStoryboardTable(
           light: typeof entry.light === 'string' ? entry.light.trim().slice(0, 80) : '',
           prevState: typeof entry.prevState === 'string' ? entry.prevState.trim().slice(0, 150) : '',
           nextState: typeof entry.nextState === 'string' ? entry.nextState.trim().slice(0, 150) : '',
+          characters: sanitizeCharacters(entry.characters, 4),
         }))
         .filter(s => s.visual !== '')
     : []
@@ -2760,7 +3089,33 @@ export async function generateStoryboardTable(
   if (missing.length > 0) {
     console.warn(`[dsh-novel-forge] storyboard: beat ${missing.join(',')} 无镜头覆盖`)
   }
-  const table: StoryboardTable = { chapterNo, shots, usedScenes: usedScenes.map(s => s.name) }
+  // 表级 characters：各镜头去重汇总；LLM 漏标时用骨架/角色库兜底。
+  const tableChars: string[] = []
+  const tableRoleIds: string[] = []
+  for (const s of shots) {
+    // 定妆绑定：镜头 characters 称谓 → 漫剧卡 id（供出图/生视频时按卡取定妆图）。
+    const ids: string[] = []
+    for (const n of s.characters ?? []) {
+      const card = bindings.resolve(n)
+      if (card !== undefined && !ids.includes(card.id)) ids.push(card.id)
+    }
+    s.mangaRoleIds = ids.length > 0 ? ids : undefined
+    for (const c of s.characters ?? []) {
+      if (!tableChars.includes(c)) tableChars.push(c)
+      if (tableChars.length >= 12) break
+    }
+    for (const id of ids) {
+      if (!tableRoleIds.includes(id)) tableRoleIds.push(id)
+    }
+  }
+  const fallbackChars = (skeleton.characters ?? guessCharactersFromRoles(project, body, 12)).slice(0, 12)
+  const table: StoryboardTable = {
+    chapterNo,
+    shots,
+    usedScenes: usedScenes.map(s => s.name),
+    characters: tableChars.length > 0 ? tableChars : fallbackChars,
+    mangaRoleIds: tableRoleIds.length > 0 ? tableRoleIds : undefined,
+  }
   saveChapterStoryboard(project, outputDir, { chapterNo, table, updatedAt: new Date().toISOString() })
   return table
 }
@@ -2789,13 +3144,22 @@ export async function generateStoryboardPrompts(
     filterStyle?.keywords,
   ].filter((v): v is string => v !== undefined && v !== '').join('，') || '3D动漫，超精细建模，电影光影'
   const rules = (project.visualRules ?? []).map(r => '- ' + r)
-  const shotLines = table.shots.map(s =>
-    `[${s.id}] 节拍${s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s
+  const bindings = buildMangaRoleBindings(project)
+  const shotLines = table.shots.map(s => {
+    const bound = (s.characters ?? []).map(n => bindings.resolve(n)).filter((c): c is MangaRoleCard => c !== undefined)
+    const makeUp = bound.map(c => {
+      const anchor = c.imagePrompt !== undefined ? c.imagePrompt.zh.slice(0, 60) : (c.appearance !== '' ? c.appearance : '')
+      const ref = c.imageUrl !== undefined ? '（参考图）' : ''
+      return c.name + '：' + anchor + ref
+    }).join('；')
+    return `[${s.id}] 节拍${s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s
+出场：${s.characters !== undefined && s.characters.length > 0 ? s.characters.join('、') : '（未标注）'}
+定妆：${makeUp !== '' ? makeUp : '（未绑定漫剧卡）'}
 画面：${s.visual}
 台词：${s.line !== '' ? s.line : '（无）'}
 光效：${s.light !== '' ? s.light : '（无）'}
 承接：${s.prevState} → ${s.nextState}`
-  ).join('\n\n')
+  }).join('\n\n')
   const system = [
     '你是一位资深影视分镜提示词工程师，熟悉即梦 AI / Seedance 等视频生成模型的中文提示词写法。',
     '任务：把分镜表的每个镜头写成一段可直接粘贴进视频生成工具的提示词。',
@@ -2804,7 +3168,7 @@ export async function generateStoryboardPrompts(
     '重要：每段提示词开头必须原样嵌入风格词块原文，不得省略、不得改写。',
     '硬性要求：',
     '1. 只写画面与镜头，禁止写音频/台词配音说明（视频模型无音频）。',
-    '2. 服装/发色/标志物必须沿用镜头表与视觉规则，禁止自行更换。',
+    '2. 服装/发色/标志物必须沿用镜头表、定妆卡与视觉规则，禁止自行更换（同一角色跨镜头保持一致）。',
     '3. 运镜用通俗电影词（推近/拉远/跟随/低机位仰拍/过肩/手持晃动/固定机位），不要用分镜术语缩写。',
     '4. 输出合法 JSON 对象：{"prompts": [{"shotId": "s1", "text": "..."}]}，所有镜头都要有，顺序一致。',
     '5. 字符串内不得包含换行符，JSON 必须在一段内完整结束。',
@@ -2819,13 +3183,19 @@ export async function generateStoryboardPrompts(
   const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ prompts?: unknown }>(text)
   const shotIds = new Set(table.shots.map(s => s.id))
+  const shotBinding = new Map<string, string[]>(table.shots.map(s => [s.id, s.mangaRoleIds ?? []]))
   const prompts: StoryboardPrompt[] = Array.isArray(raw.prompts)
     ? raw.prompts
         .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
-        .map(entry => ({
-          shotId: shotIds.has(entry.shotId as string) ? entry.shotId as string : '',
-          text: ensureStyleEmbedded(typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '', stylePrefix, 'zh'),
-        }))
+        .map(entry => {
+          const shotId = shotIds.has(entry.shotId as string) ? entry.shotId as string : ''
+          const ids = shotBinding.get(shotId) ?? []
+          return {
+            shotId,
+            text: ensureStyleEmbedded(typeof entry.text === 'string' ? entry.text.trim().slice(0, 400) : '', stylePrefix, 'zh'),
+            mangaRoleIds: ids.length > 0 ? ids : undefined,
+          }
+        })
         .filter(x => x.shotId !== '' && x.text !== '')
     : []
   if (prompts.length === 0) throw new Error('模型未输出有效提示词，请重试')
@@ -2852,13 +3222,14 @@ export async function generateStoryboardSkeleton(
   const system = [
     '你是一位从业 15 年的电影编剧，专长网文改编影视化，深谙三幕结构与节拍（beat）写作。',
     '任务：把这一章改编成影视化「剧情骨架」——只做故事层，不做画面。',
-    '输出合法 JSON 对象：{"arc": "本章弧线一句话（起承转合，20-60字）", "beats": [{"event": "事件一句话（发生了什么）", "emotion": "人物情绪走向（如 压抑→隐忍→惊惧）", "function": "铺垫|冲突|转折|高潮|收束|伏笔|人物塑造", "cause": "承接上一节拍的原因（可省略）"}]}',
+    '输出合法 JSON 对象：{"arc": "本章弧线一句话（起承转合，20-60字）", "beats": [{"event": "事件一句话（发生了什么）", "emotion": "人物情绪走向（如 压抑→隐忍→惊惧）", "function": "铺垫|冲突|转折|高潮|收束|伏笔|人物塑造", "cause": "承接上一节拍的原因（可省略）"}], "characters": ["出镜角色名1", "出镜角色名2"]}',
     '硬性要求：',
     '1. beats 数量 4-9 个，严格按时间顺序，因果链完整：前一个 beat 的结果是后一个 beat 的原因。',
     '2. 必须覆盖本章全部剧情要点与正文关键事件，遗漏关键事件视为失败。',
     '3. 只输出剧情骨架，禁止写画面描写、机位运镜、台词细节、音效（那是导演阶段的事）。',
     '4. 所有字符串值内部不得包含换行符，JSON 必须在一段内完整结束。',
     '5. 直接输出 JSON 本身，不要输出思考过程或其他文字。',
+    '6. 额外输出 characters：本章真正出镜（说话/行动/被正面描写）的角色名数组，全部使用正文中的确切称谓（如「周野」「周野的律师」，不要改名或拼接），去重，3-10 个；路人或群像可用身份词（如「围观群众」）。',
   ].join('\n')
   const user = [
     `章节《${chapter.title}》（第 ${chapter.no} 章）`,
@@ -2867,7 +3238,7 @@ export async function generateStoryboardSkeleton(
     body.replace(/^#\s+.*$/m, '').trim(),
   ].join('\n')
   const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
-  const raw = parseJsonObject<{ arc?: unknown; beats?: unknown }>(text)
+  const raw = parseJsonObject<{ arc?: unknown; beats?: unknown; characters?: unknown }>(text)
   const arc = typeof raw.arc === 'string' ? raw.arc.trim().slice(0, 200) : ''
   const functions = new Set(['铺垫', '冲突', '转折', '高潮', '收束', '伏笔', '人物塑造'])
   const beats: StoryboardBeat[] = Array.isArray(raw.beats)
@@ -2883,7 +3254,15 @@ export async function generateStoryboardSkeleton(
         .filter(b => b.event !== '')
     : []
   if (beats.length === 0) throw new Error('模型未输出有效节拍链，请重试')
-  const skeleton: StoryboardSkeleton = { chapterNo, arc: arc !== '' ? arc : '（本章弧线未生成）', beats }
+  // 出场角色：LLM 结构化输出优先，漏填时用角色库命中正文兜底。
+  const skeletonChars = sanitizeCharacters(raw.characters, 12)
+  const chars = skeletonChars.length > 0 ? skeletonChars : guessCharactersFromRoles(project, body, 12)
+  const skeleton: StoryboardSkeleton = {
+    chapterNo,
+    arc: arc !== '' ? arc : '（本章弧线未生成）',
+    beats,
+    characters: chars.length > 0 ? chars : undefined,
+  }
   saveChapterStoryboard(project, outputDir, { chapterNo, skeleton, updatedAt: new Date().toISOString() })
   return skeleton
 }

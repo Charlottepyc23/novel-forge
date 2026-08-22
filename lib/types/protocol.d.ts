@@ -43,6 +43,8 @@ export declare const NOVEL_API: {
     readonly bookshelfImportTextPreview: "/api/dsh-novel-forge/bookshelf/import-text/preview";
     /** 漫剧方案管理：create/remove/activate。 */
     readonly manhuaPlans: "/api/dsh-novel-forge/manhua/plans";
+    /** 漫剧角色库：从分镜提名（规则+LLM两段式）/ 建卡 / 更新 / 删除 / 形象锚点 / 精修提示词。 */
+    readonly mangaRoles: "/api/dsh-novel-forge/manga/roles";
     /** 分镜·编剧级：单章 → 剧情骨架（节拍链）。 */
     readonly storyboardSkeleton: "/api/dsh-novel-forge/storyboard/skeleton";
     /** 分镜·导演级：骨架 → 分镜表（镜头级）。 */
@@ -220,6 +222,8 @@ export interface StoryboardSkeleton {
     arc: string;
     /** 剧情节拍链（时间顺序，因果连贯）。 */
     beats: StoryboardBeat[];
+    /** 本章全部出镜角色（正文中的确切称谓，去重；漫剧角色库提名地基）。 */
+    characters?: string[];
 }
 /** POST /storyboard/skeleton 请求：生成单章剧情骨架。 */
 export interface StoryboardSkeletonRequest {
@@ -253,6 +257,10 @@ export interface StoryboardShot {
     prevState: string;
     /** 本镜头结束状态。 */
     nextState: string;
+    /** 本镜头出镜角色（引用小说库规范名/漫剧卡名，1-4 个；漫剧角色库提名地基）。 */
+    characters?: string[];
+    /** 本镜头已绑定漫剧卡的 id（定妆图引用，供出图/生视频时按卡取参考图）。 */
+    mangaRoleIds?: string[];
 }
 /** 分镜·导演级：单章分镜表。 */
 export interface StoryboardTable {
@@ -260,6 +268,10 @@ export interface StoryboardTable {
     shots: StoryboardShot[];
     /** 生成时注入的场景卡名称（前端标注消费关系）。 */
     usedScenes?: string[];
+    /** 本章全部出镜角色（各镜头 characters 去重汇总；骨架有则兜底）。 */
+    characters?: string[];
+    /** 本章已绑定漫剧卡的 id（去重汇总，定妆图引用）。 */
+    mangaRoleIds?: string[];
 }
 /** POST /storyboard/table 请求：骨架 → 分镜表。 */
 export interface StoryboardTableRequest {
@@ -281,6 +293,8 @@ export interface StoryboardPrompt {
     shotId: string;
     /** 即梦/视频模型可粘贴的中文提示词（画面+运镜+光效+风格词块）。 */
     text: string;
+    /** 本镜头绑定的漫剧卡 id（定妆图引用：出图/生视频时按卡取 imageUrl/立绘）。 */
+    mangaRoleIds?: string[];
 }
 /** 分镜持久化：单章的分镜产出（骨架 + 分镜表 + 视频提示词，可分别存在）。 */
 export interface ChapterStoryboard {
@@ -334,6 +348,112 @@ export interface MangaPlansRequest {
 /** POST /manhua/plans 响应。 */
 export interface MangaPlansResponse {
     plans: MangaPlan[];
+}
+/** 漫剧角色卡：制作角色（要建模/出图/锁一致性的「上镜角色」），与小说角色库弱关联。 */
+export interface MangaRoleCard {
+    /** 稳定 id。 */
+    id: string;
+    /** 来源小说角色名（只读追溯，非强外键；禁止反向写回小说库）。 */
+    sourceRoleName?: string;
+    /** 漫剧用名（可短剧化改名）。 */
+    name: string;
+    /** 身份一句话。 */
+    identity: string;
+    /** 核心功能：主角/导师/感情线/反派/搭档/线人/功能性。 */
+    coreFunction: 'protagonist' | 'mentor' | 'love_interest' | 'antagonist' | 'sidekick' | 'informant' | 'functional';
+    /** 与主角的关系。 */
+    protagonistRelation: 'enemy' | 'friend' | 'mentor' | 'lover' | 'exploit' | 'neutral';
+    /** 口头禅/说话方式（配音一致性）。 */
+    speechStyle: string;
+    /** ≤3 个极致性格标签。 */
+    traits: string[];
+    /** 1-2 个辨识度外貌点。 */
+    appearance: string;
+    /** 3-5 个关键剧情节点。 */
+    keyScenes: string[];
+    /** 上场集数（分镜提名导入时记录）。 */
+    appearsInEpisodes: number[];
+    /** 待匹配 → 待确认 → 已导入 → 已定妆 → 已归档。 */
+    status: 'pending_match' | 'pending_confirm' | 'imported' | 'anchored' | 'archived';
+    /** 形象资产（沿用小说角色库同款结构）。 */
+    imagePrompt?: RoleRecord['imagePrompt'];
+    /** 情绪表情清单（锚点提炼时产出）。 */
+    expressions?: string[];
+    /** 四类精修生图提示词（立绘/四视图/表情/细节）。 */
+    promptKit?: RoleRecord['promptKit'];
+    /** 角色参考图。 */
+    imageUrl?: string;
+    /** 图集（图像锚点）。 */
+    gallery?: RoleImage[];
+    /** 生成锚点/精修时的方案风格 id（旧风格检测用）。 */
+    promptStyleId?: string;
+    createdAt: string;
+    updatedAt: string;
+}
+/** 分镜提名 → 小说角色库匹配的一条候选。 */
+export interface MangaRoleCandidate {
+    /** 分镜里的原始称谓（正文确切用法）。 */
+    rawName: string;
+    /** matched=命中小说角色；ambiguous=多个候选待定；not_in_library=小说库没有；already_imported=已建漫剧卡（跳过）。 */
+    verdict: 'matched' | 'ambiguous' | 'not_in_library' | 'already_imported';
+    /** 规则阶段候选短名单（≤5，精确名优先 + 身份/简称匹配）。 */
+    matches: Array<{
+        roleName: string;
+        reason: string;
+    }>;
+    /** LLM/规则确认的命中角色名（ambiguous 时可能为空）。 */
+    matchedRoleName?: string;
+    /** not_in_library 时给出建议：backfill=正文有该称谓但小说库漏提炼（回小说库补）；manga_new=漫剧新增角色（直接建卡）。 */
+    novelHint?: 'backfill' | 'manga_new';
+    /** 采纳时预填的漫剧卡建议。 */
+    suggested: {
+        name: string;
+        identity: string;
+        coreFunction: MangaRoleCard['coreFunction'];
+        protagonistRelation: MangaRoleCard['protagonistRelation'];
+        speechStyle: string;
+        traits: string[];
+        appearance: string;
+        keyScenes: string[];
+    };
+}
+/** POST /manga/roles 请求：漫剧角色库操作。 */
+export interface MangaRolesRequest {
+    op: 'nominate' | 'adopt' | 'update' | 'remove' | 'visual' | 'promptKit' | 'image' | 'removeImage' | 'imageGenerate' | 'mode';
+    /** op='mode'：短剧精简模式开关。 */
+    shortDramaMode?: boolean;
+    /** op='nominate'：从哪章分镜提名角色。 */
+    chapterNo?: number;
+    /** op='adopt' / op='update'：漫剧角色卡。 */
+    card?: MangaRoleCard;
+    /** op='remove' / 'visual' / 'promptKit' / 'image' / 'removeImage' / 'imageGenerate'：漫剧卡 id。 */
+    id?: string;
+    /** op='visual' / 'promptKit'：漫剧方案基底风格 id。 */
+    styleId?: string;
+    /** 可选滤镜风格 id。 */
+    filterId?: string;
+    /** op='image'：定妆图 dataURL。 */
+    dataUrl?: string;
+    /** op='image'：图集用途标签（立绘/四视图/表情-x/场景/细节）；缺省视为角色参考图（imageUrl）。 */
+    label?: string;
+    /** op='imageGenerate'：漫画风格预设 id（可选）。 */
+    style?: string;
+    /** op='imageGenerate'：生图模型库条目 id（缺省用启用条目）。 */
+    modelId?: string;
+}
+/** POST /manga/roles 响应。 */
+export interface MangaRolesResponse {
+    cards: MangaRoleCard[];
+    /** op='nominate' 时的 AI 提名候选。 */
+    candidates?: MangaRoleCandidate[];
+    /** op='visual' 时的形象锚点（已写入漫剧卡）。 */
+    visual?: RoleRecord['imagePrompt'];
+    /** op='promptKit' 时的四类精修提示词包（已写入漫剧卡）。 */
+    promptKit?: RoleRecord['promptKit'];
+    /** op='image' / 'imageGenerate' 时的定妆图 dataURL（已写入漫剧卡）。 */
+    imageUrl?: string;
+    /** op='mode' 时的短剧精简模式状态。 */
+    shortDramaMode?: boolean;
 }
 /** Chapter lifecycle states (the writing pipeline's state machine). */
 export type ChapterStatus = 'pending' | 'generating' | 'written' | 'reviewing' | 'approved' | 'rejected' | 'error';
@@ -979,6 +1099,10 @@ export interface ProjectState {
     plotlines?: Plotline[];
     /** 角色库（作者维护 + AI 提炼的主表）。 */
     roles?: RoleRecord[];
+    /** 漫剧角色库（制作角色投影：从分镜提名导入，独立于小说角色库）。 */
+    mangaRoles?: MangaRoleCard[];
+    /** 短剧精简模式：漫剧角色库按 5-8 上镜角色 / 功能标签 / 关系闭环 / 人设极致化约束。 */
+    shortDramaMode?: boolean;
     /** 场景库（作者维护 + AI 提炼的主表）。 */
     scenes?: SceneCard[];
     /** 视觉世界观规则（生图/生视频必须遵守，从道藏提炼，注入所有提示词）。 */

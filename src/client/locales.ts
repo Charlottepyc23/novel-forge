@@ -154,7 +154,6 @@ export const zh = {
   'settings.reasoning.max': 'max · 最高思考（质检/推演）',
   'settings.theme': '主题',
   'settings.themeLiquid': 'iOS 液态玻璃（绿）',
-  'settings.themeClassic': '经典毛玻璃（蓝）',
   'settings.themeNeumorph': '新拟物（双阴影）',
   'settings.themeHint': '存于浏览器本地，即时生效',
   'settings.chapterChars': '每章目标字数',

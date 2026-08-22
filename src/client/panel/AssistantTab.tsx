@@ -227,8 +227,8 @@ export function AssistantTab({ api }: AssistantTabProps) {
         </button>
       </div>
       <span className={css.meta}>{tt('assistant.hint')}</span>
-      {notice !== '' && <span style={{ color: 'var(--nf-success)', fontSize: 12 }}>{notice}</span>}
-      {error !== '' && <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>{tt('common.error')}: {error}</span>}
+      {notice !== '' && <span style={{ color: 'var(--nf-success)', fontSize: 'var(--nf-fs-12)' }}>{notice}</span>}
+      {error !== '' && <span style={{ color: 'var(--nf-error)', fontSize: 'var(--nf-fs-12)' }}>{tt('common.error')}: {error}</span>}
       {/* 状态条：编辑老师正在做什么 */}
       <div className={`${css.assistantStatus} ${busy ? css.assistantStatusBusy : ''}`}>
         {busy
@@ -278,7 +278,7 @@ export function AssistantTab({ api }: AssistantTabProps) {
         ))}
         {busy && <span className={css.meta} style={{ color: 'var(--nf-accent)' }}>…</span>}
       </div>
-      <div className={css.row} style={{ marginTop: 8 }}>
+      <div className={css.row} style={{ marginTop: 'var(--nf-space-8)' }}>
         <textarea
           className={css.textarea}
           style={{ minHeight: 64, flex: 1 }}

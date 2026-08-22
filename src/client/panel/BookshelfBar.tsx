@@ -164,7 +164,7 @@ export function BookshelfBar({ api, shelf, onSwitch }: BookshelfBarProps) {
           </div>
         )}
       </div>
-      {error !== '' && <span style={{ color: 'var(--nf-error)', fontSize: 12 }}>{error}</span>}
+      {error !== '' && <span style={{ color: 'var(--nf-error)', fontSize: 'var(--nf-fs-12)' }}>{error}</span>}
     </div>
   )
 }

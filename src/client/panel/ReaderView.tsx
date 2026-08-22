@@ -178,7 +178,7 @@ export function ReaderView({
         <button
           type="button"
           className={`${css.button} ${css.buttonSmall} ${navOpen ? css.buttonPrimary : ''}`}
-          style={{ marginLeft: 4 }}
+          style={{ marginLeft: 'var(--nf-space-4)' }}
           onClick={() => { setNavOpen(v => { const next = !v; writePref(`${prefKey}.nav`, next); return next }) }}
           title={navOpen ? '收起目录' : '展开目录'}
         >
@@ -200,7 +200,7 @@ export function ReaderView({
             </button>
           ))}
         </div>
-        <div className={css.readerSeg} style={{ marginLeft: 8 }}>
+        <div className={css.readerSeg} style={{ marginLeft: 'var(--nf-space-8)' }}>
           {THEMES.map(t => (
             <button
               key={t.id}
@@ -214,7 +214,7 @@ export function ReaderView({
             </button>
           ))}
         </div>
-        <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ marginLeft: 10 }} onClick={onOpenWorkspace} title="回到创作工作台">
+        <button type="button" className={`${css.button} ${css.buttonSmall}`} style={{ marginLeft: 'var(--nf-space-10)' }} onClick={onOpenWorkspace} title="回到创作工作台">
           ✏️ 去工作台
         </button>
       </div>
@@ -224,7 +224,7 @@ export function ReaderView({
         {navOpen && (
           <aside className={css.readerSidebar} style={{ borderColor: themeMeta.dim, background: theme === 'night' ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.35)' }} ref={sidebarRef}>
             {groups.length === 0 ? (
-              <div className={css.meta} style={{ color: themeMeta.dim, padding: 12 }}>还没有已写章节，先去工作台创作吧</div>
+              <div className={css.meta} style={{ color: themeMeta.dim, padding: 'var(--nf-space-12)' }}>还没有已写章节，先去工作台创作吧</div>
             ) : groups.map(g => {
               const collapsed = collapsedVols.includes(g.no)
               return (

@@ -68,11 +68,82 @@ novel-forge 插件（D:\ryan work\harness\plugins\novel-forge）
 - 《“救”命钱》：roles 已清空（roleStatus 已删），旧 10 人备份在 novels/“救”命钱/roles-backup-20260822.json；**待用户在 GUI 重新提炼角色**（提炼→采纳）
 - 生图模型库：豆包旧条目曾"删除后复活"，已修（只有从未保存 imageModels 才迁移）
 
+### 本次会话已完成（2026-08-22 凌晨续接·第七轮补7：移除经典毛玻璃主题）
+0. ✅ **删除「经典毛玻璃」主题**（与 macOS 重复）：NovelPanel 类型/localStorage 恢复/下拉去掉 classic；CSS 经典浅/深块 + data-nf-mode dark 经典块删除；locales 删 settings.themeClassic；lib/client.js 确认 0 残留
+   - 主题现为 3 个：液态玻璃(liquid) / 新拟物(neumorph) / macOS
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **玻璃主题背后加抽象壁纸底图**：新增 --nf-glass-bg-image（SVG data-URI，feGaussianBlur 柔和光斑），叠在 .panel::before（orb 之上）；macro:液体=绿蓝流光、毛玻璃=冷蓝灰、macOS=蓝紫、新拟物=none；让卡片 blur 糊出真实玻璃感；深浅共用、体积近 0、无版权
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **下拉框/输入框遵循各主题**：.input/.textarea 改用可覆盖形态变量 --nf-ctrl-radius/bg/border/sheen/caret；select 加 appearance:none + 自绘箭头（caret 色随主题）；各主题控件形态：液态(圆角14/玻璃底/绿箭头)、毛玻璃(圆角8/平底/蓝箭头)、macOS(圆角8/玻璃/蓝箭头+蓝focus环)、新拟物(圆角10/实色/深箭头)；option/color-scheme 已按深浅跟随
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **液态/毛玻璃差异落到容器样式**：
+   - .card 改用可被主题覆盖的形态变量：--nf-card-radius/blur/saturate/border/sheen（含 .card::before 与 hover 的 sheen 引用）
+   - 液态(liquid)：圆角 24、blur 32、sat 190%、白描边、强内高光（果冻玻璃）
+   - 经典毛玻璃(classic)：圆角 14、blur 42、sat 120%、冷描边、无内高光（薄平板冷调）
+   - macOS：圆角 12、blur 42、sat 150%、冷描边(浅/深)；新拟物：圆角 20、blur 0、无边框、无内高光（实色）
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **显示模式统一由 data-nf-mode 驱动**：
+   - 深色基准从 `body[data-ds-dark-theme] .view` 挪到 `.panel[data-nf-mode='dark']` + `body[data-ds-dark-theme] .panel:not([data-nf-mode])`（强制 dark / system 跟随宿主）
+   - classic/macos/neumorph 深色块选择器改为 `.panel[data-nf-mode='dark'][data-nf-theme=X]` + `body[data-ds-dark-theme] .panel[data-nf-theme=X]:not([data-nf-mode])` 联合
+   - 效果：浅/深由小说工坊「显示模式」自主控制，四主题（liquid/classic/neumorph/macos）各自匹配深浅；system 才跟随宿主；深色系统下强制浅色也生效（不再只对 macos）
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **macOS 浅色显示模式修复**：macos 浅色基准选择器加 `body[data-ds-dark-theme] .panel[data-nf-mode='light'][data-nf-theme='macos']` 高优先级联合，深色系统下强制浅色也能覆盖宿主深色（classic/neumorph 同类问题未改，避免波及）
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **移除 macOS 红绿灯窗口装饰**：删除 macos 主题下 .card padding-top + .card::after 三点（纯装饰且 var(--nf-card-pad) 双值导致 left 失效挡字）；保留 macOS 配色/玻璃按钮/输入框；lib/client.js 确认无 #ff5f57 残留
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **macOS 主题**：panel.module.css 新增 data-nf-theme='macos' 浅色（#007aff 强调 + 白玻璃）与深色（#0a84ff + 深灰玻璃）两套变量，含 data-nf-mode='dark' 手动深色变体；卡片顶部红绿灯标题栏（红#ff5f57 黄#febc2e 绿#28c840，仅 macos 显示，padding-top 推开标题）；按钮/输入框玻璃化（8px 圆角、蓝渐变主按钮、focus 蓝环）。NovelPanel：panelTheme 类型/localStorage 恢复/设置下拉加「macOS · 玻璃（蓝，随外观浅/深）」
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **分镜三页按钮归属修正**：章节下拉三个分镜页都保留；「✍️ 生成剧情骨架 / 🔄 重新生成」只在骨架页（mode=skeleton）显示，分镜表/提示词页由各自内容区按钮承担
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **9 步独立页面（方案X 落地）**：
+   - FlowGuide：FlowTarget 拆为 9 个具体目标（skeleton/table/import/makeup/prompts/export…），与页面一一对应
+   - MangaWorkspace：重构为步骤页容器——顶部常驻只有「方案切换器 + 全流程步骤条」；删除三导航/新手向导大卡/常驻视觉规则卡；主体按 view 渲染：①建方案（创建成功→②）②视觉规则独立页 ③④⑦分镜页（同一实例按 mode 切换）⑤导入（focus=import+隐藏卡片列表）⑥定妆（focus=cards）⑧场景 ⑨导出使用页（含已定妆卡清单）
+   - StoryboardTab：focusStep 换 mode(skeleton/table/prompts/auto) + onGoStep；固定模式前置不足显示黄条、产物缺失给生成按钮，不再静默降级
+   - MangaRoleLibrary：focus(import/cards) 滚动聚焦 + showCards 开关
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **分镜工作台内三步按钮移除**：顶部全流程条已含 ③剧情骨架/④分镜表/⑦视频提示词，分镜页内原 ①②③ 三个可点按钮改为只读状态徽章（当前/已完成✓），切换走全流程条（focusStep 已有）；顺带清理 NovelPanel 孤儿 import StoryboardTab（该组件仅漫剧工作台使用）
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **新手流程引导（方案A+B+C）**：
+   - 新组件 FlowGuide.tsx：9 步全流程步骤条（①建方案→②视觉规则→③骨架→④分镜表→⑤导入角色→⑥定妆→⑦视频提示词→⑧场景→⑨导出），完成度自动判定（读 project 字段），点击直达对应区块/分镜子步骤
+   - MangaWorkspace：状态A 新手向导卡（9 步人话清单）；状态B 方案切换器卡内嵌 FlowGuide；新增「⚠️ 视觉规则」卡（提炼按钮补回工作台，修复入口缺失断点）；storyboardFocus 传给 StoryboardTab
+   - StoryboardTab：focusStep 受控（全流程步骤条点击切子步骤）；每步顶部说明行（这步/前置/下一步）
+   - MangaRoleLibrary / SceneLibrary：顶部加流程位置说明行
+   - 清理孤儿组件 RoleVisualPanel.tsx（无挂载点，已删；lib/client.js 确认无残留）
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **第④步 短剧精简模式开关**：
+   - protocol：ProjectState.shortDramaMode + /manga/roles op=mode（开关读写）
+   - engine：nominateMangaRoles 短剧规则（只保留 5-8 上镜角色、功能性路人不上卡、coreFunction/protagonistRelation 必填、性格标签极致化、超员裁剪）；extractRoleVisualFrom / generateRolePromptKitFrom 加 shortDrama 参数，漫剧卡路径注入「人设极致化」提示（小说角色库路径不受影响）
+   - UI：MangaRoleLibrary 顶部「📺 短剧精简模式：开/关」开关 + 「短剧精简检查」面板（上镜角色 x/5-8 计数、功能覆盖缺项、关系闭环缺项、极致化说明）
+   - 至此设计文档 ①②③④ 全部完成
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **第③步 定妆图绑定到分镜生成链路**：
+   - protocol：StoryboardShot/Table/Prompt 加 mangaRoleIds?: string[]（定妆图引用）；mangaRoles 路由 op 扩 image/removeImage/imageGenerate
+   - engine：buildMangaRoleBindings 索引（卡名/来源名精确+包含兜底）；generateStoryboardTable 注入「漫剧定妆卡」锚点+参考图标记+禁止改换硬规则，镜头/表级写 mangaRoleIds；generateStoryboardPrompts 镜头上下文注入「定妆」行+一致性规则，提示词携带 mangaRoleIds
+   - engine：generateReferenceImageFrom 底层重构，新增 generateMangaRoleReferenceImage（豆包等按锚点出定妆图写回 imageUrl）
+   - routes：mangaRoles 图集上传（立绘同步 imageUrl）/移除/生图 op
+   - UI：MangaRoleLibrary 卡内参考图预览/上传（标签图集）/移除/⚡生成定妆图+模型选择；StoryboardTab 表头/镜头/提示词显示「🎨 定妆」绑定徽章，复制文本带定妆
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **第②步 漫剧角色库提名/匹配/导入**：
+   - protocol：MangaRoleCard（含 sourceRoleName 弱关联 / 功能标签 / 关系 / 上场集数 / 状态机）+ MangaRoleCandidate + /manga/roles 路由
+   - engine nominateMangaRoles：分镜 characters 收集 → 规则过滤（精确名+身份/简称，短名单≤5）→ LLM 确认（是/否+选哪个，不做开放检索）→ 未匹配判定（正文有此称谓=回小说库补提炼 backfill / 否则漫剧新增 manga_new）
+   - engine：extractRoleVisual / generateRolePromptKit 重构出底层 From 版本，新增 extractMangaRoleVisual / generateMangaRolePromptKit（漫画卡写回自身字段，status→anchored）
+   - routes：mangaRolesRoute（nominate/adopt/update/remove/visual/promptKit）；ProjectState.mangaRoles 存储 + mergeVolatileFromDisk 同步
+   - UI：新组件 MangaRoleLibrary.tsx（从本集分镜导入/提名候选编辑/导入建卡/直接新建/编辑/删除/锚点/精修/状态徽章/风格不一致提示），替换漫剧工作台角色区；清理 MangaWorkspace 死代码
+   - 顶部按键：三导航改为「分镜→角色→场景」等宽（minWidth 96），角色计数改显漫剧卡数，方案切换器 select/按钮尺寸统一
+   - 状态：typecheck + build 完成；**待重启 DSH 生效**
+1. ✅ **分镜 characters[] 结构化角色引用（地基）**：
+   - protocol：StoryboardSkeleton / StoryboardShot / StoryboardTable 均加 characters?: string[]
+   - engine generateStoryboardSkeleton：LLM 输出 characters（正文确切称谓 3-10 个，与 beats 同步），漏填按角色库名命中正文兜底（guessCharactersFromRoles）
+   - engine generateStoryboardTable：每镜头 LLM 输出 characters（1-4 个，sanitizeCharacters 清洗）；表级 characters = 镜头去重汇总，空则用骨架/角色库兜底
+   - engine generateStoryboardPrompts：镜头上下文注入「出场」行（为后续③定妆图绑定铺路）
+   - StoryboardTab：骨架/分镜表/镜头卡展示角色徽章；复制文本带出场角色
+   - 状态：typecheck + build 完成；**待重启 DSH 生效（engine 侧改动）**
+
 ### 待做（按序，详见 docs/漫剧角色库设计.md）
-1. 分镜表/骨架加 characters[] 结构化角色引用（地基）
-2. 漫剧角色库：从分镜提名 → 小说库匹配（规则+LLM两段式）→ 导入（sourceRoleName 弱关联）
-3. 定妆图绑定到分镜生成链路
-4. 短剧精简模式开关（5-8人/功能标签/关系闭环）
+1. ✅ 分镜表/骨架加 characters[] 结构化角色引用（地基）——已实施
+2. ✅ 漫剧角色库：从分镜提名 → 小说库匹配（规则+LLM两段式）→ 导入（sourceRoleName 弱关联）——已实施
+3. ✅ 定妆图绑定到分镜生成链路（分镜生成时注入漫剧卡锚点/参考图）——已实施
+4. ✅ 短剧精简模式开关（5-8人/功能标签/关系闭环）——已实施；**漫剧角色库设计 ①②③④ 全部完成**
 5. 生图模型「获取模型列表」下拉（接口地址+API Key → 拉 /models 选模型）——已讨论未实施
 6. 分镜视频提示词按豆包/即梦格式重写（开头参数行+时间分段+结尾约束+全局时长）——已讨论未实施
 7. 分镜表模板强化：每镜头必须写「角色名+动作+表情+标志物」——已讨论未实施

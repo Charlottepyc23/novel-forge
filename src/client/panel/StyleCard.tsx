@@ -33,9 +33,9 @@ export function StyleCard({
     <div
       onClick={onClick}
       style={{
-        display: 'flex', flexDirection: 'column', gap: 6,
+        display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)',
         border: `1px solid ${selected === true ? 'var(--nf-accent)' : 'var(--nf-border)'}`,
-        borderRadius: 14, padding: 10, background: 'var(--nf-bg-raise)',
+        borderRadius: 'var(--nf-radius-14)', padding: 'var(--nf-space-10)', background: 'var(--nf-bg-raise)',
         cursor: onClick !== undefined ? 'pointer' : 'default',
         boxShadow: selected === true ? '0 0 0 2px var(--nf-accent-soft)' : 'none',
       }}
@@ -43,12 +43,12 @@ export function StyleCard({
       {/* 效果图（竖版 3:4，服务端缩略图 webp；无图回退占位） */}
       <div
         style={{
-          aspectRatio: '3 / 4', borderRadius: 10,
+          aspectRatio: '3 / 4', borderRadius: 'var(--nf-radius-10)',
           position: 'relative', overflow: 'hidden',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'linear-gradient(145deg, var(--nf-bg-inset), color-mix(in srgb, var(--nf-accent) 12%, var(--nf-bg-inset)))',
           border: '1px solid var(--nf-border)',
-          color: 'var(--nf-text-3)', fontSize: 12, textAlign: 'center',
+          color: 'var(--nf-text-3)', fontSize: 'var(--nf-fs-12)', textAlign: 'center',
         }}
       >
         <img
@@ -60,22 +60,22 @@ export function StyleCard({
         />
         🖼️ 效果图待生成
         {selected === true && (
-          <span style={{ position: 'absolute', top: 6, right: 6, background: 'var(--nf-accent)', color: '#fff', borderRadius: 999, padding: '2px 8px', fontSize: 11, fontWeight: 700 }}>✓</span>
+          <span style={{ position: 'absolute', top: 6, right: 6, background: 'var(--nf-accent)', color: '#fff', borderRadius: 'var(--nf-radius-999)', padding: 'var(--nf-space-2) var(--nf-space-8)', fontSize: 'var(--nf-fs-12)', fontWeight: 700 }}>✓</span>
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <b style={{ fontSize: 13 }}>{style.name}</b>
-        <span style={{ fontSize: 10, color: 'var(--nf-text-3)' }}>{cat?.icon} {style.category.toUpperCase()}</span>
-        {style.stackable === true && <span style={{ fontSize: 10, color: 'var(--nf-info)', border: '1px solid var(--nf-info)', borderRadius: 999, padding: '0 6px' }}>叠加滤镜</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--nf-space-6)', flexWrap: 'wrap' }}>
+        <b style={{ fontSize: 'var(--nf-fs-14)' }}>{style.name}</b>
+        <span style={{ fontSize: 'var(--nf-fs-12)', color: 'var(--nf-text-3)' }}>{cat?.icon} {style.category.toUpperCase()}</span>
+        {style.stackable === true && <span style={{ fontSize: 'var(--nf-fs-12)', color: 'var(--nf-info)', border: '1px solid var(--nf-info)', borderRadius: 'var(--nf-radius-999)', padding: '0 var(--nf-space-6)' }}>叠加滤镜</span>}
       </div>
 
-      <span style={{ fontSize: 11.5, lineHeight: 1.5, color: 'var(--nf-text-2)' }}>{style.traits}</span>
+      <span style={{ fontSize: 'var(--nf-fs-12)', lineHeight: 1.5, color: 'var(--nf-text-2)' }}>{style.traits}</span>
 
       <div
         style={{
-          fontSize: 11, lineHeight: 1.5, color: 'var(--nf-text-3)',
-          borderTop: '1px solid var(--nf-border)', paddingTop: 5,
+          fontSize: 'var(--nf-fs-12)', lineHeight: 1.5, color: 'var(--nf-text-3)',
+          borderTop: '1px solid var(--nf-border)', paddingTop: 'var(--nf-space-6)',
           display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
           cursor: 'copy',
         }}
@@ -84,7 +84,7 @@ export function StyleCard({
       >
         关键词：{style.keywords}
       </div>
-      {copied === style.id && <span style={{ color: 'var(--nf-ok, #46a758)', fontSize: 11 }}>✅ 已复制</span>}
+      {copied === style.id && <span style={{ color: 'var(--nf-ok, #46a758)', fontSize: 'var(--nf-fs-12)' }}>✅ 已复制</span>}
     </div>
   )
 }

@@ -60,6 +60,9 @@ import {
   type MangaPlan,
   type MangaPlansRequest,
   type MangaPlansResponse,
+  type MangaRoleCard,
+  type MangaRolesRequest,
+  type MangaRolesResponse,
   type LoadOutlineResponse,
   type NovelConfig,
   type PlotlinesRequest,
@@ -142,12 +145,16 @@ import {
   extractRoles,
   extractScenes,
   generateRolePromptKit,
+  generateMangaRolePromptKit,
   extractVisualRules,
   extractRoleVisual,
+  extractMangaRoleVisual,
+  nominateMangaRoles,
   suggestOutlines,
   reverseOutlineFromChapters,
   breakdownBook,
   generateRoleReferenceImage,
+  generateMangaRoleReferenceImage,
   testImageEndpoint,
   generateStoryboardSkeleton,
   generateStoryboardTable,
@@ -1919,6 +1926,201 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     },
   }
 
+  // ------------------------------------------------------- manga roles
+  /** 漫剧角色库：从分镜提名（规则+LLM 两段式）/ 建卡 / 更新 / 删除 / 形象锚点 / 精修提示词。 */
+  const mangaRolesRoute: WebRoute = {
+    kind: 'exact',
+    path: NOVEL_API.mangaRoles,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      const config = getConfig()
+      const project = requireProject(res)
+      if (project === undefined) return
+      const body = await readJsonBody<MangaRolesRequest>(req)
+      if (project.mangaRoles === undefined) project.mangaRoles = []
+      const op = body?.op
+      if (op === 'nominate') {
+        const chapterNo = body?.chapterNo
+        if (typeof chapterNo !== 'number' || chapterNo <= 0) {
+          writeJson(res, 400, { error: 'chapterNo（章号）必填' })
+          return
+        }
+        try {
+          const candidates = await nominateMangaRoles(ctx, config, project, config.outputDir, chapterNo)
+          writeJson(res, 200, { cards: project.mangaRoles, candidates } satisfies MangaRolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `提名失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'adopt' || op === 'update') {
+        const card = body?.card
+        if (card === undefined || typeof card !== 'object') {
+          writeJson(res, 400, { error: 'card（漫剧角色卡）必填' })
+          return
+        }
+        const name = (card.name ?? '').trim()
+        if (name === '') {
+          writeJson(res, 400, { error: '漫剧角色名不能为空' })
+          return
+        }
+        const now = new Date().toISOString()
+        const existing = card.id !== '' ? project.mangaRoles.find(c => c.id === card.id) : undefined
+        const next: MangaRoleCard = {
+          id: card.id !== '' ? card.id : 'mr-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+          sourceRoleName: card.sourceRoleName !== undefined && card.sourceRoleName !== '' ? card.sourceRoleName : undefined,
+          name,
+          identity: card.identity ?? '',
+          coreFunction: card.coreFunction ?? 'functional',
+          protagonistRelation: card.protagonistRelation ?? 'neutral',
+          speechStyle: card.speechStyle ?? '',
+          traits: Array.isArray(card.traits) ? card.traits.map(t => String(t).slice(0, 20)).filter(t => t !== '').slice(0, 3) : [],
+          appearance: card.appearance ?? '',
+          keyScenes: Array.isArray(card.keyScenes) ? card.keyScenes.map(k => String(k).slice(0, 120)).filter(k => k !== '').slice(0, 6) : [],
+          appearsInEpisodes: Array.isArray(card.appearsInEpisodes)
+            ? [...new Set(card.appearsInEpisodes.map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0))].sort((a, b) => a - b).slice(0, 200)
+            : [],
+          status: card.status ?? 'imported',
+          imagePrompt: card.imagePrompt,
+          expressions: card.expressions,
+          promptKit: card.promptKit,
+          imageUrl: card.imageUrl,
+          gallery: card.gallery,
+          promptStyleId: card.promptStyleId,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        }
+        if (existing !== undefined) {
+          const idx = project.mangaRoles.findIndex(c => c.id === card.id)
+          project.mangaRoles[idx] = next
+        } else {
+          project.mangaRoles.push(next)
+        }
+        project.updatedAt = now
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { cards: project.mangaRoles } satisfies MangaRolesResponse)
+        return
+      } else if (op === 'remove') {
+        const id = body?.id
+        if (typeof id !== 'string' || id === '') {
+          writeJson(res, 400, { error: 'id（漫剧卡 id）必填' })
+          return
+        }
+        project.mangaRoles = project.mangaRoles.filter(c => c.id !== id)
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { cards: project.mangaRoles } satisfies MangaRolesResponse)
+        return
+      } else if (op === 'visual') {
+        const id = body?.id?.trim()
+        if (id === undefined || id === '') {
+          writeJson(res, 400, { error: 'id（漫剧卡 id）必填' })
+          return
+        }
+        try {
+          const visual = await extractMangaRoleVisual(ctx, config, project, config.outputDir, id, body?.styleId, body?.filterId)
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { cards: project.mangaRoles, visual } satisfies MangaRolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `形象锚点生成失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'promptKit') {
+        const id = body?.id?.trim()
+        if (id === undefined || id === '') {
+          writeJson(res, 400, { error: 'id（漫剧卡 id）必填' })
+          return
+        }
+        try {
+          const kit = await generateMangaRolePromptKit(ctx, config, project, id, body?.styleId, body?.filterId)
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { cards: project.mangaRoles, promptKit: kit } satisfies MangaRolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `提示词精修失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'image') {
+        // 定妆图上传：带标签进图集；标签含「立绘」时同步为参考图（imageUrl）。
+        const id = body?.id?.trim()
+        const dataUrl = body?.dataUrl?.trim()
+        if (id === undefined || id === '') {
+          writeJson(res, 400, { error: 'id（漫剧卡 id）必填' })
+          return
+        }
+        if (dataUrl === undefined || dataUrl === '') {
+          writeJson(res, 400, { error: 'dataUrl（定妆图）必填' })
+          return
+        }
+        const card = project.mangaRoles.find(c => c.id === id)
+        if (card === undefined) {
+          writeJson(res, 404, { error: '漫剧角色卡不存在' })
+          return
+        }
+        const label = body?.label?.trim() ?? ''
+        if (label !== '') {
+          card.gallery ??= []
+          card.gallery = card.gallery.filter(g => g.label !== label)
+          card.gallery.push({ label, dataUrl })
+          if (label.includes('立绘')) card.imageUrl = dataUrl
+        } else {
+          card.imageUrl = dataUrl
+        }
+        card.updatedAt = new Date().toISOString()
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { cards: project.mangaRoles, imageUrl: card.imageUrl } satisfies MangaRolesResponse)
+        return
+      } else if (op === 'removeImage') {
+        const id = body?.id?.trim()
+        const label = body?.label?.trim() ?? ''
+        const card = project.mangaRoles.find(c => c.id === id)
+        if (card !== undefined) {
+          if (label !== '') {
+            card.gallery = (card.gallery ?? []).filter(g => g.label !== label)
+            if (label.includes('立绘')) card.imageUrl = undefined
+          } else {
+            card.imageUrl = undefined
+          }
+          card.updatedAt = new Date().toISOString()
+        }
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { cards: project.mangaRoles } satisfies MangaRolesResponse)
+        return
+      } else if (op === 'imageGenerate') {
+        const id = body?.id?.trim()
+        if (id === undefined || id === '') {
+          writeJson(res, 400, { error: 'id（漫剧卡 id）必填' })
+          return
+        }
+        try {
+          const imageUrl = await generateMangaRoleReferenceImage(ctx, config, project, config.outputDir, id, body?.style ?? '', body?.modelId)
+          project.updatedAt = new Date().toISOString()
+          saveProject(config.outputDir, project)
+          writeJson(res, 200, { cards: project.mangaRoles, imageUrl } satisfies MangaRolesResponse)
+          return
+        } catch (error) {
+          writeJson(res, 500, { error: `定妆图生成失败：${(error as Error).message}` })
+          return
+        }
+      } else if (op === 'mode') {
+        // 短剧精简模式开关（漫剧角色库 5-8 人 / 功能标签 / 关系闭环 / 人设极致化）。
+        project.shortDramaMode = body?.shortDramaMode === true
+        project.updatedAt = new Date().toISOString()
+        saveProject(config.outputDir, project)
+        writeJson(res, 200, { cards: project.mangaRoles, shortDramaMode: project.shortDramaMode } satisfies MangaRolesResponse)
+        return
+      } else {
+        writeJson(res, 400, { error: '未知的 manga/roles op' })
+        return
+      }
+    },
+  }
+
   // ------------------------------------------------------- chapter reset
   /** 章节复位：generating 卡死 → pending（可重新生成）。 */
   const chapterResetRoute: WebRoute = {
@@ -2587,6 +2789,7 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
     renameRoute,
     plotlinesRoute,
     rolesRoute,
+    mangaRolesRoute,
     scenesRoute,
     visualRulesRoute,
     sensitiveRoute,

@@ -100,6 +100,8 @@ export declare class NovelApi {
     /** 角色库：AI 提炼 / 采纳 / 更新 / 删除。 */
     imageTest(req: import('../protocol.ts').ImageTestRequest): Promise<import('../protocol.ts').ImageTestResponse>;
     roles(req: import('../protocol.ts').RolesRequest): Promise<import('../protocol.ts').RolesResponse>;
+    /** 漫剧角色库：从分镜提名 / 建卡 / 更新 / 删除 / 形象锚点 / 精修提示词。 */
+    mangaRoles(req: import('../protocol.ts').MangaRolesRequest): Promise<import('../protocol.ts').MangaRolesResponse>;
     /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
     scenes(req: import('../protocol.ts').ScenesRequest): Promise<import('../protocol.ts').ScenesResponse>;
     /** 视觉世界观规则：提炼 / 保存。 */

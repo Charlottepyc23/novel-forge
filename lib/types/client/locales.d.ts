@@ -153,7 +153,6 @@ export declare const zh: {
     readonly 'settings.reasoning.max': "max · 最高思考（质检/推演）";
     readonly 'settings.theme': "主题";
     readonly 'settings.themeLiquid': "iOS 液态玻璃（绿）";
-    readonly 'settings.themeClassic': "经典毛玻璃（蓝）";
     readonly 'settings.themeNeumorph': "新拟物（双阴影）";
     readonly 'settings.themeHint': "存于浏览器本地，即时生效";
     readonly 'settings.chapterChars': "每章目标字数";

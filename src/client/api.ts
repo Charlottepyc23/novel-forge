@@ -236,6 +236,11 @@ export class NovelApi {
     return postJson<import('../protocol.ts').RolesResponse>(NOVEL_API.roles, req)
   }
 
+  /** 漫剧角色库：从分镜提名 / 建卡 / 更新 / 删除 / 形象锚点 / 精修提示词。 */
+  async mangaRoles(req: import('../protocol.ts').MangaRolesRequest): Promise<import('../protocol.ts').MangaRolesResponse> {
+    return postJson<import('../protocol.ts').MangaRolesResponse>(NOVEL_API.mangaRoles, req)
+  }
+
   /** 场景库：AI 提炼 / 采纳 / 更新 / 删除 / 图集。 */
   async scenes(req: import('../protocol.ts').ScenesRequest): Promise<import('../protocol.ts').ScenesResponse> {
     return postJson<import('../protocol.ts').ScenesResponse>(NOVEL_API.scenes, req)

@@ -19,7 +19,7 @@ export interface AssetsTabProps {
 function GenreTree({ node, selected, onSelect }: { node: GenreNode; selected: string; onSelect: (node: GenreNode) => void }) {
   return (
     <div>
-      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 6, cursor: 'pointer' }}>
+      <label style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--nf-space-6)', cursor: 'pointer' }}>
         <input type="radio" name="genre" checked={selected === node.name} onChange={() => { onSelect(node) }} />
         <span>
           <b>{node.name}</b>
@@ -34,7 +34,7 @@ function GenreTree({ node, selected, onSelect }: { node: GenreNode; selected: st
         </span>
       </label>
       {node.children.length > 0 && (
-        <div style={{ marginLeft: 22, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ marginLeft: 'var(--nf-space-24)', display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)' }}>
           {node.children.map(child => (
             <GenreTree key={child.name} node={child} selected={selected} onSelect={onSelect} />
           ))}
@@ -205,9 +205,9 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
   const genreLibrary = data.genreLibrary
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, flex: 1, minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-12)', flex: 1, minHeight: 0 }}>
       <div className={css.row} style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
-        <span className={css.cardTitle} style={{ fontSize: 17, fontWeight: 700 }}>🧰 创作资产</span>
+        <span className={css.cardTitle} style={{ fontSize: 'var(--nf-fs-16)', fontWeight: 700 }}>🧰 创作资产</span>
         <span className={css.meta}>题材基底 / 推进模式 / 笔法帖 / 文戒 / 心法</span>
       </div>
       {error !== '' && <div className={css.card} style={{ borderColor: 'var(--nf-error)' }}><span style={{ color: 'var(--nf-error)' }}>{tt('common.error')}: {error}</span></div>}
@@ -240,13 +240,13 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
       </div>
 
       {/* 子页签：题材基底 / 推进模式 / 笔法帖 / 文戒 / 心法 */}
-      <div className={css.row} style={{ flexWrap: 'wrap', gap: 6 }}>
+      <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-6)' }}>
         {SUB_TABS.map(t => (
           <button
             key={t.id}
             type="button"
             className={`${css.button} ${assetTab === t.id ? css.buttonPrimary : ''}`}
-            style={{ fontSize: 14, flex: 1 }}
+            style={{ fontSize: 'var(--nf-fs-14)', flex: 1 }}
             onClick={() => { setAssetTab(t.id) }}
           >
             {t.label}
@@ -260,12 +260,12 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
           <span className={css.cardTitle}>题材基底库</span>
           <span className={css.meta}>这本书属于哪个阅读市场？题材定位会注入章节生成与审稿提示词。</span>
           {assets.genre !== undefined && (
-            <div style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
+            <div style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
               <b>当前题材：{assets.genre.name}</b> — {assets.genre.description}
             </div>
           )}
           {/* 题材基底库：自然展开，不套内部滚动条（描述两行截断，悬停看全文） */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)' }}>
             {genreLibrary.map(root => <GenreTree key={root.name} node={root} selected={assets.genre?.name ?? ''} onSelect={handleSelectGenre} />)}
           </div>
         </div>
@@ -277,17 +277,17 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
           <span className={css.cardTitle}>推进模式库</span>
           <span className={css.meta}>读者为什么继续看下一章？主模式 + 辅助模式注入卷规划与章节生成。</span>
           {assets.primaryProgression !== undefined && (
-            <div style={{ border: '1px solid var(--nf-accent)', borderRadius: 6, padding: '6px 10px', fontSize: 12, color: 'var(--nf-accent)' }}>
+            <div style={{ border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)', color: 'var(--nf-accent)' }}>
               <b>主推进：{assets.primaryProgression.name}</b> — {assets.primaryProgression.driver}
             </div>
           )}
           {assets.auxiliaryProgressions.map(mode => (
-            <div key={mode.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
+            <div key={mode.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
               <b>{mode.name}</b> — {mode.driver}
             </div>
           ))}
           <span className={css.meta}>从内置推进模式库选择添加（第一个设为主推进）：</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {data.progressionLibrary.map(mode => {
               const alreadyPrimary = assets.primaryProgression?.name === mode.name
               const alreadyAux = assets.auxiliaryProgressions.some(m => m.name === mode.name)
@@ -307,12 +307,12 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
         <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
           <span className={css.cardTitle}>笔法帖</span>
           <span className={css.meta}>从内置 8 套叙事风格模板中一键选用（来自 AI-Novel-Writing-Assistant 写法引擎），无需样本文本；绑定后生成与润色都遵循该风格。</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-8)', flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {data.styleTemplates.map(template => {
               const bound = assets.styleAssets.some(s => s.name === template.name)
               return (
-                <div key={template.key} style={{ border: `1px solid ${bound ? 'var(--nf-accent)' : 'var(--nf-border)'}`, borderRadius: 6, padding: '8px 10px', fontSize: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <div key={template.key} style={{ border: `1px solid ${bound ? 'var(--nf-accent)' : 'var(--nf-border)'}`, borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-8) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--nf-space-8)' }}>
                     <span><b>{template.name}</b> <span className={css.badge} style={{ borderColor: 'var(--nf-text-3)', color: 'var(--nf-text-3)' }}>{template.category}</span></span>
                     <button
                       className={`${css.button} ${css.buttonSmall} ${bound ? '' : css.buttonPrimary}`}
@@ -347,12 +347,12 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
         <div className={css.card} style={{ flex: 1, minHeight: 0 }}>
         <span className={css.cardTitle}>文戒</span>
         <span className={css.meta}>写作时必须遵守的表达边界（内置全局 + 项目自定义），生成与审稿都会检查。内置规则可用「覆盖编辑」复制为自定义版本调整。</span>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {builtinRules.map(rule => {
             const overridden = customRules.some(r => r.name === rule.name)
             return (
-              <div key={rule.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div key={rule.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--nf-space-8)' }}>
                   <span>
                     <b>{rule.name}</b>{' '}
                     <span className={css.badge} style={{ borderColor: overridden ? 'var(--nf-accent)' : 'var(--nf-text-3)', color: overridden ? 'var(--nf-accent)' : 'var(--nf-text-3)' }}>
@@ -369,13 +369,13 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
             )
           })}
           {customRules.map((rule, index) => (
-            <div key={`${rule.name}-${index}`} style={{ border: '1px solid var(--nf-accent)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div key={`${rule.name}-${index}`} style={{ border: '1px solid var(--nf-accent)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--nf-space-8)' }}>
                 <span>
                   <b>{rule.name}</b>{' '}
                   <span className={css.badge} style={{ borderColor: 'var(--nf-accent)', color: 'var(--nf-accent)' }}>自定义</span>
                 </span>
-                <span style={{ display: 'flex', gap: 6 }}>
+                <span style={{ display: 'flex', gap: 'var(--nf-space-6)' }}>
                   <button className={`${css.button} ${css.buttonSmall}`} disabled={busy} onClick={() => { setEditingRule({ index, name: rule.name, avoid: rule.avoid, fix: rule.fix ?? '' }) }}>
                     编辑
                   </button>
@@ -385,7 +385,7 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
                 </span>
               </div>
               {editingRule !== null && editingRule.index === index ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)', marginTop: 'var(--nf-space-6)' }}>
                   <input className={css.input} placeholder="规则名" value={editingRule.name} onChange={e => { setEditingRule({ ...editingRule, name: e.target.value }) }} />
                   <input className={css.input} placeholder="避免（要杜绝的表达）" value={editingRule.avoid} onChange={e => { setEditingRule({ ...editingRule, avoid: e.target.value }) }} />
                   <input className={css.input} placeholder="修正（改写方向，可留空）" value={editingRule.fix} onChange={e => { setEditingRule({ ...editingRule, fix: e.target.value }) }} />
@@ -426,7 +426,7 @@ export function AssetsTab({ api, initialTab = 'genre' }: AssetsTabProps) {
           <span className={css.cardTitle}>心法</span>
           <span className={css.meta}>粘贴一段你喜欢的样本文本，AI 提取叙事风格规则并绑定到本书，后续章节保持同一味道。</span>
           {assets.styleAssets.map(style => (
-            <div key={style.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 6, padding: '6px 10px', fontSize: 12 }}>
+            <div key={style.name} style={{ border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-6)', padding: 'var(--nf-space-6) var(--nf-space-10)', fontSize: 'var(--nf-fs-12)' }}>
               <b>{style.name}</b>
               <div className={css.meta}>叙述：{style.proseRules.slice(0, 3).join('；')}</div>
               {style.dialogueRules.length > 0 && <div className={css.meta}>台词：{style.dialogueRules.slice(0, 2).join('；')}</div>}
