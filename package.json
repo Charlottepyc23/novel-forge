@@ -95,6 +95,8 @@
     "watch": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "check:styles": "node scripts/check-theme-sizes.mjs",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run",
     "test": "vitest run"
   }
 }
