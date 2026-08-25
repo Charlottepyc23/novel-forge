@@ -199,6 +199,7 @@ export function apply(ctx: Context, config?: Config): void {
     if (patch.imageApiKey !== undefined) next.imageApiKey = patch.imageApiKey
     if (patch.imageApiModel !== undefined) next.imageApiModel = patch.imageApiModel
     if (patch.imageApiEnabled !== undefined) next.imageApiEnabled = patch.imageApiEnabled
+    if (patch.imageModels !== undefined) next.imageModels = patch.imageModels
     // Persist through the settings seam when available; otherwise keep in memory.
     // (ctx.get is the non-strict service access — no inject requirement, same
     // pattern installSettingsSection itself uses.)

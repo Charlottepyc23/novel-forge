@@ -188,7 +188,11 @@ export function CreateBookView({
           <label className={css.fieldLabel}>大纲</label>
           <div
             className={`${css.dropzone} ${dragActive ? css.dropzoneActive : ''}`}
+            role="button"
+            tabIndex={0}
+            aria-label="选择或拖入 docx 大纲文件"
             onClick={() => { outlineFileRef.current?.click() }}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); outlineFileRef.current?.click() } }}
             onDragOver={e => { e.preventDefault(); setDragActive(true) }}
             onDragLeave={() => { setDragActive(false) }}
             onDrop={e => {

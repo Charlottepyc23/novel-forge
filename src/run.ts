@@ -306,11 +306,12 @@ export class ProductionRunner {
 
   private applyDraft(project: ProjectState, chapter: ChapterPlan, draft: string, report: ReviewReport): void {
     const config = this.deps.getConfig()
+    const outputDir = this.bookDir ?? config.outputDir
     const fileName = chapterFileName(chapter)
-    mkdirSync(config.outputDir, { recursive: true })
-    const targetPath = join(config.outputDir, fileName)
+    mkdirSync(outputDir, { recursive: true })
+    const targetPath = join(outputDir, fileName)
     if (existsSync(targetPath)) {
-      copyFileSync(targetPath, join(config.outputDir, `${fileName.replace(/\.md$/, '')}.bak.md`))
+      copyFileSync(targetPath, join(outputDir, `${fileName.replace(/\.md$/, '')}.bak.md`))
     }
     writeFileSync(targetPath, `# 第${chapter.no}章 ${chapter.title}\n\n${draft}\n`, 'utf8')
     chapter.pendingDraft = undefined
@@ -325,6 +326,6 @@ export class ProductionRunner {
     }
     chapter.error = undefined
     project.updatedAt = new Date().toISOString()
-    saveProject(config.outputDir, project)
+    saveProject(outputDir, project)
   }
 }

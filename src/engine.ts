@@ -30,6 +30,21 @@ import type { Context } from '@deepseek-ai/cordis'
 import { emptyProjectAssets, renderAllAssets, styleEngineSystemPrompt } from './assets.ts'
 import { getComicStylePrompt } from './comic-presets.ts'
 import { findStyle, styleKeywords } from './style-library.ts'
+import {
+  normalizeShotSize,
+  normalizeCameras,
+  normalizeComposition,
+  normalizeLightings,
+  sizeZh,
+  cameraZh,
+  lightZh,
+} from './shot-language.ts'
+import {
+  normalizeStoryFunction,
+  normalizeEmotions,
+  functionZh,
+  emotionZh,
+} from './story-beat-language.ts'
 import type {
   AuditIssue,
   AuthorReview,
@@ -3033,8 +3048,11 @@ export async function generateStoryboardTable(
   const system = [
     '你是一位从业 10 年的电影导演兼分镜师，专长网文改编影视化。',
     '任务：把「剧情骨架」的每一个节拍展开为 1-3 个电影镜头，输出分镜表——只做画面层，禁止新增或改变剧情（骨架是只读输入）。',
-    '输出合法 JSON 对象：{"shots": [{"beatId": "骨架节拍id", "shot": "景别", "camera": "机位与运镜", "duration": 秒数, "visual": "画面内容", "line": "台词/旁白", "sound": "音效", "light": "光效", "prevState": "承接上一镜头结尾状态", "nextState": "本镜头结束状态", "characters": ["出镜角色名"]}]}',
-    '景别取值：远景/全景/中景/近景/特写。',
+    '输出合法 JSON 对象：{"shots": [{"beatId": "骨架节拍id", "shot": "景别", "camera": "机位与运镜", "composition": "构图", "duration": 秒数, "visual": "画面内容", "line": "台词/旁白", "sound": "音效", "light": "光效", "prevState": "承接上一镜头结尾状态", "nextState": "本镜头结束状态", "characters": ["出镜角色名"]}]}',
+    '景别取值（只能从这些词中选一）：大远景/远景/全景/中景/中近景/近景/特写/大特写。',
+    '运镜取值（可组合，用加号连接）：固定机位/推近/拉远/左摇/右摇/左横移/右横移/跟随/升镜/降镜/环绕/手持晃动/低机位仰拍/高机位俯拍/过肩镜头。',
+    '光效取值（可组合，用加号连接）：顺光/侧光/逆光/顶光/伦勃朗光/霓虹光/硬光/柔光/氛围光/高反差。',
+    '构图取值（可选，只能从这些词中选一）：三分法/中心对称/引导线/前景遮挡/低机位/俯拍/对称构图。',
     '硬性要求：',
     '【视觉风格】（必须内嵌进 visual/light 的画面措辞与光效描述）：',
     ...styleLines,
@@ -3059,23 +3077,23 @@ export async function generateStoryboardTable(
     '==== 章节正文（画面细节以此为准） ====',
     body.replace(/^#\s+.*$/m, '').trim().slice(0, 3000),
   ].filter(s => s !== '').join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 16000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ shots?: unknown }>(text)
   const beatIds = new Set(skeleton.beats.map(b => b.id))
-  const shotKinds = new Set(['远景', '全景', '中景', '近景', '特写'])
   const shots: StoryboardShot[] = Array.isArray(raw.shots)
     ? raw.shots
         .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
         .map((entry, i) => ({
           id: 's' + (i + 1),
           beatId: beatIds.has(entry.beatId as string) ? entry.beatId as string : skeleton.beats[0]!.id,
-          shot: shotKinds.has(entry.shot as string) ? entry.shot as string : '中景',
-          camera: typeof entry.camera === 'string' ? entry.camera.trim().slice(0, 80) : '',
+          shot: normalizeShotSize(entry.shot as string | undefined),
+          camera: normalizeCameras(entry.camera as string | undefined),
+          composition: normalizeComposition(entry.composition as string | undefined),
           duration: typeof entry.duration === 'number' && entry.duration >= 1 && entry.duration <= 12 ? Math.round(entry.duration) : 4,
           visual: typeof entry.visual === 'string' ? entry.visual.trim().slice(0, 300) : '',
           line: typeof entry.line === 'string' ? entry.line.trim().slice(0, 120) : '',
           sound: typeof entry.sound === 'string' ? entry.sound.trim().slice(0, 80) : '',
-          light: typeof entry.light === 'string' ? entry.light.trim().slice(0, 80) : '',
+          light: normalizeLightings(entry.light as string | undefined),
           prevState: typeof entry.prevState === 'string' ? entry.prevState.trim().slice(0, 150) : '',
           nextState: typeof entry.nextState === 'string' ? entry.nextState.trim().slice(0, 150) : '',
           characters: sanitizeCharacters(entry.characters, 4),
@@ -3152,12 +3170,12 @@ export async function generateStoryboardPrompts(
       const ref = c.imageUrl !== undefined ? '（参考图）' : ''
       return c.name + '：' + anchor + ref
     }).join('；')
-    return `[${s.id}] 节拍${s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s
+    return `[${s.id}] 节拍${s.beatId} · ${sizeZh(s.shot)} · ${cameraZh(s.camera)} · ${s.duration}s
 出场：${s.characters !== undefined && s.characters.length > 0 ? s.characters.join('、') : '（未标注）'}
 定妆：${makeUp !== '' ? makeUp : '（未绑定漫剧卡）'}
 画面：${s.visual}
 台词：${s.line !== '' ? s.line : '（无）'}
-光效：${s.light !== '' ? s.light : '（无）'}
+光效：${lightZh(s.light) !== '' ? lightZh(s.light) : '（无）'}
 承接：${s.prevState} → ${s.nextState}`
   }).join('\n\n')
   const system = [
@@ -3180,7 +3198,7 @@ export async function generateStoryboardPrompts(
     shotLines,
     '只输出 JSON 对象。',
   ].filter(x => x !== '').join('\n\n')
-  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 6000), reasoning: config.analysisReasoning ?? 'low' })
+  const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 16000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ prompts?: unknown }>(text)
   const shotIds = new Set(table.shots.map(s => s.id))
   const shotBinding = new Map<string, string[]>(table.shots.map(s => [s.id, s.mangaRoleIds ?? []]))
@@ -3222,7 +3240,9 @@ export async function generateStoryboardSkeleton(
   const system = [
     '你是一位从业 15 年的电影编剧，专长网文改编影视化，深谙三幕结构与节拍（beat）写作。',
     '任务：把这一章改编成影视化「剧情骨架」——只做故事层，不做画面。',
-    '输出合法 JSON 对象：{"arc": "本章弧线一句话（起承转合，20-60字）", "beats": [{"event": "事件一句话（发生了什么）", "emotion": "人物情绪走向（如 压抑→隐忍→惊惧）", "function": "铺垫|冲突|转折|高潮|收束|伏笔|人物塑造", "cause": "承接上一节拍的原因（可省略）"}], "characters": ["出镜角色名1", "出镜角色名2"]}',
+    '输出合法 JSON 对象：{"arc": "本章弧线一句话（起承转合，20-60字）", "beats": [{"event": "事件一句话（发生了什么）", "emotion": "人物情绪走向（情绪词数组）", "function": "铺垫|冲突|转折|高潮|收束|伏笔|人物塑造", "cause": "承接上一节拍的原因（可省略）"}], "characters": ["出镜角色名1", "出镜角色名2"]}',
+    '情绪词取值（从这些词中选 1-3 个，用数组输出，按情绪发展顺序）：平静/淡然/期待/好奇/警觉/压抑/隐忍/担忧/焦躁/不安/惊惧/愤怒/崩溃/决绝/痛心/释然/悲凉/得意/重生/麻木。',
+    '功能取值（只能从这些词中选一）：铺垫/冲突/转折/高潮/收束/伏笔/人物塑造。',
     '硬性要求：',
     '1. beats 数量 4-9 个，严格按时间顺序，因果链完整：前一个 beat 的结果是后一个 beat 的原因。',
     '2. 必须覆盖本章全部剧情要点与正文关键事件，遗漏关键事件视为失败。',
@@ -3240,15 +3260,16 @@ export async function generateStoryboardSkeleton(
   const text = await complete(ctx, config, { system, user, temperature: 0.3, maxTokens: Math.max(config.maxTokens, 4000), reasoning: config.analysisReasoning ?? 'low' })
   const raw = parseJsonObject<{ arc?: unknown; beats?: unknown; characters?: unknown }>(text)
   const arc = typeof raw.arc === 'string' ? raw.arc.trim().slice(0, 200) : ''
-  const functions = new Set(['铺垫', '冲突', '转折', '高潮', '收束', '伏笔', '人物塑造'])
   const beats: StoryboardBeat[] = Array.isArray(raw.beats)
     ? raw.beats
         .filter((v): v is Record<string, unknown> => typeof v === 'object' && v !== null)
         .map((entry, i) => ({
           id: 'b' + (i + 1),
           event: typeof entry.event === 'string' ? entry.event.trim().slice(0, 200) : '',
-          emotion: typeof entry.emotion === 'string' ? entry.emotion.trim().slice(0, 100) : '',
-          function: functions.has(entry.function as string) ? entry.function as string : '铺垫',
+          emotion: Array.isArray(entry.emotion)
+            ? normalizeEmotions(entry.emotion.filter((x): x is string => typeof x === 'string').join('→'))
+            : normalizeEmotions(typeof entry.emotion === 'string' ? entry.emotion : undefined),
+          function: normalizeStoryFunction(typeof entry.function === 'string' ? entry.function : undefined),
           cause: typeof entry.cause === 'string' && entry.cause.trim() !== '' ? entry.cause.trim().slice(0, 150) : undefined,
         }))
         .filter(b => b.event !== '')

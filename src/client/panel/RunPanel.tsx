@@ -169,7 +169,7 @@ export function RunPanel({ api, totalChapters }: { api: NovelApi; totalChapters:
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-6)' }}>
           <div className={css.row} style={{ flexWrap: 'wrap', gap: 'var(--nf-space-8)' }}>
             <span className={css.meta}>范围：第 {run.startNo} - {run.endNo} 章 · 当前：第 {run.currentNo} 章</span>
-            <span className={css.meta}>新生成 {run.stats.generated} · 修订通过 {run.stats.revised} · 豁免 {run.stats.exempted} · 重生成 {run.stats.regenerated} · 失败 {run.stats.error}</span>
+            <span className={css.meta}>新生成 {run.stats?.generated ?? 0} · 修订通过 {run.stats?.revised ?? 0} · 豁免 {run.stats?.exempted ?? 0} · 重生成 {run.stats?.regenerated ?? 0} · 失败 {run.stats?.error ?? 0}</span>
           </div>
           <div className={css.bigProgressBar}>
             <div className={css.bigProgressBarFill} style={{ width: `${Math.round(ratio * 100)}%` }} />

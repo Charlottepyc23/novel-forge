@@ -9,7 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { exec } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, basename, extname } from 'node:path'
 import { homedir } from 'node:os'
@@ -2296,12 +2296,18 @@ export function makeRoutes(deps: NovelRoutesDeps): WebRoute[] {
       if (!guard(req, res, 'POST')) return
       const config = getConfig()
       const dir = config.outputDir
-      exec(`explorer "${dir.replace(/"/g, '')}"`, (error) => {
-        if (error) {
-          writeJson(res, 500, { ok: false, error: error.message })
-        } else {
-          writeJson(res, 200, { ok: true })
-        }
+      const child = spawn('explorer', [dir], { shell: false })
+      let responded = false
+      child.on('error', (error) => {
+        if (responded) return
+        responded = true
+        writeJson(res, 500, { ok: false, error: error.message })
+      })
+      child.on('exit', (code) => {
+        if (responded) return
+        responded = true
+        if (code === 0) writeJson(res, 200, { ok: true })
+        else writeJson(res, 500, { ok: false, error: `explorer 退出码 ${code}` })
       })
     },
   }

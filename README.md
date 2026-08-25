@@ -169,7 +169,7 @@ tsdown.config.ts  双面打包配置 / dual-face bundling config
 - 生成消耗 LLM API 额度（默认 deepseek-official / deepseek-v4-flash）/ generation consumes LLM API quota
 - 章节质量取决于大纲完整度 / chapter quality depends on outline completeness
 - 设置写入 `~/.dsh/settings.yaml` 的 `dsh-novel-forge` 段 / settings persist in `~/.dsh/settings.yaml`
-- 角色/场景视觉资产为「提示词 + 图集」形态，不内置生图能力；出图请使用外部工具（即梦/豆包/Krea 等），提示词可直接复制 / visual assets are prompt+image anchors; image generation is external (Jimeng/Doubao/Krea) with copy-ready prompts
+- 角色/场景视觉资产为「提示词 + 图集」形态，并可在设置页配置内置生图模型（imageModels/imageApiKey，支持多模型库与连通性测试）；出图既可走内置生成，也可用外部工具（即梦/豆包/Krea 等），提示词可直接复制 / visual assets are prompt+image anchors, with optional built-in image-model configuration (imageModels/imageApiKey, multi-model library + endpoint test); images may be generated in-app or via external tools (Jimeng/Doubao/Krea) with copy-ready prompts
 - 漫剧分镜/漫画脚本功能已移除（v1.3.0），角色形象与场景库保留为漫剧流水线的视觉锚点底座 / storyboard & comic-script features removed in v1.3.0; role visuals & scene library remain as the visual-anchor foundation
 
 ---

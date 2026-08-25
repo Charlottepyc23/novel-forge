@@ -138,6 +138,7 @@ function statusBadge(chapter: ChapterPlan): { cls: string; label: string } {
     case 'approved': return { cls: css.badgeDone, label: tt('plan.approved') }
     case 'rejected': return { cls: css.badgeRejected, label: tt('plan.rejected') }
     case 'error': return { cls: css.badgeError, label: tt('plan.error') }
+    default: return { cls: css.badgeError, label: tt('plan.error') }
   }
 }
 

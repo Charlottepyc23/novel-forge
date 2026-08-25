@@ -266,7 +266,7 @@ export function SceneLibrary({
           {scenes.map(s => {
             const cover = (s.gallery ?? [])[0]
             return (
-              <div key={s.name} onClick={() => { openDetail(s.name) }} style={{ cursor: 'pointer', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-12)', overflow: 'hidden', background: 'var(--nf-bg-inset)', display: 'flex', flexDirection: 'column' }}>
+              <div key={s.name} onClick={() => { openDetail(s.name) }} role="button" tabIndex={0} aria-label={`打开场景 ${s.name}`} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDetail(s.name) } }} style={{ cursor: 'pointer', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-12)', overflow: 'hidden', background: 'var(--nf-bg-inset)', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--nf-bg-inset)', borderBottom: '1px solid var(--nf-border)', position: 'relative' }}>
                   {cover !== undefined
                     ? <img src={cover.dataUrl} alt={s.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />

@@ -5,7 +5,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NovelApi } from '../api.ts'
 import type { ChapterPlan, ProjectState, StoryboardPrompt, StoryboardSkeleton, StoryboardTable } from '../../protocol.ts'
+import {
+  sizeZh, cameraZh, compoZh, lightZh,
+  normalizeShotSize, normalizeCameras, normalizeComposition, normalizeLightings,
+} from '../../shot-language.ts'
+import { functionZh, emotionZh, normalizeStoryFunction, normalizeEmotions } from '../../story-beat-language.ts'
+import type { StoryboardShot } from '../../protocol.ts'
 import css from './panel.module.css'
+
+/** 归一化旧分镜数据：把自由文本 shot/camera/light/composition 转成词库枚举。 */
+function normalizeStoryboardShot(s: StoryboardShot): StoryboardShot {
+  return {
+    ...s,
+    shot: normalizeShotSize(typeof s.shot === 'string' ? s.shot : undefined),
+    camera: normalizeCameras(typeof s.camera === 'string' ? s.camera : undefined),
+    composition: typeof s.composition === 'string' ? normalizeComposition(s.composition) : s.composition,
+    light: normalizeLightings(typeof s.light === 'string' ? s.light : undefined),
+  }
+}
 
 export function StoryboardTab({
   api,
@@ -76,8 +93,23 @@ export function StoryboardTab({
     if (chapterNo === null) return
     if (suppressRestoreRef.current === true) return
     const entry = (project?.storyboards ?? []).find(e => e.chapterNo === chapterNo)
-    setSkeleton(prev => prev ?? entry?.skeleton ?? null)
-    setTable(prev => prev ?? entry?.table ?? null)
+    setSkeleton(prev => {
+      if (prev !== null) return prev
+      if (entry?.skeleton === undefined) return null
+      return {
+        ...entry.skeleton,
+        beats: (entry.skeleton.beats ?? []).map(b => ({
+          ...b,
+          function: normalizeStoryFunction(typeof b.function === 'string' ? b.function : undefined),
+          emotion: normalizeEmotions(typeof b.emotion === 'string' ? b.emotion : b.emotion?.join('→')),
+        })),
+      }
+    })
+    setTable(prev => {
+      if (prev !== null) return prev
+      if (entry?.table === undefined) return null
+      return { ...entry.table, shots: (entry.table.shots ?? []).map(normalizeStoryboardShot) }
+    })
     setPrompts(prev => prev ?? entry?.prompts ?? null)
   }, [chapterNo, project?.storyboards])
 
@@ -268,8 +300,8 @@ export function StoryboardTab({
             <div key={b.id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
               <div className={css.row} style={{ flexWrap: 'wrap' }}>
                 <b>节拍 {i + 1}</b>
-                <span className={`${css.badge} ${b.function === '高潮' ? css.badgeDone : b.function === '转折' ? css.badgeWritten : css.badgePending}`}>{b.function}</span>
-                <span className={css.meta}>{b.emotion}</span>
+                <span className={`${css.badge} ${b.function === 'climax' ? css.badgeDone : b.function === 'turn' ? css.badgeWritten : css.badgePending}`}>{functionZh(b.function)}</span>
+                <span className={css.meta}>💭 {emotionZh(b.emotion)}</span>
               </div>
               <span>{b.event}</span>
               {b.cause !== undefined && <span className={css.meta}>承接：{b.cause}</span>}
@@ -280,7 +312,7 @@ export function StoryboardTab({
               type="button"
               className={`${css.button} ${css.buttonSmall}`}
               onClick={() => {
-                const text = `第${skeleton.chapterNo}章 弧线：${skeleton.arc}\n出场角色：${skeleton.characters !== undefined && skeleton.characters.length > 0 ? skeleton.characters.join('、') : '（未标注）'}\n\n` + skeleton.beats.map((b, i) => `${i + 1}. [${b.function}] ${b.event}（情绪：${b.emotion}）${b.cause !== undefined ? `［承接：${b.cause}］` : ''}`).join('\n')
+                const text = `第${skeleton.chapterNo}章 弧线：${skeleton.arc}\n出场角色：${skeleton.characters !== undefined && skeleton.characters.length > 0 ? skeleton.characters.join('、') : '（未标注）'}\n\n` + skeleton.beats.map((b, i) => `${i + 1}. [${functionZh(b.function)}] ${b.event}（情绪：${emotionZh(b.emotion)}）${b.cause !== undefined ? `［承接：${b.cause}］` : ''}`).join('\n')
                 void navigator.clipboard?.writeText(text)
               }}
             >
@@ -318,7 +350,7 @@ export function StoryboardTab({
               onClick={() => {
                 const text = table.shots.map(s => {
                   const beat = skeleton?.beats.find(b => b.id === s.beatId)
-                  return `镜头 ${s.id}（节拍 ${beat?.id ?? s.beatId} · ${s.shot} · ${s.camera} · ${s.duration}s）\n出场：${s.characters !== undefined && s.characters.length > 0 ? s.characters.join('、') : '（未标注）'}\n定妆：${s.mangaRoleIds !== undefined && s.mangaRoleIds.length > 0 ? bindingNames(s.mangaRoleIds) : '（未绑定漫剧卡）'}\n画面：${s.visual}\n台词：${s.line !== '' ? s.line : '（无）'}\n音效：${s.sound !== '' ? s.sound : '（无）'}\n光效：${s.light !== '' ? s.light : '（无）'}\n承接：${s.prevState} → ${s.nextState}`
+                  return `镜头 ${s.id}（节拍 ${beat?.id ?? s.beatId} · ${sizeZh(s.shot)} · ${cameraZh(s.camera)} · ${s.duration}s）\n出场：${s.characters !== undefined && s.characters.length > 0 ? s.characters.join('、') : '（未标注）'}\n定妆：${s.mangaRoleIds !== undefined && s.mangaRoleIds.length > 0 ? bindingNames(s.mangaRoleIds) : '（未绑定漫剧卡）'}\n画面：${s.visual}\n台词：${s.line !== '' ? s.line : '（无）'}\n音效：${s.sound !== '' ? s.sound : '（无）'}\n光效：${lightZh(s.light) !== '' ? lightZh(s.light) : '（无）'}\n承接：${s.prevState} → ${s.nextState}`
                 }).join('\n\n')
                 void navigator.clipboard?.writeText(`第${table.chapterNo}章分镜表\n\n` + text)
               }}
@@ -357,9 +389,9 @@ export function StoryboardTab({
               <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--nf-space-4)', border: '1px solid var(--nf-border)', borderRadius: 'var(--nf-radius-10)', padding: 'var(--nf-space-8) var(--nf-space-10)' }}>
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <b>镜头 {s.id}</b>
-                  <span className={css.badge}>{s.shot}</span>
-                  <span className={css.meta}>{s.camera} · {s.duration}s</span>
-                  {beat !== undefined && <span className={css.meta}>节拍 {beat.id}「{beat.function}」</span>}
+                  <span className={css.badge}>{sizeZh(s.shot)}</span>
+                  <span className={css.meta}>{cameraZh(s.camera)}{compoZh(s.composition) !== '' ? ' · ' + compoZh(s.composition) : ''} · {s.duration}s</span>
+                  {beat !== undefined && <span className={css.meta}>节拍 {beat.id}「{functionZh(beat.function)}」</span>}
                   {s.characters !== undefined && s.characters.length > 0 && (
                     <span className={css.meta}>👥 {s.characters.join('、')}</span>
                   )}
@@ -371,7 +403,7 @@ export function StoryboardTab({
                 <div className={css.row} style={{ flexWrap: 'wrap' }}>
                   <span className={css.meta}>💬 {s.line !== '' ? s.line : '（无台词）'}</span>
                   <span className={css.meta}>🔊 {s.sound !== '' ? s.sound : '（无音效）'}</span>
-                  <span className={css.meta}>💡 {s.light !== '' ? s.light : '（无光效）'}</span>
+                  <span className={css.meta}>💡 {lightZh(s.light) !== '' ? lightZh(s.light) : '（无光效）'}</span>
                 </div>
                 <span className={css.meta}>承接：{s.prevState} → {s.nextState}</span>
               </div>

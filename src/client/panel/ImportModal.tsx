@@ -4,7 +4,7 @@
  *  B) txt/md 全本 → 点击选择文件，浏览器读取内容 → 服务器拆章预览 → 确认后导入。
  *  Mode B 也保留「服务器本地路径」高级选项（大文件或服务器端已有文件时用）。
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { NovelApi } from '../api.ts'
 import type { BookImportTextPreviewResponse } from '../../protocol.ts'
 import css from './panel.module.css'
@@ -118,8 +118,17 @@ export function ImportModal({
 
   const switchMode = (m: ImportMode) => { setMode(m); setError(''); setResult(null); setPreview(null) }
 
+  // Esc 关闭弹窗。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => { window.removeEventListener('keydown', onKey) }
+  }, [onClose])
+
   return (
-    <div className={css.importModalOverlay} onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div className={css.importModalOverlay} role="dialog" aria-modal="true" aria-label="导入小说" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className={css.importModal}>
         <div className={css.importModalHead}>
           <span className={css.panelTitle} style={{ margin: 0 }}>📥 导入小说</span>

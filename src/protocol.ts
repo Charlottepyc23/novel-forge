@@ -4,6 +4,16 @@
  * state file format, and the NDJSON generation stream frames all live here so
  * both halves spell exactly one vocabulary.
  */
+import type {
+  ShotSizeId,
+  CameraMoveId,
+  CompositionId,
+  LightingId,
+} from './shot-language.ts'
+import type {
+  StoryFunctionId,
+  EmotionId,
+} from './story-beat-language.ts'
 
 /** The /api/dsh-novel-forge route family (same-origin, loopback-fenced). */
 export const NOVEL_API = {
@@ -212,10 +222,10 @@ export interface StoryboardBeat {
   id: string
   /** 事件一句话（发生了什么）。 */
   event: string
-  /** 情绪走向（如 压抑→隐忍→惊惧）。 */
-  emotion: string
-  /** 叙事功能：铺垫/冲突/转折/高潮/收束/伏笔/人物塑造。 */
-  function: string
+  /** 情绪走向（情绪词 id 数组，来自 story-beat-language 词库，链式）。 */
+  emotion: EmotionId[]
+  /** 叙事功能（枚举 id，来自 story-beat-language 词库）。 */
+  function: StoryFunctionId
   /** 因果：承接上一节拍的原因（可选）。 */
   cause?: string
 }
@@ -247,10 +257,12 @@ export interface StoryboardShot {
   id: string
   /** 挂载的节拍 id（骨架中的 b1…）。 */
   beatId: string
-  /** 景别：远景/全景/中景/近景/特写。 */
-  shot: string
-  /** 机位与运镜（如 低机位仰拍 + 缓慢推近）。 */
-  camera: string
+  /** 景别（枚举 id，来自 shot-language 词库）。 */
+  shot: ShotSizeId
+  /** 机位与运镜（枚举 id 数组，来自 shot-language 词库）。 */
+  camera: CameraMoveId[]
+  /** 构图（可选，枚举 id）。 */
+  composition?: CompositionId
   /** 时长（秒，1-12）。 */
   duration: number
   /** 画面内容：角色动作 + 表情 + 服装/标志物。 */
@@ -259,8 +271,8 @@ export interface StoryboardShot {
   line: string
   /** 音效（无则空字符串）。 */
   sound: string
-  /** 光效（如 雨夜顶光 + 手机屏幕冷光）。 */
-  light: string
+  /** 光效（枚举 id 数组，来自 shot-language 词库）。 */
+  light: LightingId[]
   /** 承接上一镜头结尾状态（位置/动作/情绪/服装）。 */
   prevState: string
   /** 本镜头结束状态。 */

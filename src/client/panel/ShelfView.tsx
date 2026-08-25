@@ -223,14 +223,14 @@ export function ShelfView({
           ))}
 
           {/* 开书入口：进入独立向导页 */}
-          <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onAddBook}>
+          <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onAddBook} role="button" tabIndex={0} aria-label="开一本新书" onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onAddBook() } }}>
             <div className={css.bookAddIcon}><Plus size={28} /></div>
             <span>开一本新书</span>
             <span className={css.meta}>书名 + 大纲，开书即建项目</span>
           </div>
 
           {/* 导入入口：已有项目目录 / txt/md 全本 */}
-          <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onImportBook}>
+          <div className={`${css.bookCard} ${css.bookAddCard}`} onClick={onImportBook} role="button" tabIndex={0} aria-label="导入已有小说" onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onImportBook() } }}>
             <div className={css.bookAddIcon}><Download size={28} /></div>
             <span>导入已有小说</span>
             <span className={css.meta}>项目目录或 txt/md 全本</span>
