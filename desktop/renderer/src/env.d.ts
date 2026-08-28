@@ -1,15 +1,9 @@
-interface DesktopAppInfo {
-  name: string
-  version: string
-  dataDirectory: string
+import type { DesktopApi } from '../../shared/contracts'
+
+declare global {
+  interface Window {
+    novelDesktop: DesktopApi
+  }
 }
 
-interface DesktopApi {
-  getAppInfo(): Promise<DesktopAppInfo>
-  chooseProjectDirectory(): Promise<string | undefined>
-  openDirectory(path: string): Promise<string>
-}
-
-interface Window {
-  novelDesktop: DesktopApi
-}
+export {}

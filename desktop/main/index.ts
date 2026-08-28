@@ -1,9 +1,12 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
+import { readNovelChapter, readNovelProject } from './project-reader'
 
 const IPC = {
   appInfo: 'app:info',
-  chooseProjectDirectory: 'project:choose-directory',
+  chooseProject: 'project:choose',
+  loadProject: 'project:load',
+  readChapter: 'chapter:read',
   openDirectory: 'shell:open-directory',
 } as const
 
@@ -39,12 +42,22 @@ ipcMain.handle(IPC.appInfo, () => ({
   dataDirectory: app.getPath('userData'),
 }))
 
-ipcMain.handle(IPC.chooseProjectDirectory, async () => {
+ipcMain.handle(IPC.chooseProject, async () => {
   const result = await dialog.showOpenDialog({
     title: '选择小说项目目录',
-    properties: ['openDirectory', 'createDirectory'],
+    properties: ['openDirectory'],
   })
-  return result.canceled ? undefined : result.filePaths[0]
+  return result.canceled ? undefined : readNovelProject(result.filePaths[0]!)
+})
+
+ipcMain.handle(IPC.loadProject, (_event, directory: unknown) => {
+  if (typeof directory !== 'string') throw new Error('项目目录无效')
+  return readNovelProject(directory)
+})
+
+ipcMain.handle(IPC.readChapter, (_event, directory: unknown, file: unknown) => {
+  if (typeof directory !== 'string' || typeof file !== 'string') throw new Error('章节读取参数无效')
+  return readNovelChapter(directory, file)
 })
 
 ipcMain.handle(IPC.openDirectory, async (_event, path: unknown) => {
