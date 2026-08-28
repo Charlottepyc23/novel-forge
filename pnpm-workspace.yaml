@@ -1,3 +1,11 @@
-# pnpm 11 settings (package.json "pnpm" field is no longer read).
 allowBuilds:
+  electron: true
+  electron-winstaller: true
   esbuild: true
+packages:
+  - .
+
+onlyBuiltDependencies:
+  - electron
+  - electron-winstaller
+  - esbuild

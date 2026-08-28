@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# Desktop build output
+out/
+dist-installer/
+
 # Logs & temp
 *.log
 *.tmp
@@ -19,7 +23,7 @@ Thumbs.db
 # Test artifacts
 coverage/
 
-# Local-only (never publish)
+# Local-only
 backup/
 restart-dsh.cmd
 *.tgz
