@@ -1,6 +1,7 @@
-import { readFile, readdir, realpath, stat } from 'node:fs/promises'
+import { copyFile, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
-import type { DesktopChapterDocument, DesktopChapterSummary, DesktopProjectOverview } from '../shared/contracts'
+import type { DesktopChapterDocument, DesktopChapterSaveRequest, DesktopChapterSaveResult, DesktopChapterSummary, DesktopProjectOverview } from '../shared/contracts'
 
 const PROJECT_FILE = 'novel-project.json'
 const MAX_PROJECT_BYTES = 64 * 1024 * 1024
@@ -16,6 +17,8 @@ interface RawChapter {
   file?: unknown
   review?: { score?: unknown } | null
   summary?: unknown
+  pendingDraft?: unknown
+  authorReview?: unknown
 }
 
 interface RawProject {
@@ -74,8 +77,36 @@ function samePath(left: string, right: string): boolean {
   return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right
 }
 
-/** Read one chapter file while preventing traversal and symlink escapes. */
-export async function readNovelChapter(inputDirectory: string, inputFile: string): Promise<DesktopChapterDocument> {
+function revisionOf(content: Buffer | string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function bodyCharacterCount(markdown: string): number {
+  return markdown.replace(/^\s*#\s+.*(?:\r?\n)?/m, '').trim().length
+}
+
+async function atomicReplace(targetPath: string, content: string): Promise<void> {
+  const suffix = `.desktop-${process.pid}-${randomUUID()}`
+  const temporaryPath = `${targetPath}${suffix}.tmp`
+  const rollbackPath = `${targetPath}${suffix}.rollback`
+  await writeFile(temporaryPath, content, 'utf8')
+  let movedOriginal = false
+  try {
+    await rename(targetPath, rollbackPath)
+    movedOriginal = true
+    await rename(temporaryPath, targetPath)
+    await rm(rollbackPath, { force: true })
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined)
+    if (movedOriginal) {
+      await rm(targetPath, { force: true }).catch(() => undefined)
+      await rename(rollbackPath, targetPath).catch(() => undefined)
+    }
+    throw error
+  }
+}
+
+async function resolveChapterPath(inputDirectory: string, inputFile: string): Promise<{ projectDirectory: string; chapterPath: string }> {
   if (typeof inputDirectory !== 'string' || inputDirectory.trim() === '') throw new Error('项目目录不能为空')
   if (!isAbsolute(inputDirectory)) throw new Error('项目目录必须是绝对路径')
   if (typeof inputFile !== 'string' || inputFile.trim() === '') throw new Error('章节文件不能为空')
@@ -85,15 +116,21 @@ export async function readNovelChapter(inputDirectory: string, inputFile: string
 
   const directory = resolve(inputDirectory)
   const projectDirectory = await realpath(directory).catch(() => { throw new Error('项目目录不存在') })
-  const filePath = join(projectDirectory, inputFile)
-  const chapterPath = await realpath(filePath).catch(() => { throw new Error('章节正文文件不存在') })
+  const chapterPath = await realpath(join(projectDirectory, inputFile)).catch(() => { throw new Error('章节正文文件不存在') })
   if (!samePath(dirname(chapterPath), projectDirectory)) throw new Error('禁止读取项目目录之外的文件')
+  return { projectDirectory, chapterPath }
+}
+
+/** Read one chapter file while preventing traversal and symlink escapes. */
+export async function readNovelChapter(inputDirectory: string, inputFile: string): Promise<DesktopChapterDocument> {
+  const { projectDirectory, chapterPath } = await resolveChapterPath(inputDirectory, inputFile)
 
   const chapterStat = await stat(chapterPath)
   if (!chapterStat.isFile()) throw new Error('章节路径不是文件')
   if (chapterStat.size > MAX_CHAPTER_BYTES) throw new Error('章节文件超过 16 MB，已拒绝读取')
 
-  let markdown = await readFile(chapterPath, 'utf8')
+  const bytes = await readFile(chapterPath)
+  let markdown = bytes.toString('utf8')
   if (markdown.charCodeAt(0) === 0xFEFF) markdown = markdown.slice(1)
   const heading = /^\s*#\s+(.+)$/m.exec(markdown)?.[1]?.trim()
   const no = chapterFileNumber(inputFile)
@@ -103,9 +140,63 @@ export async function readNovelChapter(inputDirectory: string, inputFile: string
     file: inputFile,
     title: heading !== undefined && heading !== '' ? heading : fallbackTitle,
     markdown,
-    chars: markdown.replace(/^\s*#\s+.*(?:\r?\n)?/m, '').trim().length,
+    chars: bodyCharacterCount(markdown),
     bytes: chapterStat.size,
     modifiedAt: chapterStat.mtime.toISOString(),
+    revision: revisionOf(bytes),
+  }
+}
+
+/** Save a chapter with conflict detection, backups, and project metadata synchronization. */
+export async function saveNovelChapter(request: DesktopChapterSaveRequest): Promise<DesktopChapterSaveResult> {
+  if (typeof request !== 'object' || request === null) throw new Error('保存参数无效')
+  if (typeof request.markdown !== 'string' || request.markdown.trim() === '') throw new Error('章节正文不能为空')
+  if (Buffer.byteLength(request.markdown, 'utf8') > MAX_CHAPTER_BYTES) throw new Error('章节正文超过 16 MB，已拒绝保存')
+  if (typeof request.expectedRevision !== 'string' || !/^[a-f0-9]{64}$/i.test(request.expectedRevision)) throw new Error('章节修订标识无效')
+
+  const { projectDirectory, chapterPath } = await resolveChapterPath(request.directory, request.file)
+  const currentBytes = await readFile(chapterPath)
+  if (revisionOf(currentBytes) !== request.expectedRevision) {
+    throw new Error('章节文件已在应用外被修改。请关闭编辑器并重新打开章节后再编辑，当前内容未覆盖。')
+  }
+
+  const projectPath = join(projectDirectory, PROJECT_FILE)
+  const raw = await readProjectJson(projectDirectory)
+  if (typeof raw.outline !== 'string' || !Array.isArray(raw.chapters)) throw new Error(`${PROJECT_FILE} 缺少有效的 outline 或 chapters`)
+  const chapterNo = chapterFileNumber(request.file)
+  const projectChapter = (raw.chapters as RawChapter[]).find(entry => {
+    const no = typeof entry?.no === 'number' ? entry.no : Number(entry?.no)
+    return no === chapterNo || entry?.file === request.file
+  })
+  if (projectChapter === undefined) throw new Error('该章节不在项目计划中，暂不允许编辑保存')
+
+  const normalizedMarkdown = request.markdown.replace(/\r\n/g, '\n').replace(/\s+$/, '') + '\n'
+  const backupFile = request.file.replace(/\.md$/i, '.bak.md')
+  await copyFile(chapterPath, join(projectDirectory, backupFile))
+  await atomicReplace(chapterPath, normalizedMarkdown)
+
+  const now = new Date().toISOString()
+  projectChapter.chars = bodyCharacterCount(normalizedMarkdown)
+  projectChapter.status = 'written'
+  projectChapter.file = request.file
+  delete projectChapter.review
+  delete projectChapter.authorReview
+  delete projectChapter.pendingDraft
+  raw.updatedAt = now
+
+  const projectBackupPath = join(projectDirectory, 'novel-project.bak.json')
+  await copyFile(projectPath, projectBackupPath)
+  try {
+    await atomicReplace(projectPath, JSON.stringify(raw, null, 2) + '\n')
+  } catch (error) {
+    await atomicReplace(chapterPath, currentBytes.toString('utf8')).catch(() => undefined)
+    throw error
+  }
+
+  return {
+    chapter: await readNovelChapter(projectDirectory, request.file),
+    project: await readNovelProject(projectDirectory),
+    backupFile,
   }
 }
 

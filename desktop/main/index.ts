@@ -1,12 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { join } from 'node:path'
-import { readNovelChapter, readNovelProject } from './project-reader'
+import { readNovelChapter, readNovelProject, saveNovelChapter } from './project-reader'
+import type { DesktopChapterSaveRequest } from '../shared/contracts'
 
 const IPC = {
   appInfo: 'app:info',
   chooseProject: 'project:choose',
   loadProject: 'project:load',
   readChapter: 'chapter:read',
+  saveChapter: 'chapter:save',
   openDirectory: 'shell:open-directory',
 } as const
 
@@ -59,6 +61,8 @@ ipcMain.handle(IPC.readChapter, (_event, directory: unknown, file: unknown) => {
   if (typeof directory !== 'string' || typeof file !== 'string') throw new Error('章节读取参数无效')
   return readNovelChapter(directory, file)
 })
+
+ipcMain.handle(IPC.saveChapter, (_event, request: DesktopChapterSaveRequest) => saveNovelChapter(request))
 
 ipcMain.handle(IPC.openDirectory, async (_event, path: unknown) => {
   if (typeof path !== 'string' || path.trim() === '') return '目录无效'

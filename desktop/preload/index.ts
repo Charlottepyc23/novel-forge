@@ -6,6 +6,7 @@ const IPC = {
   chooseProject: 'project:choose',
   loadProject: 'project:load',
   readChapter: 'chapter:read',
+  saveChapter: 'chapter:save',
   openDirectory: 'shell:open-directory',
 } as const
 
@@ -14,6 +15,7 @@ const api: DesktopApi = {
   chooseProject: () => ipcRenderer.invoke(IPC.chooseProject),
   loadProject: (directory) => ipcRenderer.invoke(IPC.loadProject, directory),
   readChapter: (directory, file) => ipcRenderer.invoke(IPC.readChapter, directory, file),
+  saveChapter: (request) => ipcRenderer.invoke(IPC.saveChapter, request),
   openDirectory: (path) => ipcRenderer.invoke(IPC.openDirectory, path),
 }
 

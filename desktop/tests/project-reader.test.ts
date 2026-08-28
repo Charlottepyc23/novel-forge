@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { readNovelChapter, readNovelProject } from '../main/project-reader'
+import { readNovelChapter, readNovelProject, saveNovelChapter } from '../main/project-reader'
 
 const directories: string[] = []
 
@@ -82,5 +82,48 @@ describe('readNovelChapter', () => {
     const directory = await temporaryProject()
     await expect(readNovelChapter(directory, '..\\secret.md')).rejects.toThrow('章节文件名无效')
     await expect(readNovelChapter(directory, 'novel-project.json')).rejects.toThrow('章节文件名无效')
+  })
+})
+
+describe('saveNovelChapter', () => {
+  it('backs up and atomically saves a chapter while updating project metadata', async () => {
+    const directory = await temporaryProject()
+    await writeFile(join(directory, 'novel-project.json'), JSON.stringify({
+      outline: '测试',
+      chapters: [{ no: 1, volume: 1, title: '开端', status: 'approved', chars: 2, file: '第001章_开端.md', review: { score: 90 }, pendingDraft: '旧草稿' }],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }))
+    const original = '# 第一章 开端\n\n旧正文\n'
+    await writeFile(join(directory, '第001章_开端.md'), original)
+    const loaded = await readNovelChapter(directory, '第001章_开端.md')
+
+    const result = await saveNovelChapter({
+      directory,
+      file: loaded.file,
+      markdown: '# 第一章 开端\n\n这是新的正文。',
+      expectedRevision: loaded.revision,
+    })
+
+    expect(result.chapter.markdown).toBe('# 第一章 开端\n\n这是新的正文。\n')
+    expect(result.chapter.chars).toBe(7)
+    expect(await readFile(join(directory, '第001章_开端.bak.md'), 'utf8')).toBe(original)
+    const project = JSON.parse(await readFile(join(directory, 'novel-project.json'), 'utf8')) as { chapters: Array<Record<string, unknown>>; updatedAt: string }
+    expect(project.chapters[0]).toMatchObject({ chars: 7, status: 'written', file: '第001章_开端.md' })
+    expect(project.chapters[0]!.review).toBeUndefined()
+    expect(project.chapters[0]!.pendingDraft).toBeUndefined()
+    expect(project.updatedAt).not.toBe('2026-01-01T00:00:00.000Z')
+  })
+
+  it('rejects saving when the chapter changed after it was opened', async () => {
+    const directory = await temporaryProject()
+    await writeFile(join(directory, 'novel-project.json'), JSON.stringify({ outline: '测试', chapters: [{ no: 1, file: '第001章_开端.md' }] }))
+    await writeFile(join(directory, '第001章_开端.md'), '# 第一章\n\n初始内容')
+    const loaded = await readNovelChapter(directory, '第001章_开端.md')
+    await writeFile(join(directory, '第001章_开端.md'), '# 第一章\n\n外部修改')
+
+    await expect(saveNovelChapter({ directory, file: loaded.file, markdown: '本地修改', expectedRevision: loaded.revision }))
+      .rejects.toThrow('应用外被修改')
+    expect(await readFile(join(directory, '第001章_开端.md'), 'utf8')).toContain('外部修改')
   })
 })

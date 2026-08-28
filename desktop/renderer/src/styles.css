@@ -138,7 +138,10 @@ button.secondary { color: #cfdbcc; background: transparent; border-color: rgba(2
 .reader-header { padding: 28px 34px 22px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; border-bottom: 1px solid rgba(207, 229, 200, 0.09); }
 .reader-header h2 { margin: 8px 0 7px; font: 600 28px SimSun, serif; }
 .reader-header span { color: #758077; font-size: 11px; }
+.reader-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .reader-content { flex: 1; min-height: 0; overflow: auto; }
+.chapter-editor { width: min(720px, calc(100% - 64px)); min-height: calc(100% - 80px); margin: 40px auto; padding: 34px 38px; display: block; resize: none; color: #e1e8df; background: #0b100d; border: 1px solid rgba(207, 229, 200, 0.14); outline: none; font-family: SimSun, "Microsoft YaHei UI", serif; font-size: 18px; line-height: 2; tab-size: 2; }
+.chapter-editor:focus { border-color: rgba(164, 205, 146, 0.42); box-shadow: 0 0 0 3px rgba(137, 180, 118, 0.08); }
 .markdown-reader { width: min(680px, calc(100% - 64px)); margin: 0 auto; padding: 52px 0 80px; color: #d5ddd2; }
 .markdown-reader h1 { margin: 0 0 42px; color: #edf4eb; font: 600 32px/1.4 SimSun, serif; text-align: center; }
 .markdown-reader h2 { margin: 42px 0 20px; color: #e2eade; font: 600 24px/1.5 SimSun, serif; }
@@ -170,7 +173,10 @@ footer code { margin-left: auto; }
   footer code { margin-left: 0; overflow-wrap: anywhere; }
   .reader-panel { width: 100vw; }
   .reader-header { padding: 22px 18px; }
+  .reader-header { flex-direction: column; }
+  .reader-actions { justify-content: flex-start; }
   .markdown-reader { width: calc(100% - 36px); padding-top: 36px; }
+  .chapter-editor { width: calc(100% - 36px); margin: 18px auto; padding: 22px 18px; }
   .markdown-reader p { font-size: 17px; }
   .reader-footer { flex-direction: column; padding: 13px 18px; }
 }

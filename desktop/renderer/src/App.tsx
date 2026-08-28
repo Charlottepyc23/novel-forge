@@ -50,12 +50,18 @@ export function App(): JSX.Element {
   const [chapterLoading, setChapterLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [chapter, setChapter] = useState<DesktopChapterDocument>()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saveNotice, setSaveNotice] = useState<string>()
+  const hasUnsavedChanges = chapter !== undefined && editing && draft !== chapter.markdown
 
   useEffect(() => {
     void window.novelDesktop.getAppInfo().then(setAppInfo)
   }, [])
 
   const chooseProject = async (): Promise<void> => {
+    if (hasUnsavedChanges && !window.confirm('当前章节有未保存修改，确定切换项目吗？')) return
     setLoading(true)
     setError(undefined)
     try {
@@ -63,6 +69,7 @@ export function App(): JSX.Element {
       if (selected !== undefined) {
         setProject(selected)
         setChapter(undefined)
+        setEditing(false)
       }
     } catch (cause) {
       setError(errorMessage(cause))
@@ -73,10 +80,15 @@ export function App(): JSX.Element {
 
   const openChapter = async (file: string | undefined): Promise<void> => {
     if (project === undefined || file === undefined) return
+    if (hasUnsavedChanges && !window.confirm('当前章节有未保存修改，确定打开其他章节吗？')) return
     setChapterLoading(true)
     setError(undefined)
     try {
-      setChapter(await window.novelDesktop.readChapter(project.directory, file))
+      const loaded = await window.novelDesktop.readChapter(project.directory, file)
+      setChapter(loaded)
+      setDraft(loaded.markdown)
+      setEditing(false)
+      setSaveNotice(undefined)
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
@@ -84,8 +96,50 @@ export function App(): JSX.Element {
     }
   }
 
+  const closeChapter = (): void => {
+    if (hasUnsavedChanges && !window.confirm('当前章节有未保存修改，确定关闭吗？')) return
+    setChapter(undefined)
+    setEditing(false)
+    setSaveNotice(undefined)
+  }
+
+  const saveChapter = async (): Promise<void> => {
+    if (project === undefined || chapter === undefined || !hasUnsavedChanges) return
+    setSaving(true)
+    setError(undefined)
+    setSaveNotice(undefined)
+    try {
+      const result = await window.novelDesktop.saveChapter({
+        directory: project.directory,
+        file: chapter.file,
+        markdown: draft,
+        expectedRevision: chapter.revision,
+      })
+      setChapter(result.chapter)
+      setDraft(result.chapter.markdown)
+      setProject(result.project)
+      setEditing(false)
+      setSaveNotice(`已保存，并备份为 ${result.backupFile}`)
+    } catch (cause) {
+      setError(errorMessage(cause))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
+      if (!hasUnsavedChanges) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [hasUnsavedChanges])
+
   const refreshProject = async (): Promise<void> => {
     if (project === undefined) return
+    if (hasUnsavedChanges && !window.confirm('当前章节有未保存修改，确定刷新项目吗？')) return
     setLoading(true)
     setError(undefined)
     try {
@@ -208,21 +262,34 @@ export function App(): JSX.Element {
 
       {chapter !== undefined && (
         <div className="reader-backdrop" role="presentation" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setChapter(undefined)
+          if (event.target === event.currentTarget) closeChapter()
         }}>
           <section className="reader-panel" role="dialog" aria-modal="true" aria-label={chapter.title}>
             <header className="reader-header">
               <div>
-                <p className="eyebrow">CHAPTER READER / READ ONLY</p>
+                <p className="eyebrow">{editing ? 'CHAPTER EDITOR / LOCAL FILE' : 'CHAPTER READER'}</p>
                 <h2>{chapter.title}</h2>
                 <span>{formatNumber(chapter.chars)} 字符 · {formatNumber(chapter.bytes)} 字节 · {new Date(chapter.modifiedAt).toLocaleString('zh-CN')}</span>
               </div>
-              <button className="secondary" type="button" onClick={() => setChapter(undefined)}>关闭</button>
+              <div className="reader-actions">
+                {editing ? (
+                  <>
+                    <button type="button" onClick={() => void saveChapter()} disabled={saving || !hasUnsavedChanges}>{saving ? '保存中...' : '保存修改'}</button>
+                    <button className="secondary" type="button" onClick={() => { setDraft(chapter.markdown); setEditing(false) }} disabled={saving}>放弃编辑</button>
+                  </>
+                ) : <button type="button" onClick={() => { setDraft(chapter.markdown); setEditing(true); setSaveNotice(undefined) }}>编辑正文</button>}
+                <button className="secondary" type="button" onClick={closeChapter} disabled={saving}>关闭</button>
+              </div>
             </header>
             <div className="reader-content">
-              <MarkdownReader markdown={chapter.markdown} />
+              {editing ? (
+                <textarea className="chapter-editor" value={draft} onChange={event => setDraft(event.target.value)} spellCheck={false} />
+              ) : <MarkdownReader markdown={chapter.markdown} />}
             </div>
-            <footer className="reader-footer"><code>{chapter.file}</code><span>只读预览，不会修改源文件</span></footer>
+            <footer className="reader-footer">
+              <code>{chapter.file}</code>
+              <span>{saveNotice ?? (hasUnsavedChanges ? '有未保存修改' : editing ? '编辑模式：保存时自动备份并检查冲突' : '阅读模式')}</span>
+            </footer>
           </section>
         </div>
       )}

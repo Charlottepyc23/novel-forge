@@ -42,6 +42,20 @@ export interface DesktopChapterDocument {
   chars: number
   bytes: number
   modifiedAt: string
+  revision: string
+}
+
+export interface DesktopChapterSaveRequest {
+  directory: string
+  file: string
+  markdown: string
+  expectedRevision: string
+}
+
+export interface DesktopChapterSaveResult {
+  chapter: DesktopChapterDocument
+  project: DesktopProjectOverview
+  backupFile: string
 }
 
 export interface DesktopApi {
@@ -49,5 +63,6 @@ export interface DesktopApi {
   chooseProject(): Promise<DesktopProjectOverview | undefined>
   loadProject(directory: string): Promise<DesktopProjectOverview>
   readChapter(directory: string, file: string): Promise<DesktopChapterDocument>
+  saveChapter(request: DesktopChapterSaveRequest): Promise<DesktopChapterSaveResult>
   openDirectory(path: string): Promise<string>
 }
